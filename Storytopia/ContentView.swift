@@ -313,7 +313,7 @@ private struct GeneratedStoryboard: Identifiable {
 
 private enum OpenAITestConfig {
     // Temporary test-only client key. Remove this before pushing or shipping.
-    "
+    static let apiKey = "PASTE_OPENAI_API_KEY_HERE"
     static let imageModel = "gpt-image-2"
 }
 
