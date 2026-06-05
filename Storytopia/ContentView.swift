@@ -5,11 +5,15 @@
 //  Created by Mike Kogan on 5/28/26.
 //
 
+import PhotosUI
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var selectedPage: StoryPage = .home
     @State private var entryText = ""
+    @State private var generatedStoryboards: [GeneratedStoryboard] = GeneratedStoryboardStore.load()
 
     var body: some View {
         Group {
@@ -21,27 +25,27 @@ struct ContentView: View {
             case .create:
                 CreateEntryView(
                     entryText: $entryText,
-                    selectedPage: $selectedPage
+                    selectedPage: $selectedPage,
+                    generatedStoryboards: $generatedStoryboards
                 )
             case .journal:
                 JournalView(selectedPage: $selectedPage)
             case .profile:
-                ProfileView(selectedPage: $selectedPage)
+                ProfileView(
+                    selectedPage: $selectedPage,
+                    generatedStoryboards: generatedStoryboards
+                )
             }
         }
     }
 
     private var homePage: some View {
         ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [Color.storyCream, .white, Color.storyBlush],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color.homePageBackground
+                .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 14) {
                     header
                     heroCard
                     captureCard
@@ -52,7 +56,7 @@ struct ContentView: View {
                 .padding(.bottom, 92)
             }
 
-            bottomNavigation
+            BottomNavigationBar(selectedPage: $selectedPage)
         }
     }
 
@@ -60,19 +64,19 @@ struct ContentView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Storytopia")
-                    .font(.system(size: 34, weight: .bold, design: .serif))
+                    .font(.system(size: 28, weight: .bold, design: .serif))
                     .foregroundStyle(Color.storyInk)
 
                 Text("Your life, told in storyboards.")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.storyGray)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.homeMutedText)
             }
 
             Spacer()
 
             HStack(spacing: 10) {
-                CircleIconButton(systemName: "bell")
-                ProfilePlaceholder()
+                HeaderIconButton(systemName: "bell")
+                HeaderIconButton(systemName: "person.fill")
             }
             .padding(.top, 5)
         }
@@ -81,164 +85,116 @@ struct ContentView: View {
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Create your\nfirst story")
-                .font(.system(size: 25, weight: .bold, design: .serif))
+                .font(.system(size: 26, weight: .bold, design: .serif))
                 .lineSpacing(2)
-                .foregroundStyle(Color.storyInk)
+                .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("Write about your day \nand turn it into a story.")
-                .font(.system(size: 15, weight: .regular))
+                .font(.system(size: 14, weight: .medium))
                 .lineSpacing(2)
-                .foregroundStyle(Color.storyGray)
+                .foregroundStyle(.white.opacity(0.92))
 
             Button {
                 selectedPage = .create
             } label: {
                 Label("New Story", systemImage: "plus")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(height: 44)
-                    .background(Color.storyPurple, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.homeAccent)
+                    )
             }
+            .buttonStyle(.plain)
             .padding(.top, 2)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 18)
-        .frame(maxWidth: .infinity, minHeight: 172, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
         .background {
             Image("homepage_banner")
                 .resizable()
                 .scaledToFill()
                 .overlay(
                     LinearGradient(
-                        colors: [.white.opacity(0.82), .white.opacity(0.38), .clear],
+                        colors: [.black.opacity(0.66), .black.opacity(0.22), .clear],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.storyBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
-        .shadow(color: Color.storyPurple.opacity(0.08), radius: 12, y: 7)
+        .shadow(color: .black.opacity(0.1), radius: 14, y: 6)
     }
 
     private var captureCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Capture this moment")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Color.storyInk)
 
                     Text("No labels needed. AI will understand.")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.storyGray)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
                 }
 
                 Spacer()
-
-                Image(systemName: "sparkles")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color.storyPurple.opacity(0.7))
             }
 
             HStack(spacing: 12) {
                 Text("What’s on your mind?")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(Color.storyGray.opacity(0.72))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
 
                 Spacer()
 
                 Image(systemName: "mic")
                 Image(systemName: "photo")
             }
-            .font(.system(size: 19, weight: .regular))
+            .font(.system(size: 17, weight: .regular))
             .foregroundStyle(Color.storyInk)
             .padding(.horizontal, 14)
-            .frame(height: 46)
-            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(height: 38)
+            .background(Color.homeInputGray, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(14)
-        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
     }
 
     private var storyboardsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle(title: "Your storyboards", action: "View all")
 
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.52))
-
-                HStack(spacing: 12) {
-                    Image(systemName: "book.pages")
-                        .font(.system(size: 32, weight: .regular))
-                        .foregroundStyle(Color.storyPurple)
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Your storyboards\nwill appear here")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(Color.storyInk)
-                            .lineSpacing(2)
-
-                        Text("Start by creating your\nfirst story.")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(Color.storyGray)
-                            .lineSpacing(2)
-                    }
-                }
-                .padding(.horizontal, 18)
+            VStack(spacing: 3) {
+                Text("You haven’t created any storyboards yet.")
+                Text("Start by writing your first entry.")
             }
-            .frame(height: 128)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Color.homeMutedText)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.storyBorder, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.homeBorder, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             )
+            .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
         }
-    }
-
-    private var bottomNavigation: some View {
-        HStack {
-            NavItem(title: "Home", systemName: "house.fill", isSelected: selectedPage == .home) {
-                selectedPage = .home
-            }
-            Spacer()
-            NavItem(title: "Explore", systemName: "safari", isSelected: selectedPage == .explore) {
-                selectedPage = .explore
-            }
-            Spacer()
-            CreateNavItem(isSelected: selectedPage == .create) {
-                selectedPage = .create
-            }
-            Spacer()
-            NavItem(title: "Journal", systemName: "book.closed.fill", isSelected: selectedPage == .journal) {
-                selectedPage = .journal
-            }
-            Spacer()
-            NavItem(title: "Profile", systemName: "person", isSelected: selectedPage == .profile) {
-                selectedPage = .profile
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.storyBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 }
 
@@ -248,6 +204,380 @@ private enum StoryPage {
     case create
     case journal
     case profile
+}
+
+private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
+    case twoRectangles
+    case threePanels
+    case threeVerticalPanels
+    case fourSquares
+    case fourVerticalPanels
+    case fourHorizontalRectangles
+    case fiveHorizontalPanels
+    case fiveClassic
+    case sixSquares
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .twoRectangles:
+            return "2 Rectangles"
+        case .threePanels:
+            return "3 Panels"
+        case .threeVerticalPanels:
+            return "3 Vertical"
+        case .fourSquares:
+            return "4 Squares"
+        case .fourVerticalPanels:
+            return "4 Vertical"
+        case .fourHorizontalRectangles:
+            return "4 Horiz."
+        case .fiveHorizontalPanels:
+            return "5 Horiz."
+        case .fiveClassic:
+            return "5 Classic"
+        case .sixSquares:
+            return "6 Squares"
+        }
+    }
+
+    var panelCount: Int {
+        switch self {
+        case .twoRectangles:
+            return 2
+        case .threePanels, .threeVerticalPanels:
+            return 3
+        case .fourSquares, .fourVerticalPanels, .fourHorizontalRectangles:
+            return 4
+        case .fiveHorizontalPanels, .fiveClassic:
+            return 5
+        case .sixSquares:
+            return 6
+        }
+    }
+
+    var promptDescription: String {
+        switch self {
+        case .twoRectangles:
+            return "two full-width horizontal rectangle panels stacked evenly from top to bottom."
+        case .threePanels:
+            return "one large full-width horizontal rectangle panel on top, with two equal rectangle panels side by side underneath."
+        case .threeVerticalPanels:
+            return "three equal tall vertical rectangle panels side by side in a single row."
+        case .fourSquares:
+            return "four equal square panels in a clean 2 by 2 grid."
+        case .fourVerticalPanels:
+            return "four equal tall vertical rectangle panels side by side in a single row."
+        case .fourHorizontalRectangles:
+            return "four full-width horizontal rectangle panels stacked evenly from top to bottom."
+        case .fiveHorizontalPanels:
+            return "five full-width horizontal rectangle panels stacked evenly from top to bottom."
+        case .fiveClassic:
+            return "row 1 has two equal panels side by side; row 2 has one wide full-width panel; row 3 has two equal panels side by side."
+        case .sixSquares:
+            return "six equal square panels in a clean 2-column by 3-row grid."
+        }
+    }
+}
+
+private struct GeneratedStoryboard: Identifiable {
+    let id: UUID
+    let image: UIImage
+    let promptText: String
+    let artStyle: String
+    let sourcePhotoCount: Int
+    let createdAt: Date
+    let imageFileName: String?
+
+    init(
+        id: UUID = UUID(),
+        image: UIImage,
+        promptText: String,
+        artStyle: String,
+        sourcePhotoCount: Int,
+        createdAt: Date = Date(),
+        imageFileName: String? = nil
+    ) {
+        self.id = id
+        self.image = image
+        self.promptText = promptText
+        self.artStyle = artStyle
+        self.sourcePhotoCount = sourcePhotoCount
+        self.createdAt = createdAt
+        self.imageFileName = imageFileName
+    }
+}
+
+private enum OpenAITestConfig {
+    // Temporary test-only client key. Remove this before pushing or shipping.
+    "
+    static let imageModel = "gpt-image-2"
+}
+
+private enum GeneratedStoryboardStore {
+    private static let metadataKey = "StorytopiaGeneratedStoryboardMetadata"
+
+    static func load() -> [GeneratedStoryboard] {
+        guard
+            let metadataData = UserDefaults.standard.data(forKey: metadataKey),
+            let metadata = try? JSONDecoder().decode([GeneratedStoryboardMetadata].self, from: metadataData)
+        else {
+            return []
+        }
+
+        return metadata.compactMap { item in
+            let imageURL = imagesDirectory.appendingPathComponent(item.imageFileName)
+            guard
+                let imageData = try? Data(contentsOf: imageURL),
+                let image = UIImage(data: imageData)
+            else {
+                return nil
+            }
+
+            return GeneratedStoryboard(
+                id: item.id,
+                image: image,
+                promptText: item.promptText,
+                artStyle: item.artStyle,
+                sourcePhotoCount: item.sourcePhotoCount,
+                createdAt: item.createdAt,
+                imageFileName: item.imageFileName
+            )
+        }
+    }
+
+    static func save(_ storyboards: [GeneratedStoryboard]) {
+        let metadata = storyboards.compactMap { storyboard -> GeneratedStoryboardMetadata? in
+            guard let imageFileName = storyboard.imageFileName else {
+                return nil
+            }
+
+            return GeneratedStoryboardMetadata(
+                id: storyboard.id,
+                promptText: storyboard.promptText,
+                artStyle: storyboard.artStyle,
+                sourcePhotoCount: storyboard.sourcePhotoCount,
+                createdAt: storyboard.createdAt,
+                imageFileName: imageFileName
+            )
+        }
+
+        guard let metadataData = try? JSONEncoder().encode(metadata) else {
+            return
+        }
+
+        UserDefaults.standard.set(metadataData, forKey: metadataKey)
+    }
+
+    static func persistedStoryboard(
+        image: UIImage,
+        promptText: String,
+        artStyle: String,
+        sourcePhotoCount: Int
+    ) throws -> GeneratedStoryboard {
+        try FileManager.default.createDirectory(
+            at: imagesDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let id = UUID()
+        let imageFileName = "\(id.uuidString).jpg"
+        let imageURL = imagesDirectory.appendingPathComponent(imageFileName)
+
+        guard let imageData = image.jpegData(compressionQuality: 0.9) else {
+            throw StoryboardGenerationError.invalidRequest
+        }
+
+        try imageData.write(to: imageURL, options: [.atomic])
+
+        return GeneratedStoryboard(
+            id: id,
+            image: image,
+            promptText: promptText,
+            artStyle: artStyle,
+            sourcePhotoCount: sourcePhotoCount,
+            imageFileName: imageFileName
+        )
+    }
+
+    private static var imagesDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GeneratedStoryboards", isDirectory: true)
+    }
+}
+
+private struct GeneratedStoryboardMetadata: Codable {
+    let id: UUID
+    let promptText: String
+    let artStyle: String
+    let sourcePhotoCount: Int
+    let createdAt: Date
+    let imageFileName: String
+}
+
+private enum StoryboardGenerationError: LocalizedError {
+    case missingAPIKey
+    case missingImages
+    case invalidRequest
+    case invalidResponse
+    case noGeneratedImage
+    case openAIMessage(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "Add an OpenAI API key before generating a storyboard."
+        case .missingImages:
+            return "Add at least one photo before generating a storyboard."
+        case .invalidRequest:
+            return "The storyboard request could not be prepared."
+        case .invalidResponse:
+            return "OpenAI returned a response Storytopia could not read."
+        case .noGeneratedImage:
+            return "OpenAI did not return a storyboard image."
+        case .openAIMessage(let message):
+            return message
+        }
+    }
+}
+
+private struct OpenAIImageGenerationService {
+    private let endpoint = URL(string: "https://api.openai.com/v1/images/edits")!
+    private let requestTimeout: TimeInterval = 600
+
+    func generateStoryboard(
+        apiKey: String,
+        text: String,
+        artStyle: String,
+        layout: StoryboardLayoutOption,
+        images: [UIImage]
+    ) async throws -> UIImage {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StoryboardGenerationError.missingAPIKey
+        }
+
+        guard !images.isEmpty else {
+            throw StoryboardGenerationError.missingImages
+        }
+
+        let prompt = makePrompt(text: text, artStyle: artStyle, layout: layout, imageCount: images.count)
+        var request = URLRequest(url: endpoint)
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.appendMultipartField(name: "model", value: OpenAITestConfig.imageModel, boundary: boundary)
+        body.appendMultipartField(name: "prompt", value: prompt, boundary: boundary)
+        body.appendMultipartField(name: "size", value: "1024x1536", boundary: boundary)
+        body.appendMultipartField(name: "quality", value: "medium", boundary: boundary)
+
+        for (index, image) in images.prefix(6).enumerated() {
+            guard let imageData = image.storytopiaPreparedJPEGData(maxDimension: 1536, compressionQuality: 0.76) else {
+                throw StoryboardGenerationError.invalidRequest
+            }
+
+            body.appendMultipartFile(
+                name: "image[]",
+                fileName: "storyboard-reference-\(index + 1).jpg",
+                mimeType: "image/jpeg",
+                data: imageData,
+                boundary: boundary
+            )
+        }
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = requestTimeout
+        let session = URLSession(configuration: configuration)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw StoryboardGenerationError.invalidResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            if let errorResponse = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
+                throw StoryboardGenerationError.openAIMessage(errorResponse.error.message)
+            }
+
+            throw StoryboardGenerationError.openAIMessage("OpenAI returned status \(httpResponse.statusCode).")
+        }
+
+        let decoded = try JSONDecoder().decode(OpenAIImageResponse.self, from: data)
+        guard
+            let base64Image = decoded.data.first?.b64JSON,
+            let imageData = Data(base64Encoded: base64Image),
+            let image = UIImage(data: imageData)
+        else {
+            throw StoryboardGenerationError.noGeneratedImage
+        }
+
+        return image
+    }
+
+    private func makePrompt(text: String, artStyle: String, layout: StoryboardLayoutOption, imageCount: Int) -> String {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storyText = trimmedText.isEmpty ? "No written story was provided. Infer a warm, visually coherent moment from the uploaded photos." : trimmedText
+
+        return """
+        Create a vertical multi-panel comic book storyboard illustration from the user's \(imageCount) uploaded reference photo(s) and written story.
+
+        User story:
+        \(storyText)
+
+        Art style:
+        \(artStyle)
+
+        ART STYLE DIRECTION — follow this look exactly:
+        \(artStylePromptDescription(for: artStyle))
+
+        FORMAT — this is critical:
+        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible borders/gutters between them.
+        - Panel layout (top to bottom): \(layout.promptDescription)
+        - Each panel must illustrate a different sequential moment in the story, like frames in a graphic novel or film storyboard.
+        - Do NOT create a photo collage, photomontage, or stitched-together composite of the uploaded photos. Fully redraw every scene as polished illustrated art in the chosen style.
+
+        TEXT OVERLAYS — include comic-style lettering in every panel:
+        - A small colored header label in the top-left of each panel (e.g. "1. THE BEGINNING", "2. NEXT STEP") with a panel number and short title.
+        - A white narration box with a black border containing short all-caps sans-serif caption text that advances the story (internal monologue or scene description).
+        - Optional thought or speech bubbles where dialogue fits the moment.
+
+        VISUAL STYLE:
+        - Clean, detailed digital illustration with expressive characters and cinematic lighting.
+        - Keep characters, clothing, and key objects visually consistent across all panels.
+        - Use rich, detailed backgrounds (architecture, interiors, city streets, nature) appropriate to each scene.
+        - Use the uploaded photos only as visual reference for people, places, mood, objects, and narrative clues — then reinterpret them as fully illustrated comic art, never as pasted or blended photographs.
+        """
+    }
+}
+
+private struct OpenAIImageResponse: Decodable {
+    struct ImageData: Decodable {
+        let b64JSON: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case b64JSON = "b64_json"
+        }
+    }
+
+    let data: [ImageData]
+}
+
+private struct OpenAIErrorResponse: Decodable {
+    struct APIError: Decodable {
+        let message: String
+    }
+
+    let error: APIError
 }
 
 private struct ExploreView: View {
@@ -315,7 +645,7 @@ private struct ExploreView: View {
                 .padding(.bottom, 92)
             }
 
-            bottomNavigation
+            BottomNavigationBar(selectedPage: $selectedPage)
         }
     }
 
@@ -368,41 +698,6 @@ private struct ExploreView: View {
                 ExploreStoryCard(story: story)
             }
         }
-    }
-
-    private var bottomNavigation: some View {
-        HStack {
-            NavItem(title: "Home", systemName: "house", isSelected: selectedPage == .home) {
-                selectedPage = .home
-            }
-            Spacer()
-            NavItem(title: "Explore", systemName: "safari.fill", isSelected: selectedPage == .explore) {
-                selectedPage = .explore
-            }
-            Spacer()
-            CreateNavItem(isSelected: selectedPage == .create) {
-                selectedPage = .create
-            }
-            Spacer()
-            NavItem(title: "Journal", systemName: "book.closed.fill", isSelected: selectedPage == .journal) {
-                selectedPage = .journal
-            }
-            Spacer()
-            NavItem(title: "Profile", systemName: "person", isSelected: selectedPage == .profile) {
-                selectedPage = .profile
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.storyBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 }
 
@@ -596,7 +891,7 @@ private struct JournalView: View {
                 .padding(.bottom, 92)
             }
 
-            bottomNavigation
+            BottomNavigationBar(selectedPage: $selectedPage)
         }
     }
 
@@ -710,41 +1005,6 @@ private struct JournalView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var bottomNavigation: some View {
-        HStack {
-            NavItem(title: "Home", systemName: "house", isSelected: selectedPage == .home) {
-                selectedPage = .home
-            }
-            Spacer()
-            NavItem(title: "Explore", systemName: "safari", isSelected: selectedPage == .explore) {
-                selectedPage = .explore
-            }
-            Spacer()
-            CreateNavItem(isSelected: selectedPage == .create) {
-                selectedPage = .create
-            }
-            Spacer()
-            NavItem(title: "Journal", systemName: "book.closed.fill", isSelected: selectedPage == .journal) {
-                selectedPage = .journal
-            }
-            Spacer()
-            NavItem(title: "Profile", systemName: "person", isSelected: selectedPage == .profile) {
-                selectedPage = .profile
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.storyBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
-    }
-
     private var journalBackground: some View {
         LinearGradient(
             colors: [Color.storyCream, .white, Color.storyBlush],
@@ -757,139 +1017,100 @@ private struct JournalView: View {
 
 private struct ProfileView: View {
     @Binding var selectedPage: StoryPage
+    let generatedStoryboards: [GeneratedStoryboard]
+
+    @State private var selectedStoryboard: GeneratedStoryboard?
 
     private let storyboardColumns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1)
     ]
 
     var body: some View {
         ZStack(alignment: .bottom) {
             LinearGradient(
-                colors: [Color.storyCream, .white, Color.storyBlush],
+                colors: [.white, .white, Color.storyBlush.opacity(0.2)],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 21) {
+                VStack(alignment: .leading, spacing: 18) {
                     header
-                    profileCard
+                    profileSummary
                     storyboardsSection
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
                 .padding(.bottom, 96)
             }
 
-            bottomNavigation
+            BottomNavigationBar(selectedPage: $selectedPage)
+        }
+        .fullScreenCover(item: $selectedStoryboard) { storyboard in
+            StoryboardImageViewer(storyboard: storyboard)
+                .presentationBackground(.clear)
         }
     }
 
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Profile")
-                    .font(.system(size: 30, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Text("Your stories, your journey.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.storyGray)
-            }
+        HStack(alignment: .center) {
+            Text("Profile")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Color.storyInk)
 
             Spacer()
 
-            HStack(spacing: 10) {
-                CircleIconButton(systemName: "bell")
-                ProfilePlaceholder()
-            }
-            .padding(.top, 5)
+            CircleIconButton(systemName: "gearshape")
         }
+        .padding(.top, 2)
     }
 
-    private var profileCard: some View {
-        VStack(spacing: 15) {
-            HStack(alignment: .center, spacing: 12) {
-                ZStack(alignment: .bottomTrailing) {
-                    ProfilePlaceholder(size: 62)
+    private var profileSummary: some View {
+        VStack(spacing: 18) {
+            HStack(alignment: .center, spacing: 18) {
+                ProfilePlaceholder(size: 82)
 
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                        .frame(width: 27, height: 27)
-                        .background(.white, in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
-                        )
-                        .offset(x: 5, y: 5)
-                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Story Seeker")
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundStyle(Color.storyInk)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
 
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 8) {
-                        Text("Story Seeker")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(Color.storyInk)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-
-                        Image(systemName: "pencil")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyGray)
-                    }
+                    Text("@story.seeker")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.storyInk.opacity(0.7))
 
                     Text("Collecting life's moments,\none storyboard at a time.")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 14, weight: .medium))
                         .lineSpacing(2)
-                        .foregroundStyle(Color.storyGray)
+                        .foregroundStyle(Color.storyInk)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 4)
-
-                Button {
-                } label: {
-                    Text("Edit Profile")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyInk)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(width: 94, height: 42)
-                        .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .stroke(Color.storyPurple.opacity(0.25), lineWidth: 1.4)
-                        )
-                }
+                Spacer(minLength: 0)
             }
 
             HStack(spacing: 0) {
-                ProfileStat(systemName: "book.closed", value: "0", title: "Storyboards")
-                statDivider
-                ProfileStat(systemName: "calendar", value: "0", title: "This Month")
-                statDivider
-                ProfileStat(systemName: "flame", value: "0", title: "Day Streak")
-                statDivider
-                ProfileStat(systemName: "heart", value: "0", title: "Favorites")
+                ProfileStat(value: "\(generatedStoryboards.count)", title: "Storyboards")
+                ProfileStat(value: "\(thisMonthStoryboardCount)", title: "This Month")
+                ProfileStat(value: "0", title: "Day Streak")
+                ProfileStat(value: "0", title: "Favorites")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 15)
-        .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.62), lineWidth: 1)
-        )
-        .shadow(color: Color.storyPurple.opacity(0.05), radius: 14, y: 8)
+        .padding(.top, 2)
     }
 
-    private var statDivider: some View {
-        Rectangle()
-            .fill(Color.storyBorder.opacity(0.52))
-            .frame(width: 1, height: 42)
+    private var thisMonthStoryboardCount: Int {
+        let calendar = Calendar.current
+        guard let month = calendar.dateInterval(of: .month, for: Date()) else {
+            return 0
+        }
+
+        return generatedStoryboards.filter { month.contains($0.createdAt) }.count
     }
 
     private var storyboardsSection: some View {
@@ -920,69 +1141,41 @@ private struct ProfileView: View {
                 }
             }
 
-            LazyVGrid(columns: storyboardColumns, spacing: 10) {
-                ForEach(0..<9, id: \.self) { _ in
-                    StoryboardPlaceholderCard()
+            if generatedStoryboards.isEmpty {
+                LazyVGrid(columns: storyboardColumns, spacing: 1) {
+                    ForEach(0..<9, id: \.self) { _ in
+                        StoryboardPlaceholderCard()
+                    }
+                }
+            } else {
+                LazyVGrid(columns: storyboardColumns, spacing: 1) {
+                    ForEach(generatedStoryboards) { storyboard in
+                        Button {
+                            selectedStoryboard = storyboard
+                        } label: {
+                            GeneratedStoryboardThumbnail(storyboard: storyboard)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
     }
-
-    private var bottomNavigation: some View {
-        HStack {
-            NavItem(title: "Home", systemName: "house", isSelected: selectedPage == .home) {
-                selectedPage = .home
-            }
-            Spacer()
-            NavItem(title: "Explore", systemName: "safari", isSelected: selectedPage == .explore) {
-                selectedPage = .explore
-            }
-            Spacer()
-            CreateNavItem(isSelected: selectedPage == .create) {
-                selectedPage = .create
-            }
-            Spacer()
-            NavItem(title: "Journal", systemName: "book.closed.fill", isSelected: selectedPage == .journal) {
-                selectedPage = .journal
-            }
-            Spacer()
-            NavItem(title: "Profile", systemName: "person.fill", isSelected: selectedPage == .profile) {
-                selectedPage = .profile
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.storyBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
-    }
 }
 
 private struct ProfileStat: View {
-    let systemName: String
     let value: String
     let title: String
 
     var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: systemName)
-                .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(Color.storyGray.opacity(0.82))
-                .frame(height: 22)
-
+        VStack(spacing: 3) {
             Text(value)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(Color.storyInk)
 
             Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.storyGray)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.72))
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
@@ -993,10 +1186,10 @@ private struct ProfileStat: View {
 private struct StoryboardPlaceholderCard: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            Rectangle()
                 .fill(Color.white.opacity(0.38))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    Rectangle()
                         .stroke(Color.storyBorder.opacity(0.56), lineWidth: 1)
                 )
 
@@ -1020,95 +1213,589 @@ private struct StoryboardPlaceholderCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 136)
+        .aspectRatio(0.72, contentMode: .fit)
     }
 }
 
+private struct GeneratedStoryboardThumbnail: View {
+    let storyboard: GeneratedStoryboard
+
+    var body: some View {
+        GeometryReader { proxy in
+            Image(uiImage: storyboard.image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(0.72, contentMode: .fit)
+        .clipped()
+        .contentShape(Rectangle())
+    }
+}
+
+private struct StoryboardImageViewer: View {
+    let storyboard: GeneratedStoryboard
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var imageScale: CGFloat = 1
+    @State private var lastImageScale: CGFloat = 1
+    @State private var imageOffset: CGSize = .zero
+    @State private var lastImageOffset: CGSize = .zero
+
+    private let minimumScale: CGFloat = 1
+    private let maximumScale: CGFloat = 5
+    private let horizontalPadding: CGFloat = 0
+    private let verticalPadding: CGFloat = 52
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .opacity(backgroundOpacity)
+                .ignoresSafeArea()
+
+            GeometryReader { proxy in
+                let viewportSize = proxy.size
+                let imageSize = fittedImageSize(in: viewportSize)
+
+                Image(uiImage: storyboard.image)
+                    .resizable()
+                    .scaledToFit()
+                    .scaleEffect(imageScale * dismissalScale)
+                    .offset(imageOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.vertical, verticalPadding)
+                    .contentShape(Rectangle())
+                    .gesture(imageGesture(imageSize: imageSize, viewportSize: viewportSize))
+                    .onTapGesture(count: 2) {
+                        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.86)) {
+                            if imageScale > minimumScale {
+                                resetZoom()
+                            } else {
+                                imageScale = 2.35
+                                lastImageScale = imageScale
+                            }
+
+                            imageOffset = boundedOffset(
+                                imageOffset,
+                                imageSize: imageSize,
+                                viewportSize: viewportSize
+                            )
+                            lastImageOffset = imageOffset
+                        }
+                    }
+            }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.white.opacity(0.18), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .opacity(closeButtonOpacity)
+            .padding(.top, 18)
+            .padding(.trailing, 18)
+        }
+        .background(Color.clear)
+    }
+
+    private func imageGesture(imageSize: CGSize, viewportSize: CGSize) -> some Gesture {
+        SimultaneousGesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    imageScale = rubberBandScale(lastImageScale * value)
+                    imageOffset = boundedOffset(
+                        imageOffset,
+                        imageSize: imageSize,
+                        viewportSize: viewportSize,
+                        allowsResistance: true
+                    )
+                }
+                .onEnded { _ in
+                    withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.84)) {
+                        imageScale = clampedScale(imageScale)
+                        imageOffset = boundedOffset(
+                            imageOffset,
+                            imageSize: imageSize,
+                            viewportSize: viewportSize
+                        )
+
+                        if imageScale <= minimumScale {
+                            imageOffset = .zero
+                        }
+
+                        lastImageScale = imageScale
+                        lastImageOffset = imageOffset
+                    }
+                },
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    if imageScale <= minimumScale {
+                        imageOffset = CGSize(
+                            width: value.translation.width * 0.16,
+                            height: max(value.translation.height, 0)
+                        )
+                        return
+                    }
+
+                    let proposedOffset = CGSize(
+                        width: lastImageOffset.width + value.translation.width,
+                        height: lastImageOffset.height + value.translation.height
+                    )
+
+                    imageOffset = boundedOffset(
+                        proposedOffset,
+                        imageSize: imageSize,
+                        viewportSize: viewportSize,
+                        allowsResistance: true
+                    )
+                }
+                .onEnded { value in
+                    if imageScale <= minimumScale {
+                        closeOrResetAfterSwipe(value)
+                        return
+                    }
+
+                    let projectedOffset = CGSize(
+                        width: imageOffset.width + (value.predictedEndTranslation.width - value.translation.width) * 0.28,
+                        height: imageOffset.height + (value.predictedEndTranslation.height - value.translation.height) * 0.28
+                    )
+
+                    withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.86)) {
+                        imageOffset = boundedOffset(
+                            projectedOffset,
+                            imageSize: imageSize,
+                            viewportSize: viewportSize
+                        )
+                        lastImageOffset = imageOffset
+                    }
+                }
+        )
+    }
+
+    private func clampedScale(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minimumScale), maximumScale)
+    }
+
+    private func rubberBandScale(_ scale: CGFloat) -> CGFloat {
+        if scale < minimumScale {
+            return minimumScale - ((minimumScale - scale) * 0.42)
+        }
+
+        if scale > maximumScale {
+            return maximumScale + ((scale - maximumScale) * 0.18)
+        }
+
+        return scale
+    }
+
+    private func fittedImageSize(in viewportSize: CGSize) -> CGSize {
+        let availableSize = CGSize(
+            width: max(viewportSize.width - (horizontalPadding * 2), 1),
+            height: max(viewportSize.height - (verticalPadding * 2), 1)
+        )
+        let sourceSize = storyboard.image.size
+        let sourceAspectRatio = sourceSize.width / max(sourceSize.height, 1)
+        let availableAspectRatio = availableSize.width / max(availableSize.height, 1)
+
+        if sourceAspectRatio > availableAspectRatio {
+            let height = availableSize.width / sourceAspectRatio
+            return CGSize(width: availableSize.width, height: height)
+        } else {
+            let width = availableSize.height * sourceAspectRatio
+            return CGSize(width: width, height: availableSize.height)
+        }
+    }
+
+    private func boundedOffset(
+        _ offset: CGSize,
+        imageSize: CGSize,
+        viewportSize: CGSize,
+        allowsResistance: Bool = false
+    ) -> CGSize {
+        let bounds = offsetBounds(imageSize: imageSize, viewportSize: viewportSize)
+
+        return CGSize(
+            width: boundedValue(offset.width, limit: bounds.width, allowsResistance: allowsResistance),
+            height: boundedValue(offset.height, limit: bounds.height, allowsResistance: allowsResistance)
+        )
+    }
+
+    private func offsetBounds(imageSize: CGSize, viewportSize: CGSize) -> CGSize {
+        let visibleSize = CGSize(
+            width: max(viewportSize.width - (horizontalPadding * 2), 1),
+            height: max(viewportSize.height - (verticalPadding * 2), 1)
+        )
+
+        return CGSize(
+            width: max(((imageSize.width * imageScale) - visibleSize.width) / 2, 0),
+            height: max(((imageSize.height * imageScale) - visibleSize.height) / 2, 0)
+        )
+    }
+
+    private func boundedValue(_ value: CGFloat, limit: CGFloat, allowsResistance: Bool) -> CGFloat {
+        guard limit > 0 else {
+            return allowsResistance ? value * 0.18 : 0
+        }
+
+        guard abs(value) > limit else {
+            return value
+        }
+
+        let overshoot = abs(value) - limit
+        let resistedOvershoot = allowsResistance ? rubberBandDistance(overshoot) : 0
+        return (limit + resistedOvershoot) * (value < 0 ? -1 : 1)
+    }
+
+    private func rubberBandDistance(_ distance: CGFloat) -> CGFloat {
+        (1 - (1 / ((distance * 0.008) + 1))) * 120
+    }
+
+    private var backgroundOpacity: Double {
+        guard imageScale <= minimumScale else {
+            return 1
+        }
+
+        return 1 - (Double(dismissProgress) * 0.92)
+    }
+
+    private var dismissProgress: CGFloat {
+        min(max(imageOffset.height / 260, 0), 1)
+    }
+
+    private var dismissalScale: CGFloat {
+        guard imageScale <= minimumScale else {
+            return 1
+        }
+
+        return 1 - (dismissProgress * 0.12)
+    }
+
+    private var closeButtonOpacity: Double {
+        guard imageScale <= minimumScale else {
+            return 1
+        }
+
+        return max(1 - Double(dismissProgress * 1.7), 0)
+    }
+
+    private func closeOrResetAfterSwipe(_ value: DragGesture.Value) {
+        let isDownwardSwipe = value.translation.height > 120
+        let isMostlyVertical = value.translation.height > abs(value.translation.width)
+
+        if isDownwardSwipe && isMostlyVertical {
+            dismiss()
+            return
+        }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            imageOffset = .zero
+            lastImageOffset = .zero
+        }
+    }
+
+    private func resetOffsetIfNeeded() {
+        guard imageScale <= minimumScale else {
+            return
+        }
+
+        imageOffset = .zero
+        lastImageOffset = .zero
+    }
+
+    private func resetZoom() {
+        imageScale = minimumScale
+        lastImageScale = minimumScale
+        imageOffset = .zero
+        lastImageOffset = .zero
+    }
+}
+
+private enum CreateEntryRoute: Hashable {
+    case storyDetails
+}
+
 private struct CreateEntryView: View {
-    private let artStyles = ["Comic", "Ghibli", "Pixar", "Manga", "Cinematic", "Pixel Art"]
+    private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
+    private let storyboardLayouts = StoryboardLayoutOption.allCases
 
     @Binding var entryText: String
     @Binding var selectedPage: StoryPage
+    @Binding var generatedStoryboards: [GeneratedStoryboard]
 
-    @State private var isShowingArtStyles = false
-    @State private var selectedArtStyle: String?
+    @State private var navigationPath: [CreateEntryRoute] = []
+    @State private var selectedArtStyle = "Anime"
+    @State private var selectedStoryboardLayout: StoryboardLayoutOption = .fourSquares
+    @State private var storyboardPhotos: [UIImage?] = Array(repeating: nil, count: 6)
+    @State private var selectedPhotoSlot: Int?
+    @State private var isShowingPhotoSourceDialog = false
+    @State private var isShowingPhotoLibrary = false
+    @State private var isShowingCamera = false
+    @State private var isShowingDraftSavedConfirmation = false
+    @State private var isGeneratingStoryboard = false
+    @State private var generationErrorMessage: String?
+    @State private var isShowingExpandedEditor = false
+    @State private var isShowingArtStyleGrid = false
+    @State private var isShowingClearTextConfirmation = false
+    @State private var storyTitle = ""
+    @State private var storyLocation = ""
+    @State private var storyDate = Date()
+    @State private var savesDraft = true
+    @State private var isPrivateEntry = false
+    @State private var selectedPhotoPickerItem: PhotosPickerItem?
+    @State private var draggedStoryboardPhotoIndex: Int?
     @FocusState private var isEditorFocused: Bool
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [Color.storyCream, Color.white.opacity(0.94), Color.storyBlush],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            Color.homePageBackground
+                .ignoresSafeArea()
+                .onTapGesture {
+                    isEditorFocused = false
+                }
+
+            NavigationStack(path: $navigationPath) {
+                layoutPage
+                    .navigationDestination(for: CreateEntryRoute.self) { route in
+                        switch route {
+                        case .storyDetails:
+                            storyDetailsPage
+                        }
+                    }
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+
+            if navigationPath.isEmpty {
+                BottomNavigationBar(selectedPage: $selectedPage)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.24), value: navigationPath.isEmpty)
+        .sheet(isPresented: $isShowingCamera) {
+            CameraPhotoPicker { image in
+                setStoryboardPhoto(image)
+            }
             .ignoresSafeArea()
-            .onTapGesture {
+        }
+        .sheet(isPresented: $isShowingExpandedEditor) {
+            ExpandedEntryEditor(entryText: $entryText)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingArtStyleGrid) {
+            ArtStyleGridSheet(
+                artStyles: artStyles,
+                selectedArtStyle: $selectedArtStyle
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .photosPicker(
+            isPresented: $isShowingPhotoLibrary,
+            selection: $selectedPhotoPickerItem,
+            matching: .images
+        )
+        .confirmationDialog(
+            "Add Photo",
+            isPresented: $isShowingPhotoSourceDialog,
+            titleVisibility: .visible
+        ) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("Camera") {
+                    selectedPhotoSlot = nextAvailablePhotoSlot
+                    isShowingCamera = true
+                }
+            }
+
+            Button("Photo Library") {
+                selectedPhotoSlot = nextAvailablePhotoSlot
+                isShowingPhotoLibrary = true
+            }
+
+            Button("Cancel", role: .cancel) {
+            }
+        }
+        .alert("Draft saved", isPresented: $isShowingDraftSavedConfirmation) {
+            Button("OK", role: .cancel) {
+            }
+        } message: {
+            Text("You can keep editing this entry whenever you're ready.")
+        }
+        .alert(
+            "Storyboard generation failed",
+            isPresented: Binding(
+                get: { generationErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        generationErrorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+            }
+        } message: {
+            Text(generationErrorMessage ?? "")
+        }
+        .alert("Clear writing?", isPresented: $isShowingClearTextConfirmation) {
+            Button("Clear", role: .destructive) {
+                entryText = ""
                 isEditorFocused = false
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                pageHeader
-
-                VStack(alignment: .leading, spacing: 14) {
-                    editorCard
-
-                    Button {
-                        isEditorFocused = false
-                        isShowingArtStyles = true
-                    } label: {
-                        HStack(spacing: 7) {
-                            Text("Generate Storyboard")
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(
-                            LinearGradient(
-                                colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        )
-                        .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
-                    }
-                    .padding(.top, 2)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 92)
+            Button("Cancel", role: .cancel) {
+            }
+        } message: {
+            Text("Are you sure? This will remove everything you've written in this entry.")
+        }
+        .onChange(of: selectedPhotoPickerItem) { item in
+            guard let item else {
+                return
             }
 
-            bottomNavigation
-        }
-        .sheet(isPresented: $isShowingArtStyles) {
-            ArtStyleSelectionSheet(
-                artStyles: artStyles,
-                selectedArtStyle: selectedArtStyle,
-                onSelect: { style in
-                    selectedArtStyle = style
-                    isShowingArtStyles = false
-                }
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
+            Task {
+                await loadPhotoLibraryImage(from: item)
+            }
         }
     }
 
-    private var pageHeader: some View {
+    private func startStoryboardGeneration() {
+        guard !isGeneratingStoryboard else {
+            return
+        }
+
+        let apiKey = OpenAITestConfig.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty, apiKey != "PASTE_OPENAI_API_KEY_HERE" else {
+            generationErrorMessage = StoryboardGenerationError.missingAPIKey.localizedDescription
+            return
+        }
+
+        let photos = storyboardPhotos.compactMap { $0 }
+        guard !photos.isEmpty else {
+            generationErrorMessage = StoryboardGenerationError.missingImages.localizedDescription
+            return
+        }
+
+        isGeneratingStoryboard = true
+
+        Task {
+            do {
+                let image = try await OpenAIImageGenerationService().generateStoryboard(
+                    apiKey: apiKey,
+                    text: entryText,
+                    artStyle: selectedArtStyle,
+                    layout: selectedStoryboardLayout,
+                    images: photos
+                )
+
+                let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
+                    image: image,
+                    promptText: entryText,
+                    artStyle: selectedArtStyle,
+                    sourcePhotoCount: photos.count
+                )
+
+                await MainActor.run {
+                    generatedStoryboards.insert(storyboard, at: 0)
+                    GeneratedStoryboardStore.save(generatedStoryboards)
+                    isGeneratingStoryboard = false
+                    selectedPage = .profile
+                }
+            } catch {
+                await MainActor.run {
+                    generationErrorMessage = error.localizedDescription
+                    isGeneratingStoryboard = false
+                }
+            }
+        }
+    }
+
+    private var layoutPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            pageHeader(title: "New Entry", showsBackButton: false)
+
+            ScrollView(showsIndicators: false) {
+                layoutStepContent
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 92)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(pageTapBackground)
+        }
+        .background(Color.homePageBackground)
+    }
+
+    private var storyDetailsPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(showsIndicators: false) {
+                storyDetailsStepContent
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(pageTapBackground)
+        }
+        .background(Color.homePageBackground)
+        .navigationTitle("Story Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    isEditorFocused = false
+                    isShowingDraftSavedConfirmation = true
+                } label: {
+                    Text("Save")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                }
+            }
+        }
+    }
+
+    private var pageTapBackground: some View {
+        Color.homePageBackground
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isEditorFocused = false
+            }
+    }
+
+    private func pageHeader(title: String, showsBackButton: Bool) -> some View {
         HStack(alignment: .center) {
-            Text("New Entry")
-                .font(.system(size: 28, weight: .bold, design: .serif))
+            if showsBackButton {
+                Button {
+                    isEditorFocused = false
+                    if !navigationPath.isEmpty {
+                        navigationPath.removeLast()
+                    }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(width: 32, height: 44)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, -6)
+            }
+
+            Text(title)
+                .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
 
             Button {
+                isEditorFocused = false
+                isShowingDraftSavedConfirmation = true
             } label: {
                 Text("Save")
                     .font(.system(size: 14, weight: .bold))
@@ -1118,112 +1805,791 @@ private struct CreateEntryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isEditorFocused = false
+        }
     }
 
-    private var bottomNavigation: some View {
-        HStack {
-            NavItem(title: "Home", systemName: "house", isSelected: selectedPage == .home) {
-                selectedPage = .home
+    private var layoutStepContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            photoStripSection
+            layoutPickerSection
+            storyboardPreviewSection
+            artStylePickerSection
+            continueToStoryDetailsButton
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var storyDetailsStepContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            editorCard
+            storyDetailsCard
+            entryPrivacyCard
+            generateStoryboardButton
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var photoStripSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Add Photos")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .padding(.horizontal, 2)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    photoSourceButton(title: "Add", systemName: "plus") {
+                        selectedPhotoSlot = nextAvailablePhotoSlot
+                        isShowingPhotoSourceDialog = true
+                    }
+
+                    photoSourceButton(title: "Camera", systemName: "camera") {
+                        selectedPhotoSlot = nextAvailablePhotoSlot
+                        isShowingCamera = true
+                    }
+
+                    photoSourceButton(title: "Library", systemName: "photo") {
+                        selectedPhotoSlot = nextAvailablePhotoSlot
+                        isShowingPhotoLibrary = true
+                    }
+
+                    ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
+                        StoryboardPhotoStripThumbnail(image: image) {
+                            removeStoryboardPhoto(at: index)
+                        }
+                            .onDrag {
+                                draggedStoryboardPhotoIndex = index
+                                return NSItemProvider(object: String(index) as NSString)
+                            }
+                            .onDrop(
+                                of: [.text],
+                                delegate: StoryboardPhotoDropDelegate(
+                                    photos: $storyboardPhotos,
+                                    draggedIndex: $draggedStoryboardPhotoIndex,
+                                    destinationIndex: index
+                                )
+                            )
+                    }
+
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
-            Spacer()
-            NavItem(title: "Explore", systemName: "safari", isSelected: selectedPage == .explore) {
-                selectedPage = .explore
+
+            Text("Long press to reorder")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.homeMutedText.opacity(storyboardPhotos.compactMap { $0 }.count > 1 ? 1 : 0.72))
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isEditorFocused = false
             }
-            Spacer()
-            CreateNavItem(isSelected: selectedPage == .create) {
-                selectedPage = .create
+        )
+    }
+
+    private func photoSourceButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
+        Button {
+            isEditorFocused = false
+            action()
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: systemName)
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(height: 26)
+
+                Text(title)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
-            Spacer()
-            NavItem(title: "Journal", systemName: "book.closed.fill", isSelected: selectedPage == .journal) {
-                selectedPage = .journal
+            .frame(width: 76, height: 82)
+            .background(Color.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.storyPurple.opacity(0.32), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private var storyboardPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text("Storyboard Preview")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.storyInk)
+
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.storyGold)
+                    }
+
+                    Text("Add up to 6 photos to shape your story")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 5) {
+                    Text(selectedStoryboardLayout.title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.7))
+
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
+                }
             }
-            Spacer()
-            NavItem(title: "Profile", systemName: "person", isSelected: selectedPage == .profile) {
-                selectedPage = .profile
+
+            storyboardPreviewLayout(selectedStoryboardLayout)
+        }
+        .padding(14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isEditorFocused = false
+            }
+        )
+    }
+
+    private var layoutPickerSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Choose Layout")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .padding(.horizontal, 2)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(storyboardLayouts) { layout in
+                        Button {
+                            selectedStoryboardLayout = layout
+                            isEditorFocused = false
+                        } label: {
+                            StoryboardLayoutOptionTile(
+                                layout: layout,
+                                isSelected: selectedStoryboardLayout == layout
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.storyBorder, lineWidth: 1)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isEditorFocused = false
+            }
         )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+    }
+
+    @ViewBuilder
+    private func storyboardPreviewLayout(_ layout: StoryboardLayoutOption) -> some View {
+        switch layout {
+        case .twoRectangles:
+            VStack(spacing: 8) {
+                storyboardPhotoPanel(index: 0)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 170)
+
+                storyboardPhotoPanel(index: 1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 170)
+            }
+        case .threePanels:
+            VStack(spacing: 8) {
+                storyboardPhotoPanel(index: 0)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 192)
+
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 1)
+                    storyboardPhotoPanel(index: 2)
+                }
+                .frame(height: 148)
+            }
+        case .threeVerticalPanels:
+            HStack(spacing: 8) {
+                storyboardPhotoPanel(index: 0)
+                storyboardPhotoPanel(index: 1)
+                storyboardPhotoPanel(index: 2)
+            }
+            .frame(height: 340)
+        case .fourSquares:
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 0)
+                    storyboardPhotoPanel(index: 1)
+                }
+                .frame(height: 170)
+
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 2)
+                    storyboardPhotoPanel(index: 3)
+                }
+                .frame(height: 170)
+            }
+        case .fourVerticalPanels:
+            HStack(spacing: 8) {
+                storyboardPhotoPanel(index: 0)
+                storyboardPhotoPanel(index: 1)
+                storyboardPhotoPanel(index: 2)
+                storyboardPhotoPanel(index: 3)
+            }
+            .frame(height: 340)
+        case .fourHorizontalRectangles:
+            VStack(spacing: 8) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    storyboardPhotoPanel(index: index)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 80)
+                }
+            }
+        case .fiveHorizontalPanels:
+            VStack(spacing: 8) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    storyboardPhotoPanel(index: index)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                }
+            }
+        case .fiveClassic:
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 0)
+                    storyboardPhotoPanel(index: 1)
+                }
+                .frame(height: 132)
+
+                storyboardPhotoPanel(index: 2)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 106)
+
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 3)
+                    storyboardPhotoPanel(index: 4)
+                }
+                .frame(height: 108)
+            }
+        case .sixSquares:
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 0)
+                    storyboardPhotoPanel(index: 1)
+                }
+                .aspectRatio(2, contentMode: .fit)
+
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 2)
+                    storyboardPhotoPanel(index: 3)
+                }
+                .aspectRatio(2, contentMode: .fit)
+
+                HStack(spacing: 8) {
+                    storyboardPhotoPanel(index: 4)
+                    storyboardPhotoPanel(index: 5)
+                }
+                .aspectRatio(2, contentMode: .fit)
+            }
+        }
+    }
+
+    private func storyboardPhotoPanel(index: Int) -> some View {
+        StoryboardPhotoPanel(
+            image: storyboardPhotos[index],
+            placeholderImageName: "storyboard_placeholder_\(min(index + 1, 5))",
+            number: index + 1
+        )
+    }
+
+    private var nextAvailablePhotoSlot: Int? {
+        storyboardPhotos.firstIndex(where: { $0 == nil }) ?? storyboardPhotos.indices.last
+    }
+
+    private func setStoryboardPhoto(_ image: UIImage) {
+        guard let slot = selectedPhotoSlot ?? nextAvailablePhotoSlot else {
+            return
+        }
+
+        storyboardPhotos[slot] = image
+        selectedPhotoSlot = nil
+    }
+
+    @MainActor
+    private func loadPhotoLibraryImage(from item: PhotosPickerItem) async {
+        defer {
+            selectedPhotoPickerItem = nil
+        }
+
+        guard
+            let data = try? await item.loadTransferable(type: Data.self),
+            let image = UIImage(data: data)
+        else {
+            return
+        }
+
+        setStoryboardPhoto(image)
+    }
+
+    private func removeStoryboardPhoto(at index: Int) {
+        var existingPhotos = storyboardPhotos.compactMap { $0 }
+        guard existingPhotos.indices.contains(index) else {
+            return
+        }
+
+        existingPhotos.remove(at: index)
+        storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
+    }
+
+    private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
+        let trimmedPhotos = Array(photos.prefix(storyboardPhotos.count))
+        return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
     }
 
     private var editorCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Write about your day...")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Color.storyInk)
+            HStack(alignment: .center) {
+                Text("Story Summary")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Button {
+                    isEditorFocused = false
+                    isShowingClearTextConfirmation = true
+                } label: {
+                    Text("Clear")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(entryText.isEmpty ? Color.storyGray.opacity(0.42) : Color.storyPurple)
+                        .frame(height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(entryText.isEmpty)
+                .accessibilityLabel("Clear writing")
+            }
 
             ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.storyBorder.opacity(0.85), lineWidth: 1)
+                    )
+
                 TextEditor(text: $entryText)
                     .font(.system(size: 15, weight: .regular))
                     .lineSpacing(4)
                     .foregroundStyle(Color.storyInk.opacity(0.82))
                     .scrollContentBackground(.hidden)
+                    .scrollIndicators(.visible, axes: .vertical)
                     .background(Color.clear)
                     .focused($isEditorFocused)
-                    .padding(.horizontal, -5)
-                    .padding(.vertical, -7)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 8)
+                    .padding(.bottom, 28)
                     .onTapGesture {
                         isEditorFocused = true
                     }
 
                 if entryText.isEmpty {
-                    Text("Today was chaotic but really good...")
+                    Text("Start writing...")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundStyle(Color.storyGray.opacity(0.46))
-                        .padding(.horizontal, 0)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
                         .allowsHitTesting(false)
-                }
+                    }
             }
-            .frame(minHeight: 205)
+            .frame(height: 210)
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    isEditorFocused = false
+                    isShowingExpandedEditor = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(width: 34, height: 34)
+                        .background(Color.storyPurple.opacity(0.1), in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.storyPurple.opacity(0.26), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Expand writing box")
+                .padding(8)
+            }
+
+            HStack(spacing: 10) {
+                summaryHelperButton(title: "AI Write Help", systemName: "sparkles")
+
+                Spacer(minLength: 8)
+
+                summaryHelperButton(title: "Prompts", systemName: "text.bubble")
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+    }
+
+    private func summaryHelperButton(title: String, systemName: String) -> some View {
+        Button {
+            isEditorFocused = false
+        } label: {
+            Label(title, systemImage: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 128, height: 34)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.storyPurple.opacity(0.32), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var storyDetailsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Story Details")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+
+            storyTextFieldRow(
+                icon: "pencil",
+                title: "Title",
+                placeholder: "Give your story a title",
+                text: $storyTitle
+            )
 
             Divider()
-                .background(Color.storyBorder.opacity(0.7))
+                .padding(.leading, 44)
 
-            HStack(spacing: 24) {
-                Button {
-                } label: {
-                    Image(systemName: "photo")
-                }
+            storyTextFieldRow(
+                icon: "location",
+                title: "Location",
+                placeholder: "Add a location",
+                text: $storyLocation
+            )
 
-                Button {
-                } label: {
-                    Image(systemName: "mic")
+            Divider()
+                .padding(.leading, 44)
+
+            DatePicker(selection: $storyDate, displayedComponents: [.date, .hourAndMinute]) {
+                HStack(spacing: 12) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(width: 20)
+
+                    Text("Date/time")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.9))
                 }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .tint(Color.storyPurple)
+            .padding(.horizontal, 12)
+            .frame(height: 48)
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+    }
+
+    private func storyTextFieldRow(
+        icon: String,
+        title: String,
+        placeholder: String,
+        text: Binding<String>
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 20)
+
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.9))
+                .frame(width: 72, alignment: .leading)
+
+            TextField(placeholder, text: text)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Color.storyInk)
+                .tint(Color.storyPurple)
+                .textInputAutocapitalization(.words)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 48)
+    }
+
+    private var entryPrivacyCard: some View {
+        VStack(spacing: 0) {
+            entrySwitchRow(
+                icon: "tray.and.arrow.down",
+                title: "Save as Draft",
+                subtitle: "Save progress and come back later",
+                isOn: $savesDraft
+            )
+
+            Divider()
+                .padding(.leading, 44)
+
+            entrySwitchRow(
+                icon: "lock.shield",
+                title: "Private Entry",
+                subtitle: "Only you can see this entry",
+                isOn: $isPrivateEntry
+            )
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+    }
+
+    private func entrySwitchRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+            }
+        }
+        .toggleStyle(SwitchToggleStyle(tint: Color.storyPurple))
+        .padding(.horizontal, 12)
+        .frame(height: 58)
+    }
+
+    private var artStylePickerSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center) {
+                Text("Choose Art Style")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
 
                 Spacer()
 
                 Button {
+                    isEditorFocused = false
+                    isShowingArtStyleGrid = true
                 } label: {
-                    Image(systemName: "face.smiling")
+                    Text("View all")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(artStyles, id: \.self) { style in
+                        Button {
+                            selectedArtStyle = style
+                            isEditorFocused = false
+                        } label: {
+                            InlineArtStyleOption(
+                                title: style,
+                                isSelected: selectedArtStyle == style
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 1)
+            }
+        }
+    }
+
+    private var continueToStoryDetailsButton: some View {
+        Button {
+            isEditorFocused = false
+            navigationPath.append(.storyDetails)
+        } label: {
+            HStack(spacing: 7) {
+                Text("Continue to Story Details")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(
+                LinearGradient(
+                    colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+    }
+
+    private var generateStoryboardButton: some View {
+        Button {
+            isEditorFocused = false
+            startStoryboardGeneration()
+        } label: {
+            HStack(spacing: 7) {
+                if isGeneratingStoryboard {
+                    ProgressView()
+                        .tint(.white)
+
+                    Text("Generating...")
+                } else {
+                    Text("Generate Storyboard")
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14, weight: .semibold))
                 }
             }
-            .font(.system(size: 21, weight: .regular))
-            .foregroundStyle(Color.storyInk.opacity(0.82))
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
             .frame(height: 52)
+            .background(
+                LinearGradient(
+                    colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
         }
-        .padding(16)
-        .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-        )
+        .padding(.top, 2)
+        .disabled(isGeneratingStoryboard)
+        .opacity(isGeneratingStoryboard ? 0.76 : 1)
     }
 }
 
-private struct ArtStyleSelectionSheet: View {
+private struct ExpandedEntryEditor: View {
+    @Binding var entryText: String
+
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Text("Write about this storyboard")
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(height: 38)
+                }
+            }
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $entryText)
+                    .font(.system(size: 16, weight: .regular))
+                    .lineSpacing(5)
+                    .foregroundStyle(Color.storyInk.opacity(0.86))
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .focused($isFocused)
+                    .padding(.horizontal, -5)
+                    .padding(.vertical, -7)
+
+                if entryText.isEmpty {
+                    Text("Start writing...")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(Color.storyGray.opacity(0.46))
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(16)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+        .background(Color.homePageBackground)
+        .onAppear {
+            isFocused = true
+        }
+    }
+}
+
+private struct ArtStyleGridSheet: View {
     let artStyles: [String]
-    let selectedArtStyle: String?
-    let onSelect: (String) -> Void
+
+    @Binding var selectedArtStyle: String
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1233,105 +2599,517 @@ private struct ArtStyleSelectionSheet: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Choose an art style")
-                        .font(.system(size: 22, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
-
-                    Text("Pick the look for your storyboard.")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.storyGray)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center) {
+                Text("Choose art style")
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
 
                 Spacer()
 
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "xmark")
+                    Text("Done")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.72))
-                        .frame(width: 34, height: 34)
-                        .background(Color.storySoftPink.opacity(0.72), in: Circle())
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(height: 38)
                 }
             }
 
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(Array(artStyles.enumerated()), id: \.offset) { index, style in
-                    Button {
-                        onSelect(style)
-                    } label: {
-                        ArtStyleOptionCard(
-                            title: style,
-                            index: index,
-                            isSelected: selectedArtStyle == style
-                        )
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(artStyles, id: \.self) { style in
+                        Button {
+                            selectedArtStyle = style
+                        } label: {
+                            ArtStyleGridOption(
+                                title: style,
+                                isSelected: selectedArtStyle == style
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.bottom, 18)
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 24)
-        .padding(.bottom, 14)
-        .background(Color.storyCream.opacity(0.55))
+        .padding(.horizontal, 18)
+        .padding(.top, 22)
+        .background(Color.homePageBackground)
     }
 }
 
-private struct ArtStyleOptionCard: View {
+private struct ArtStyleGridOption: View {
     let title: String
-    let index: Int
     let isSelected: Bool
 
-    private var colors: [Color] {
-        let palette: [[Color]] = [
-            [.storyPeach, .storyPurple],
-            [.storyGold, .green.opacity(0.45)],
-            [.storyInk, .storyPeach],
-            [.white, .black.opacity(0.75)],
-            [.storyRose, .orange.opacity(0.65)],
-            [.brown.opacity(0.7), .storyGold]
-        ]
-        return palette[index % palette.count]
+    var body: some View {
+        VStack(spacing: 7) {
+            GeometryReader { proxy in
+                ZStack(alignment: .topTrailing) {
+                    Image(artStyleAssetName(for: title))
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.width)
+                        .clipped()
+
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.5), lineWidth: isSelected ? 2.5 : 1)
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white, Color.storyPurple)
+                            .padding(7)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .aspectRatio(1, contentMode: .fit)
+
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.84))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
     }
+}
+
+private struct StoryboardPhotoStripThumbnail: View {
+    let image: UIImage
+    let removeAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: colors,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+        ZStack(alignment: .topTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 82, height: 82)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.storyInk.opacity(0.72), lineWidth: 1)
                 )
-                .overlay(ArtStyleInnerGrid(index: index))
+
+            Button {
+                removeAction()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 18, height: 18)
+                    .background(Color.black.opacity(0.58), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(3)
+            .accessibilityLabel("Remove photo")
+        }
+        .frame(width: 82, height: 82)
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+    }
+}
+
+private struct StoryboardPhotoStripAddButton: View {
+    var body: some View {
+        VStack {
+            Image(systemName: "plus")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Color.storyPurple)
+        }
+        .frame(width: 82, height: 82)
+        .background(Color.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(Color.storyPurple.opacity(0.32), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+        )
+        .accessibilityLabel("Add photos")
+    }
+}
+
+private struct StoryboardPhotoDropDelegate: DropDelegate {
+    @Binding var photos: [UIImage?]
+    @Binding var draggedIndex: Int?
+
+    let destinationIndex: Int
+
+    func dropEntered(info: DropInfo) {
+        guard
+            let draggedIndex,
+            draggedIndex != destinationIndex
+        else {
+            return
+        }
+
+        var compactPhotos = photos.compactMap { $0 }
+        guard
+            compactPhotos.indices.contains(draggedIndex),
+            compactPhotos.indices.contains(destinationIndex)
+        else {
+            return
+        }
+
+        let photo = compactPhotos.remove(at: draggedIndex)
+        compactPhotos.insert(photo, at: destinationIndex)
+        photos = compactPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, photos.count - compactPhotos.count))
+        self.draggedIndex = destinationIndex
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedIndex = nil
+        return true
+    }
+}
+
+private struct StoryboardLayoutOptionTile: View {
+    let layout: StoryboardLayoutOption
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            StoryboardLayoutDiagram(layout: layout)
+                .frame(width: 72, height: 92)
+                .padding(8)
+                .background(
+                    Color.white,
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.68), lineWidth: isSelected ? 2 : 1)
+                )
                 .overlay(alignment: .topTrailing) {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 21, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white, Color.storyPurple)
-                            .padding(8)
+                            .padding(4)
                     }
                 }
-                .frame(height: 98)
+
+            Text(layout.title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(width: 88)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(layout.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct StoryboardLayoutDiagram: View {
+    let layout: StoryboardLayoutOption
+
+    var body: some View {
+        VStack(spacing: 4) {
+            switch layout {
+            case .twoRectangles:
+                diagramPanel(number: 1)
+                    .frame(height: 42)
+
+                diagramPanel(number: 2)
+                    .frame(height: 42)
+            case .threePanels:
+                diagramPanel(number: 1)
+                    .frame(height: 46)
+
+                HStack(spacing: 4) {
+                    diagramPanel(number: 2)
+                    diagramPanel(number: 3)
+                }
+                .frame(height: 38)
+            case .threeVerticalPanels:
+                HStack(spacing: 4) {
+                    ForEach(1...3, id: \.self) { number in
+                        diagramPanel(number: number)
+                    }
+                }
+                .frame(height: 88)
+            case .fourSquares:
+                HStack(spacing: 4) {
+                    diagramPanel(number: 1)
+                    diagramPanel(number: 2)
+                }
+                .frame(height: 42)
+
+                HStack(spacing: 4) {
+                    diagramPanel(number: 3)
+                    diagramPanel(number: 4)
+                }
+                .frame(height: 42)
+            case .fourVerticalPanels:
+                HStack(spacing: 4) {
+                    ForEach(1...4, id: \.self) { number in
+                        diagramPanel(number: number)
+                    }
+                }
+                .frame(height: 88)
+            case .fourHorizontalRectangles:
+                ForEach(1...4, id: \.self) { number in
+                    diagramPanel(number: number)
+                        .frame(height: 20)
+                }
+            case .fiveHorizontalPanels:
+                ForEach(1...5, id: \.self) { number in
+                    diagramPanel(number: number)
+                        .frame(height: 14)
+                }
+            case .fiveClassic:
+                HStack(spacing: 4) {
+                    diagramPanel(number: 1)
+                    diagramPanel(number: 2)
+                }
+                .frame(height: 30)
+
+                diagramPanel(number: 3)
+                    .frame(height: 24)
+
+                HStack(spacing: 4) {
+                    diagramPanel(number: 4)
+                    diagramPanel(number: 5)
+                }
+                .frame(height: 26)
+            case .sixSquares:
+                ForEach(0..<3, id: \.self) { row in
+                    HStack(spacing: 4) {
+                        diagramPanel(number: row * 2 + 1)
+                        diagramPanel(number: row * 2 + 2)
+                    }
+                    .frame(height: 26)
+                }
+            }
+        }
+    }
+
+    private func diagramPanel(number: Int) -> some View {
+        Rectangle()
+            .fill(Color.white)
+            .overlay(
+                Rectangle()
+                    .stroke(Color.storyInk.opacity(0.54), lineWidth: 1)
+            )
+            .overlay {
+                Text("\(number)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.76))
+            }
+            .frame(maxWidth: .infinity)
+    }
+}
+
+private struct StoryboardPhotoPanel: View {
+    let image: UIImage?
+    let placeholderImageName: String
+    let number: Int
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.white)
+
+            GeometryReader { proxy in
+                Group {
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                    } else {
+                        Image(placeholderImageName)
+                            .resizable()
+                    }
+                }
+                .scaledToFill()
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
+            }
+
+            if image == nil {
+                Rectangle()
+                    .fill(Color.white.opacity(0.34))
+            }
+
+            Text("\(number)")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.82), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.storyPurple.opacity(0.22), lineWidth: 1)
+                )
+        }
+        .overlay(
+            Rectangle()
+                .stroke(Color.storyInk.opacity(0.88), lineWidth: 1.5)
+        )
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+}
+
+private struct CameraPhotoPicker: UIViewControllerRepresentable {
+    let onImagePicked: (UIImage) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            dismiss: dismiss,
+            onImagePicked: onImagePicked
+        )
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        private let dismiss: DismissAction
+        private let onImagePicked: (UIImage) -> Void
+
+        init(
+            dismiss: DismissAction,
+            onImagePicked: @escaping (UIImage) -> Void
+        ) {
+            self.dismiss = dismiss
+            self.onImagePicked = onImagePicked
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                onImagePicked(image)
+            }
+
+            dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            dismiss()
+        }
+    }
+}
+
+private struct InlineArtStyleOption: View {
+    let title: String
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(inlineArtStyleAssetName(for: title))
+                .resizable()
+                .scaledToFill()
+                .frame(width: 92, height: 92)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.5), lineWidth: isSelected ? 2 : 1)
+                )
+                .overlay(alignment: .topTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white, Color.storyPurple)
+                            .padding(5)
+                    }
+                }
 
             Text(title)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color.storyInk.opacity(0.88))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.7)
+                .frame(width: 96)
         }
-        .padding(10)
-        .background(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.72), lineWidth: isSelected ? 2 : 1)
-        )
+    }
+}
+
+private func inlineArtStyleAssetName(for title: String) -> String {
+    switch title {
+    case "Anime":
+        return "inline_art_style_anime"
+    case "Graphic Novel":
+        return "inline_art_style_graphic_novel"
+    case "Pixel Art":
+        return "inline_art_style_pixel_art"
+    case "Manga":
+        return "inline_art_style_manga"
+    case "Cozy Storybook":
+        return "inline_art_style_cozy_storybook"
+    case "Pop Art":
+        return "inline_art_style_pop_art"
+    case "Colored Journal":
+        return "inline_art_style_colored_journal"
+    default:
+        return "inline_art_style_anime"
+    }
+}
+
+private func artStylePromptDescription(for title: String) -> String {
+    switch title {
+    case "Anime":
+        return """
+        Japanese anime illustration. Large expressive eyes, clean cel-shaded coloring, smooth gradients, vibrant saturated colors, and dramatic highlights. Dynamic poses and modern TV-anime character design. Soft atmospheric backgrounds with cinematic lighting.
+        """
+    case "Graphic Novel":
+        return """
+        Western graphic novel / comic book art. Bold ink outlines, mature cinematic framing, and painterly or flat color fills. Restrained color palette with deep shadows and noir-influenced lighting. Realistic proportions with stylized ink edges and graphic novel panel composition.
+        """
+    case "Pixel Art":
+        return """
+        Retro 16-bit pixel art. Visible blocky pixels with crisp pixel edges and no anti-aliasing blur. Limited color palette with dithering for shading. Nostalgic video-game sprite aesthetic — every shape should read as deliberately pixelated, not smooth digital illustration.
+        """
+    case "Manga":
+        return """
+        Japanese manga illustration. Fine pen line work, screentone shading patterns, cross-hatching, and speed lines. High-contrast black-and-white or limited-tone coloring. Expressive eyes, dramatic panel angles, and classic manga visual storytelling conventions.
+        """
+    case "Cozy Storybook":
+        return """
+        Children's picture-book illustration. Soft watercolor and gouache textures, warm gentle colors, rounded friendly shapes, and a whimsical hand-painted feel. Dreamy pastoral mood with gentle diffused lighting — cozy, inviting, and storybook-sweet.
+        """
+    case "Pop Art":
+        return """
+        Pop art comic style inspired by Warhol and Lichtenstein. Bold flat primary colors, thick black outlines, high contrast, and visible Ben-Day halftone dots for shading. Graphic poster-like composition with punchy, saturated color blocks — never soft or painterly.
+        """
+    case "Colored Journal":
+        return """
+        Hand-drawn personal journal / sketchbook illustration. Colored pencil, marker, and pen textures with informal linework and doodle-like charm. Pastel and marker colors on an off-white paper feel. Intimate diary aesthetic — imperfect, personal, and warmly handmade.
+        """
+    default:
+        return "Illustrated art in the \(title) style. Fully commit to this aesthetic across every panel — do not default to generic anime or photorealism."
+    }
+}
+
+private func artStyleAssetName(for title: String) -> String {
+    switch title {
+    case "Anime":
+        return "art_style_anime"
+    case "Graphic Novel":
+        return "art_style_graphic_novel"
+    case "Pixel Art":
+        return "art_style_pixel_art"
+    case "Manga":
+        return "art_style_manga"
+    case "Cozy Storybook":
+        return "art_style_cozy_storybook"
+    case "Pop Art":
+        return "art_style_pop_art"
+    case "Colored Journal":
+        return "art_style_colored_journal"
+    default:
+        return "art_style_anime"
     }
 }
 
@@ -1342,7 +3120,7 @@ private struct SectionTitle: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 17, weight: .bold))
+                .font(.system(size: 18, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
@@ -1371,49 +3149,92 @@ private struct CircleIconButton: View {
     }
 }
 
+private struct HeaderIconButton: View {
+    let systemName: String
+
+    var body: some View {
+        Button {
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(Color.storyInk)
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct ProfilePlaceholder: View {
     var size: CGFloat = 42
 
     var body: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color.storyPeach, Color.storyPurple.opacity(0.35)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: size * 0.64))
-                    .foregroundStyle(.white.opacity(0.85))
-            )
+        Image("art_style_anime")
+            .resizable()
+            .scaledToFill()
             .frame(width: size, height: size)
-            .overlay(Circle().stroke(.white, lineWidth: 2))
-            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(Color.storyInk.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
-private struct ArtStyleInnerGrid: View {
-    let index: Int
+private struct BottomNavigationBar: View {
+    @Binding var selectedPage: StoryPage
 
     var body: some View {
-        VStack(spacing: 3) {
-            ForEach(0..<2, id: \.self) { row in
-                HStack(spacing: 3) {
-                    ForEach(0..<2, id: \.self) { column in
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(Color.white.opacity(index == 3 ? 0.66 : 0.22))
-                            .overlay(
-                                Image(systemName: (row + column).isMultiple(of: 2) ? "person.fill" : "sparkles")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(Color.storyInk.opacity(0.35))
-                            )
-                    }
-                }
+        HStack {
+            NavItem(
+                title: "Home",
+                systemName: selectedPage == .home ? "house.fill" : "house",
+                isSelected: selectedPage == .home,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .home
+            }
+            Spacer()
+            NavItem(
+                title: "Explore",
+                systemName: selectedPage == .explore ? "safari.fill" : "safari",
+                isSelected: selectedPage == .explore,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .explore
+            }
+            Spacer()
+            CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
+                selectedPage = .create
+            }
+            Spacer()
+            NavItem(
+                title: "Journal",
+                systemName: selectedPage == .journal ? "book.closed.fill" : "book.closed",
+                isSelected: selectedPage == .journal,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .journal
+            }
+            Spacer()
+            NavItem(
+                title: "Profile",
+                systemName: selectedPage == .profile ? "person.fill" : "person",
+                isSelected: selectedPage == .profile,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .profile
             }
         }
-        .padding(6)
+        .padding(.horizontal, 22)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(Color.white)
+        .overlay(
+            Rectangle()
+                .fill(Color.homeBorder)
+                .frame(height: 1),
+            alignment: .top
+        )
     }
 }
 
@@ -1421,6 +3242,7 @@ private struct NavItem: View {
     let title: String
     let systemName: String
     let isSelected: Bool
+    var selectedColor: Color = .storyPurple
     let action: () -> Void
 
     var body: some View {
@@ -1432,7 +3254,7 @@ private struct NavItem: View {
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
+            .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
             .frame(width: 50, height: 44)
         }
     }
@@ -1440,6 +3262,7 @@ private struct NavItem: View {
 
 private struct CreateNavItem: View {
     let isSelected: Bool
+    var selectedColor: Color = .storyPurple
     let action: () -> Void
 
     var body: some View {
@@ -1450,18 +3273,60 @@ private struct CreateNavItem: View {
 
                 Text("Create")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
+                    .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
             }
-            .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
+            .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
             .frame(width: 50, height: 44)
         }
+    }
+}
+
+private extension Data {
+    mutating func appendMultipartField(name: String, value: String, boundary: String) {
+        append("--\(boundary)\r\n".data(using: .utf8)!)
+        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+        append("\(value)\r\n".data(using: .utf8)!)
+    }
+
+    mutating func appendMultipartFile(
+        name: String,
+        fileName: String,
+        mimeType: String,
+        data: Data,
+        boundary: String
+    ) {
+        append("--\(boundary)\r\n".data(using: .utf8)!)
+        append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        append(data)
+        append("\r\n".data(using: .utf8)!)
+    }
+}
+
+private extension UIImage {
+    func storytopiaPreparedJPEGData(maxDimension: CGFloat = 2048, compressionQuality: CGFloat = 0.82) -> Data? {
+        let longestSide = max(size.width, size.height)
+        guard longestSide > maxDimension else {
+            return jpegData(compressionQuality: compressionQuality)
+        }
+
+        let scale = maxDimension / longestSide
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+
+        let resized = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+
+        return resized.jpegData(compressionQuality: compressionQuality)
     }
 }
 
 private extension Color {
     static let storyInk = Color(red: 0.08, green: 0.07, blue: 0.22)
     static let storyGray = Color(red: 0.39, green: 0.39, blue: 0.46)
-    static let storyPurple = Color(red: 0.39, green: 0.18, blue: 0.56)
+    static let storyPurple = Color(uiColor: .systemIndigo)
     static let storyLavender = Color(red: 0.91, green: 0.86, blue: 0.98)
     static let storyRose = Color(red: 0.93, green: 0.73, blue: 0.70)
     static let storyBlush = Color(red: 0.99, green: 0.95, blue: 0.92)
@@ -1470,6 +3335,12 @@ private extension Color {
     static let storyPeach = Color(red: 0.93, green: 0.63, blue: 0.45)
     static let storyGold = Color(red: 0.95, green: 0.69, blue: 0.34)
     static let storyBorder = Color(red: 0.88, green: 0.80, blue: 0.78)
+    static let homePageBackground = Color(red: 0.949, green: 0.949, blue: 0.969)
+    static let homeCardGray = Color(uiColor: .systemGray6)
+    static let homeInputGray = Color(red: 0.92, green: 0.92, blue: 0.94)
+    static let homeMutedText = Color(red: 0.43, green: 0.44, blue: 0.54)
+    static let homeBorder = Color(red: 0.86, green: 0.87, blue: 0.91)
+    static let homeAccent = Color(uiColor: .systemIndigo)
 }
 
 struct ContentView_Previews: PreviewProvider {
