@@ -16,26 +16,41 @@ struct ContentView: View {
     @State private var generatedStoryboards: [GeneratedStoryboard] = GeneratedStoryboardStore.load()
 
     var body: some View {
-        Group {
-            switch selectedPage {
-            case .home:
-                homePage
-            case .explore:
-                ExploreView(selectedPage: $selectedPage)
-            case .create:
-                CreateEntryView(
-                    entryText: $entryText,
-                    selectedPage: $selectedPage,
-                    generatedStoryboards: $generatedStoryboards
-                )
-            case .journal:
-                JournalView(selectedPage: $selectedPage)
-            case .profile:
-                ProfileView(
-                    selectedPage: $selectedPage,
-                    generatedStoryboards: generatedStoryboards
-                )
-            }
+        ZStack {
+            currentPage
+        }
+    }
+
+    @ViewBuilder
+    private var currentPage: some View {
+        switch selectedPage {
+        case .home:
+            homePage
+                .transition(.identity)
+                .zIndex(0)
+        case .explore:
+            ExploreView(selectedPage: $selectedPage)
+                .transition(.identity)
+                .zIndex(0)
+        case .create:
+            CreateEntryView(
+                entryText: $entryText,
+                selectedPage: $selectedPage,
+                generatedStoryboards: $generatedStoryboards
+            )
+            .transition(.move(edge: .trailing))
+            .zIndex(1)
+        case .journal:
+            JournalView(selectedPage: $selectedPage)
+                .transition(.identity)
+                .zIndex(0)
+        case .profile:
+            ProfileView(
+                selectedPage: $selectedPage,
+                generatedStoryboards: generatedStoryboards
+            )
+            .transition(.identity)
+            .zIndex(0)
         }
     }
 
@@ -1553,7 +1568,7 @@ private struct CreateEntryView: View {
     @FocusState private var isEditorFocused: Bool
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             Color.homePageBackground
                 .ignoresSafeArea()
                 .onTapGesture {
@@ -1570,13 +1585,7 @@ private struct CreateEntryView: View {
                     }
                     .toolbar(.hidden, for: .navigationBar)
             }
-
-            if navigationPath.isEmpty {
-                BottomNavigationBar(selectedPage: $selectedPage)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
-        .animation(.snappy(duration: 0.24), value: navigationPath.isEmpty)
         .sheet(isPresented: $isShowingCamera) {
             CameraPhotoPicker { image in
                 setStoryboardPhoto(image)
@@ -1718,13 +1727,13 @@ private struct CreateEntryView: View {
 
     private var layoutPage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            pageHeader(title: "New Entry", showsBackButton: false)
+            pageHeader(title: "New Entry")
 
             ScrollView(showsIndicators: false) {
                 layoutStepContent
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
-                    .padding(.bottom, 92)
+                    .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(pageTapBackground)
@@ -1769,23 +1778,21 @@ private struct CreateEntryView: View {
             }
     }
 
-    private func pageHeader(title: String, showsBackButton: Bool) -> some View {
+    private func pageHeader(title: String) -> some View {
         HStack(alignment: .center) {
-            if showsBackButton {
-                Button {
-                    isEditorFocused = false
-                    if !navigationPath.isEmpty {
-                        navigationPath.removeLast()
-                    }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                        .frame(width: 32, height: 44)
+            Button {
+                isEditorFocused = false
+                withAnimation(.snappy(duration: 0.32)) {
+                    selectedPage = .home
                 }
-                .buttonStyle(.plain)
-                .padding(.leading, -6)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.plain)
+            .padding(.leading, -10)
 
             Text(title)
                 .font(.system(size: 24, weight: .bold, design: .serif))
@@ -1813,9 +1820,9 @@ private struct CreateEntryView: View {
 
     private var layoutStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            photoStripSection
-            layoutPickerSection
             storyboardPreviewSection
+            layoutPickerSection
+            photoStripSection
             artStylePickerSection
             continueToStoryDetailsButton
         }
@@ -3204,7 +3211,9 @@ private struct BottomNavigationBar: View {
             }
             Spacer()
             CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
-                selectedPage = .create
+                withAnimation(.snappy(duration: 0.32)) {
+                    selectedPage = .create
+                }
             }
             Spacer()
             NavItem(
