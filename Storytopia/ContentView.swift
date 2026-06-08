@@ -223,6 +223,7 @@ private enum StoryPage {
 
 private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
     case twoRectangles
+    case threeHorizontalPanels
     case threePanels
     case threeVerticalPanels
     case fourSquares
@@ -240,6 +241,8 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         switch self {
         case .twoRectangles:
             return "2 Rectangles"
+        case .threeHorizontalPanels:
+            return "3 Horiz."
         case .threePanels:
             return "3 Panels"
         case .threeVerticalPanels:
@@ -263,7 +266,7 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         switch self {
         case .twoRectangles:
             return 2
-        case .threePanels, .threeVerticalPanels:
+        case .threeHorizontalPanels, .threePanels, .threeVerticalPanels:
             return 3
         case .fourSquares, .fourVerticalPanels, .fourHorizontalRectangles:
             return 4
@@ -278,6 +281,8 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         switch self {
         case .twoRectangles:
             return "two full-width horizontal rectangle panels stacked evenly from top to bottom."
+        case .threeHorizontalPanels:
+            return "three full-width horizontal rectangle panels stacked evenly from top to bottom."
         case .threePanels:
             return "one large full-width horizontal rectangle panel on top, with two equal rectangle panels side by side underneath."
         case .threeVerticalPanels:
@@ -295,6 +300,12 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         case .sixSquares:
             return "six equal square panels in a clean 2-column by 3-row grid."
         }
+    }
+
+    static func random(for imageCount: Int) -> StoryboardLayoutOption {
+        let panelCount = storyboardPanelCount(for: imageCount)
+        let matchingLayouts = allCases.filter { $0.panelCount == panelCount }
+        return matchingLayouts.randomElement() ?? .fourSquares
     }
 }
 
@@ -328,7 +339,7 @@ private struct GeneratedStoryboard: Identifiable {
 
 private enum OpenAITestConfig {
     // Temporary test-only client key. Remove this before pushing or shipping.
-    static let apiKey = "PASTE_OPENAI_API_KEY_HERE"
+    static let apiKey = ""
     static let imageModel = "gpt-image-2"
 }
 
@@ -539,39 +550,73 @@ private struct OpenAIImageGenerationService {
         return image
     }
 
-    private func makePrompt(text: String, artStyle: String, layout: StoryboardLayoutOption, imageCount: Int) -> String {
+    private func makePrompt(
+        text: String,
+        artStyle: String,
+        layout: StoryboardLayoutOption,
+        imageCount: Int
+    ) -> String {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let storyText = trimmedText.isEmpty ? "No written story was provided. Infer a warm, visually coherent moment from the uploaded photos." : trimmedText
+        let storyText = trimmedText.isEmpty ? "No written story was provided. Infer a warm, visually coherent story about the moment from the uploaded photos." : trimmedText
+        let referencePhotoCount = min(imageCount, 6)
 
         return """
-        Create a vertical multi-panel comic book storyboard illustration from the user's \(imageCount) uploaded reference photo(s) and written story.
+        Create a vertical illustrated comic/storyboard about the moment using the user's \(referencePhotoCount) uploaded reference photo(s) and optional written story.
 
-        User story:
+        USER STORY:
         \(storyText)
 
-        Art style:
+        ART STYLE:
         \(artStyle)
 
-        ART STYLE DIRECTION — follow this look exactly:
+        STYLE PRIORITY — this is the most important instruction:
         \(artStylePromptDescription(for: artStyle))
 
-        FORMAT — this is critical:
-        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible borders/gutters between them.
+        The final image must fully commit to the selected art style.
+        Preserve the identity of people, pets, locations, clothing, and important objects from the reference photos, but DO NOT preserve photographic realism.
+        Strongly reinterpret everything in the selected style.
+        The result should look like authentic \(artStyle) artwork, not a photograph with an art filter applied.
+        When there is a conflict between realism and the selected art style, always prioritize the selected art style.
+
+        FORMAT:
+        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible gutters or borders.
         - Panel layout (top to bottom): \(layout.promptDescription)
-        - Each panel must illustrate a different sequential moment in the story, like frames in a graphic novel or film storyboard.
-        - Do NOT create a photo collage, photomontage, or stitched-together composite of the uploaded photos. Fully redraw every scene as polished illustrated art in the chosen style.
+        - Create a coherent beginning, middle, and end.
+        - Show a progression of events rather than repeating the same scene.
+        - Generate a true illustrated comic/storyboard.
+        - Never create a photo collage, contact sheet, photomontage, or collection of separate photos.
+        - Fully redraw every scene as original illustrated artwork.
 
-        TEXT OVERLAYS — include comic-style lettering in every panel:
-        - A small colored header label in the top-left of each panel (e.g. "1. THE BEGINNING", "2. NEXT STEP") with a panel number and short title.
-        - A white narration box with a black border containing short all-caps sans-serif caption text that advances the story (internal monologue or scene description).
-        - Optional thought or speech bubbles where dialogue fits the moment.
+        REFERENCE PHOTOS:
+        - Use ALL uploaded reference photos.
+        - Do not ignore uploaded photos.
+        - Use them as references for identity, pets, clothing, objects, locations, mood, and story details.
+        - Do NOT map photo 1 to panel 1, photo 2 to panel 2, and so on.
+        - You may combine details from multiple photos when it improves storytelling.
+        - Keep characters and important visual elements recognizable and consistent across panels.
+        - Reimagine every scene in the selected art style rather than recreating the original photographs.
 
-        VISUAL STYLE:
-        - Clean, detailed digital illustration with expressive characters and cinematic lighting.
-        - Keep characters, clothing, and key objects visually consistent across all panels.
-        - Use rich, detailed backgrounds (architecture, interiors, city streets, nature) appropriate to each scene.
-        - Use the uploaded photos only as visual reference for people, places, mood, objects, and narrative clues — then reinterpret them as fully illustrated comic art, never as pasted or blended photographs.
+        TEXT:
+        - Minimal text.
+        - Minimal speech bubbles.
+        - Minimal captions.
+        - Prioritize visual storytelling.
         """
+    }
+}
+
+private func storyboardPanelCount(for imageCount: Int) -> Int {
+    switch imageCount {
+    case ...0:
+        return 0
+    case 1...3:
+        return 3
+    case 4:
+        return 4
+    case 5:
+        return 5
+    default:
+        return 6
     }
 }
 
@@ -1532,21 +1577,15 @@ private struct StoryboardImageViewer: View {
     }
 }
 
-private enum CreateEntryRoute: Hashable {
-    case storyDetails
-}
-
 private struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
-    private let storyboardLayouts = StoryboardLayoutOption.allCases
 
     @Binding var entryText: String
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
 
-    @State private var navigationPath: [CreateEntryRoute] = []
     @State private var selectedArtStyle = "Anime"
-    @State private var selectedStoryboardLayout: StoryboardLayoutOption = .fourSquares
+    @State private var previewLayout = StoryboardLayoutOption.fourSquares
     @State private var storyboardPhotos: [UIImage?] = Array(repeating: nil, count: 6)
     @State private var selectedPhotoSlot: Int?
     @State private var isShowingPhotoSourceDialog = false
@@ -1563,28 +1602,24 @@ private struct CreateEntryView: View {
     @State private var storyDate = Date()
     @State private var savesDraft = true
     @State private var isPrivateEntry = false
-    @State private var selectedPhotoPickerItem: PhotosPickerItem?
+    @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @FocusState private var isEditorFocused: Bool
+
+    private func dismissKeyboard() {
+        isEditorFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 
     var body: some View {
         ZStack {
             Color.homePageBackground
                 .ignoresSafeArea()
                 .onTapGesture {
-                    isEditorFocused = false
+                    dismissKeyboard()
                 }
 
-            NavigationStack(path: $navigationPath) {
-                layoutPage
-                    .navigationDestination(for: CreateEntryRoute.self) { route in
-                        switch route {
-                        case .storyDetails:
-                            storyDetailsPage
-                        }
-                    }
-                    .toolbar(.hidden, for: .navigationBar)
-            }
+            layoutPage
         }
         .sheet(isPresented: $isShowingCamera) {
             CameraPhotoPicker { image in
@@ -1607,7 +1642,9 @@ private struct CreateEntryView: View {
         }
         .photosPicker(
             isPresented: $isShowingPhotoLibrary,
-            selection: $selectedPhotoPickerItem,
+            selection: $selectedPhotoPickerItems,
+            maxSelectionCount: nil,
+            selectionBehavior: .ordered,
             matching: .images
         )
         .confirmationDialog(
@@ -1655,7 +1692,7 @@ private struct CreateEntryView: View {
         .alert("Clear writing?", isPresented: $isShowingClearTextConfirmation) {
             Button("Clear", role: .destructive) {
                 entryText = ""
-                isEditorFocused = false
+                dismissKeyboard()
             }
 
             Button("Cancel", role: .cancel) {
@@ -1663,13 +1700,13 @@ private struct CreateEntryView: View {
         } message: {
             Text("Are you sure? This will remove everything you've written in this entry.")
         }
-        .onChange(of: selectedPhotoPickerItem) { item in
-            guard let item else {
+        .onChange(of: selectedPhotoPickerItems) { items in
+            guard !items.isEmpty else {
                 return
             }
 
             Task {
-                await loadPhotoLibraryImage(from: item)
+                await loadPhotoLibraryImages(from: items)
             }
         }
     }
@@ -1691,6 +1728,7 @@ private struct CreateEntryView: View {
             return
         }
 
+        let layout = StoryboardLayoutOption.random(for: photos.count)
         isGeneratingStoryboard = true
 
         Task {
@@ -1699,7 +1737,7 @@ private struct CreateEntryView: View {
                     apiKey: apiKey,
                     text: entryText,
                     artStyle: selectedArtStyle,
-                    layout: selectedStoryboardLayout,
+                    layout: layout,
                     images: photos
                 )
 
@@ -1730,7 +1768,7 @@ private struct CreateEntryView: View {
             pageHeader(title: "New Entry")
 
             ScrollView(showsIndicators: false) {
-                layoutStepContent
+                createEntryContent
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
                     .padding(.bottom, 24)
@@ -1739,49 +1777,20 @@ private struct CreateEntryView: View {
             .background(pageTapBackground)
         }
         .background(Color.homePageBackground)
-    }
-
-    private var storyDetailsPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView(showsIndicators: false) {
-                storyDetailsStepContent
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(pageTapBackground)
-        }
-        .background(Color.homePageBackground)
-        .navigationTitle("Story Details")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    isEditorFocused = false
-                    isShowingDraftSavedConfirmation = true
-                } label: {
-                    Text("Save")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                }
-            }
-        }
     }
 
     private var pageTapBackground: some View {
         Color.homePageBackground
             .contentShape(Rectangle())
             .onTapGesture {
-                isEditorFocused = false
+                dismissKeyboard()
             }
     }
 
     private func pageHeader(title: String) -> some View {
         HStack(alignment: .center) {
             Button {
-                isEditorFocused = false
+                dismissKeyboard()
                 withAnimation(.snappy(duration: 0.32)) {
                     selectedPage = .home
                 }
@@ -1801,10 +1810,10 @@ private struct CreateEntryView: View {
             Spacer()
 
             Button {
-                isEditorFocused = false
+                dismissKeyboard()
                 isShowingDraftSavedConfirmation = true
             } label: {
-                Text("Save")
+                Text("Save Draft")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color.storyPurple)
                     .frame(height: 44)
@@ -1814,24 +1823,26 @@ private struct CreateEntryView: View {
         .padding(.top, 12)
         .contentShape(Rectangle())
         .onTapGesture {
-            isEditorFocused = false
+            dismissKeyboard()
         }
     }
 
-    private var layoutStepContent: some View {
+    private var createEntryContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            storyboardPreviewSection
-            layoutPickerSection
-            photoStripSection
-            artStylePickerSection
-            continueToStoryDetailsButton
+            storyDetailsStepContent
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            dismissKeyboard()
+        }
     }
 
     private var storyDetailsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             editorCard
+            photoStripSection
+            artStylePickerSection
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
@@ -1841,28 +1852,23 @@ private struct CreateEntryView: View {
 
     private var photoStripSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Add Photos")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-                .padding(.horizontal, 2)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Reference Photos")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer(minLength: 10)
+
+                Text("Long press to reorder")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.homeMutedText.opacity(storyboardPhotos.compactMap { $0 }.count > 1 ? 1 : 0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .padding(.horizontal, 2)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    photoSourceButton(title: "Add", systemName: "plus") {
-                        selectedPhotoSlot = nextAvailablePhotoSlot
-                        isShowingPhotoSourceDialog = true
-                    }
-
-                    photoSourceButton(title: "Camera", systemName: "camera") {
-                        selectedPhotoSlot = nextAvailablePhotoSlot
-                        isShowingCamera = true
-                    }
-
-                    photoSourceButton(title: "Library", systemName: "photo") {
-                        selectedPhotoSlot = nextAvailablePhotoSlot
-                        isShowingPhotoLibrary = true
-                    }
-
                     ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
                         StoryboardPhotoStripThumbnail(image: image) {
                             removeStoryboardPhoto(at: index)
@@ -1881,27 +1887,31 @@ private struct CreateEntryView: View {
                             )
                     }
 
+                    Button {
+                        dismissKeyboard()
+                        selectedPhotoSlot = nextAvailablePhotoSlot
+                        isShowingPhotoSourceDialog = true
+                    } label: {
+                        StoryboardPhotoStripAddButton()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add reference photos")
                 }
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
             }
-
-            Text("Long press to reorder")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.homeMutedText.opacity(storyboardPhotos.compactMap { $0 }.count > 1 ? 1 : 0.72))
-                .frame(maxWidth: .infinity, alignment: .center)
         }
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
-                isEditorFocused = false
+                dismissKeyboard()
             }
         )
     }
 
     private func photoSourceButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
         Button {
-            isEditorFocused = false
+            dismissKeyboard()
             action()
         } label: {
             VStack(spacing: 8) {
@@ -1941,7 +1951,7 @@ private struct CreateEntryView: View {
                             .foregroundStyle(Color.storyGold)
                     }
 
-                    Text("Add up to 6 photos to shape your story")
+                    Text("Layout changes each time you generate")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.homeMutedText)
                 }
@@ -1949,7 +1959,8 @@ private struct CreateEntryView: View {
                 Spacer(minLength: 8)
 
                 HStack(spacing: 5) {
-                    Text(selectedStoryboardLayout.title)
+                    let photoCount = storyboardPhotos.compactMap { $0 }.count
+                    Text("\(previewLayout.title) · \(storyboardPanelCount(for: photoCount)) panels")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.7))
 
@@ -1959,7 +1970,7 @@ private struct CreateEntryView: View {
                 }
             }
 
-            storyboardPreviewLayout(selectedStoryboardLayout)
+            storyboardPreviewLayout(previewLayout)
         }
         .padding(14)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -1971,41 +1982,7 @@ private struct CreateEntryView: View {
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
-                isEditorFocused = false
-            }
-        )
-    }
-
-    private var layoutPickerSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("Choose Layout")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-                .padding(.horizontal, 2)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(storyboardLayouts) { layout in
-                        Button {
-                            selectedStoryboardLayout = layout
-                            isEditorFocused = false
-                        } label: {
-                            StoryboardLayoutOptionTile(
-                                layout: layout,
-                                isSelected: selectedStoryboardLayout == layout
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 2)
-            }
-        }
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isEditorFocused = false
+                dismissKeyboard()
             }
         )
     }
@@ -2022,6 +1999,14 @@ private struct CreateEntryView: View {
                 storyboardPhotoPanel(index: 1)
                     .frame(maxWidth: .infinity)
                     .frame(height: 170)
+            }
+        case .threeHorizontalPanels:
+            VStack(spacing: 8) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    storyboardPhotoPanel(index: index)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 112)
+                }
             }
         case .threePanels:
             VStack(spacing: 8) {
@@ -2123,7 +2108,7 @@ private struct CreateEntryView: View {
 
     private func storyboardPhotoPanel(index: Int) -> some View {
         StoryboardPhotoPanel(
-            image: storyboardPhotos[index],
+            image: storyboardPhotos.indices.contains(index) ? storyboardPhotos[index] : nil,
             placeholderImageName: "storyboard_placeholder_\(min(index + 1, 5))",
             number: index + 1
         )
@@ -2142,20 +2127,51 @@ private struct CreateEntryView: View {
         selectedPhotoSlot = nil
     }
 
-    @MainActor
-    private func loadPhotoLibraryImage(from item: PhotosPickerItem) async {
-        defer {
-            selectedPhotoPickerItem = nil
-        }
-
+    private func setStoryboardPhotos(_ images: [UIImage]) {
         guard
-            let data = try? await item.loadTransferable(type: Data.self),
-            let image = UIImage(data: data)
+            !images.isEmpty,
+            let firstSlot = selectedPhotoSlot ?? nextAvailablePhotoSlot
         else {
+            selectedPhotoSlot = nil
             return
         }
 
-        setStoryboardPhoto(image)
+        var updatedPhotos = storyboardPhotos
+        var slot = firstSlot
+
+        for image in images {
+            guard updatedPhotos.indices.contains(slot) else {
+                break
+            }
+
+            updatedPhotos[slot] = image
+            slot += 1
+        }
+
+        storyboardPhotos = updatedPhotos
+        selectedPhotoSlot = nil
+    }
+
+    @MainActor
+    private func loadPhotoLibraryImages(from items: [PhotosPickerItem]) async {
+        defer {
+            selectedPhotoPickerItems = []
+        }
+
+        var images: [UIImage] = []
+
+        for item in items {
+            guard
+                let data = try? await item.loadTransferable(type: Data.self),
+                let image = UIImage(data: data)
+            else {
+                continue
+            }
+
+            images.append(image)
+        }
+
+        setStoryboardPhotos(images)
     }
 
     private func removeStoryboardPhoto(at index: Int) {
@@ -2174,19 +2190,33 @@ private struct CreateEntryView: View {
     }
 
     private var editorCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                Text("Story Summary")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.storyPurple.opacity(0.58))
 
-                Spacer()
+                    Text(storyDate.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+
+                    Circle()
+                        .fill(Color.homeMutedText.opacity(0.38))
+                        .frame(width: 3, height: 3)
+
+                    Text("New entry")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+
+                Spacer(minLength: 12)
 
                 Button {
-                    isEditorFocused = false
+                    dismissKeyboard()
                     isShowingClearTextConfirmation = true
                 } label: {
-                    Text("Clear")
+                    Text("Edit")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(entryText.isEmpty ? Color.storyGray.opacity(0.42) : Color.storyPurple)
                         .frame(height: 32)
@@ -2195,43 +2225,48 @@ private struct CreateEntryView: View {
                 .disabled(entryText.isEmpty)
                 .accessibilityLabel("Clear writing")
             }
+            .padding(.horizontal, 2)
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.white)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.storyBorder.opacity(0.85), lineWidth: 1)
-                    )
+                journalPaperBackground
 
-                TextEditor(text: $entryText)
-                    .font(.system(size: 15, weight: .regular))
-                    .lineSpacing(4)
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-                    .scrollContentBackground(.hidden)
-                    .scrollIndicators(.visible, axes: .vertical)
-                    .background(Color.clear)
-                    .focused($isEditorFocused)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 8)
-                    .padding(.bottom, 28)
-                    .onTapGesture {
-                        isEditorFocused = true
-                    }
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("What's on your mind?")
+                        .font(.system(size: 22, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundStyle(Color.storyInk.opacity(0.66))
 
-                if entryText.isEmpty {
-                    Text("Start writing...")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Color.storyGray.opacity(0.46))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 16)
-                        .allowsHitTesting(false)
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $entryText)
+                            .font(.system(size: 16, weight: .regular))
+                            .lineSpacing(7)
+                            .foregroundStyle(Color.storyInk.opacity(0.78))
+                            .scrollContentBackground(.hidden)
+                            .scrollIndicators(.visible, axes: .vertical)
+                            .background(Color.clear)
+                            .focused($isEditorFocused)
+                            .padding(.horizontal, -5)
+                            .padding(.vertical, -7)
+                            .padding(.bottom, 28)
+                            .onTapGesture {
+                                isEditorFocused = true
+                            }
+
+                        if entryText.isEmpty {
+                            Text("Today was...")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundStyle(Color.storyGray.opacity(0.46))
+                                .padding(.vertical, 1)
+                                .allowsHitTesting(false)
+                        }
                     }
+                }
+                .padding(.top, 2)
             }
-            .frame(height: 210)
+            .frame(height: 252)
             .overlay(alignment: .bottomTrailing) {
                 Button {
-                    isEditorFocused = false
+                    dismissKeyboard()
                     isShowingExpandedEditor = true
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -2248,39 +2283,24 @@ private struct CreateEntryView: View {
                 .accessibilityLabel("Expand writing box")
                 .padding(8)
             }
-
-            HStack(spacing: 10) {
-                summaryHelperButton(title: "AI Write Help", systemName: "sparkles")
-
-                Spacer(minLength: 8)
-
-                summaryHelperButton(title: "Prompts", systemName: "text.bubble")
-            }
         }
-        .padding(12)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
-    private func summaryHelperButton(title: String, systemName: String) -> some View {
-        Button {
-            isEditorFocused = false
-        } label: {
-            Label(title, systemImage: systemName)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyPurple)
-                .frame(width: 128, height: 34)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.storyPurple.opacity(0.32), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
+    private var journalPaperBackground: some View {
+        Color.clear
+            .overlay {
+                VStack(spacing: 25) {
+                    ForEach(0..<9, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.storyPurple.opacity(0.035))
+                            .frame(height: 1)
+                    }
+                }
+                .padding(.top, 69)
+            }
     }
 
     private var storyDetailsCard: some View {
@@ -2432,7 +2452,7 @@ private struct CreateEntryView: View {
                 Spacer()
 
                 Button {
-                    isEditorFocused = false
+                    dismissKeyboard()
                     isShowingArtStyleGrid = true
                 } label: {
                     Text("View all")
@@ -2447,7 +2467,7 @@ private struct CreateEntryView: View {
                     ForEach(artStyles, id: \.self) { style in
                         Button {
                             selectedArtStyle = style
-                            isEditorFocused = false
+                            dismissKeyboard()
                         } label: {
                             InlineArtStyleOption(
                                 title: style,
@@ -2463,40 +2483,9 @@ private struct CreateEntryView: View {
         }
     }
 
-    private var continueToStoryDetailsButton: some View {
-        Button {
-            isEditorFocused = false
-            navigationPath.append(.storyDetails)
-        } label: {
-            HStack(spacing: 7) {
-                Text("Continue to Story Details")
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(
-                LinearGradient(
-                    colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 2)
-    }
-
     private var generateStoryboardButton: some View {
         Button {
-            isEditorFocused = false
+            dismissKeyboard()
             startStoryboardGeneration()
         } label: {
             HStack(spacing: 7) {
@@ -2770,145 +2759,6 @@ private struct StoryboardPhotoDropDelegate: DropDelegate {
     }
 }
 
-private struct StoryboardLayoutOptionTile: View {
-    let layout: StoryboardLayoutOption
-    let isSelected: Bool
-
-    var body: some View {
-        VStack(spacing: 6) {
-            StoryboardLayoutDiagram(layout: layout)
-                .frame(width: 72, height: 92)
-                .padding(8)
-                .background(
-                    Color.white,
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.68), lineWidth: isSelected ? 2 : 1)
-                )
-                .overlay(alignment: .topTrailing) {
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white, Color.storyPurple)
-                            .padding(4)
-                    }
-                }
-
-            Text(layout.title)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .frame(width: 88)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(layout.title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-private struct StoryboardLayoutDiagram: View {
-    let layout: StoryboardLayoutOption
-
-    var body: some View {
-        VStack(spacing: 4) {
-            switch layout {
-            case .twoRectangles:
-                diagramPanel(number: 1)
-                    .frame(height: 42)
-
-                diagramPanel(number: 2)
-                    .frame(height: 42)
-            case .threePanels:
-                diagramPanel(number: 1)
-                    .frame(height: 46)
-
-                HStack(spacing: 4) {
-                    diagramPanel(number: 2)
-                    diagramPanel(number: 3)
-                }
-                .frame(height: 38)
-            case .threeVerticalPanels:
-                HStack(spacing: 4) {
-                    ForEach(1...3, id: \.self) { number in
-                        diagramPanel(number: number)
-                    }
-                }
-                .frame(height: 88)
-            case .fourSquares:
-                HStack(spacing: 4) {
-                    diagramPanel(number: 1)
-                    diagramPanel(number: 2)
-                }
-                .frame(height: 42)
-
-                HStack(spacing: 4) {
-                    diagramPanel(number: 3)
-                    diagramPanel(number: 4)
-                }
-                .frame(height: 42)
-            case .fourVerticalPanels:
-                HStack(spacing: 4) {
-                    ForEach(1...4, id: \.self) { number in
-                        diagramPanel(number: number)
-                    }
-                }
-                .frame(height: 88)
-            case .fourHorizontalRectangles:
-                ForEach(1...4, id: \.self) { number in
-                    diagramPanel(number: number)
-                        .frame(height: 20)
-                }
-            case .fiveHorizontalPanels:
-                ForEach(1...5, id: \.self) { number in
-                    diagramPanel(number: number)
-                        .frame(height: 14)
-                }
-            case .fiveClassic:
-                HStack(spacing: 4) {
-                    diagramPanel(number: 1)
-                    diagramPanel(number: 2)
-                }
-                .frame(height: 30)
-
-                diagramPanel(number: 3)
-                    .frame(height: 24)
-
-                HStack(spacing: 4) {
-                    diagramPanel(number: 4)
-                    diagramPanel(number: 5)
-                }
-                .frame(height: 26)
-            case .sixSquares:
-                ForEach(0..<3, id: \.self) { row in
-                    HStack(spacing: 4) {
-                        diagramPanel(number: row * 2 + 1)
-                        diagramPanel(number: row * 2 + 2)
-                    }
-                    .frame(height: 26)
-                }
-            }
-        }
-    }
-
-    private func diagramPanel(number: Int) -> some View {
-        Rectangle()
-            .fill(Color.white)
-            .overlay(
-                Rectangle()
-                    .stroke(Color.storyInk.opacity(0.54), lineWidth: 1)
-            )
-            .overlay {
-                Text("\(number)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.76))
-            }
-            .frame(maxWidth: .infinity)
-    }
-}
-
 private struct StoryboardPhotoPanel: View {
     let image: UIImage?
     let placeholderImageName: String
@@ -3065,38 +2915,71 @@ private func inlineArtStyleAssetName(for title: String) -> String {
 }
 
 private func artStylePromptDescription(for title: String) -> String {
-    switch title {
+switch title {
+
     case "Anime":
         return """
-        Japanese anime illustration. Large expressive eyes, clean cel-shaded coloring, smooth gradients, vibrant saturated colors, and dramatic highlights. Dynamic poses and modern TV-anime character design. Soft atmospheric backgrounds with cinematic lighting.
+        Authentic modern anime artwork. Strongly stylized anime characters with large expressive eyes, simplified facial features, clean cel shading, vibrant colors, dramatic lighting, and dynamic poses.
+        NOT photorealistic.
+        Preserve identity but reinterpret all people as anime characters. Do not preserve realistic skin textures, facial proportions, or photographic details.
+        The final result should look like a frame from a high-budget anime series, not a photograph with anime effects applied.
         """
+
     case "Graphic Novel":
         return """
-        Western graphic novel / comic book art. Bold ink outlines, mature cinematic framing, and painterly or flat color fills. Restrained color palette with deep shadows and noir-influenced lighting. Realistic proportions with stylized ink edges and graphic novel panel composition.
+        Premium western graphic novel artwork. Bold ink outlines, dramatic shadows, cinematic composition, painterly rendering, graphic shapes, and highly stylized comic-book storytelling.
+        NOT photorealistic.
+        Characters should look illustrated and artist-rendered rather than realistic. Use strong visual stylization, dramatic contrast, and graphic novel energy.
+        The final result should look like published graphic novel artwork, not a painted photograph.
         """
+
     case "Pixel Art":
         return """
-        Retro 16-bit pixel art. Visible blocky pixels with crisp pixel edges and no anti-aliasing blur. Limited color palette with dithering for shading. Nostalgic video-game sprite aesthetic — every shape should read as deliberately pixelated, not smooth digital illustration.
+        Authentic 16-bit pixel art video game artwork. Large visible pixels, pixel-perfect edges, limited color palette, sprite-like characters, retro RPG environments, and deliberate pixel construction throughout.
+        ABSOLUTELY NO smooth illustration or photorealistic rendering.
+        Every object, character, and background element must be visibly pixelated.
+        The final image should look like a premium SNES-era RPG screenshot, not a normal illustration with a pixel filter.
         """
+
     case "Manga":
         return """
-        Japanese manga illustration. Fine pen line work, screentone shading patterns, cross-hatching, and speed lines. High-contrast black-and-white or limited-tone coloring. Expressive eyes, dramatic panel angles, and classic manga visual storytelling conventions.
+        Authentic Japanese manga artwork. Highly stylized manga characters with expressive eyes, exaggerated expressions, bold black inks, screentones, cross-hatching, speed lines, dramatic camera angles, and dynamic manga storytelling.
+        NOT photorealistic.
+        Preserve identity but transform all people into manga characters. Simplify facial features and strongly stylize proportions.
+        The final result should look like pages from a published manga series, not a realistic black-and-white photograph.
         """
+
     case "Cozy Storybook":
         return """
-        Children's picture-book illustration. Soft watercolor and gouache textures, warm gentle colors, rounded friendly shapes, and a whimsical hand-painted feel. Dreamy pastoral mood with gentle diffused lighting — cozy, inviting, and storybook-sweet.
+        Whimsical storybook illustration. Hand-painted watercolor and gouache textures, warm colors, soft edges, charming character designs, dreamy environments, and magical storybook atmosphere.
+        NOT photorealistic.
+        Characters should feel illustrated, charming, and slightly idealized rather than realistic.
+        The final result should look like artwork from a beautifully illustrated children's storybook.
         """
+
     case "Pop Art":
         return """
-        Pop art comic style inspired by Warhol and Lichtenstein. Bold flat primary colors, thick black outlines, high contrast, and visible Ben-Day halftone dots for shading. Graphic poster-like composition with punchy, saturated color blocks — never soft or painterly.
+        Bold pop art comic artwork inspired by classic comic books and gallery pop art. Thick black outlines, flat saturated colors, strong graphic shapes, Ben-Day dots, poster-like composition, and exaggerated visual impact.
+        NOT photorealistic.
+        Simplify forms into graphic comic-book shapes and bold color blocks.
+        The final result should look like authentic pop art illustration, not a photo with color effects.
         """
+
     case "Colored Journal":
         return """
-        Hand-drawn personal journal / sketchbook illustration. Colored pencil, marker, and pen textures with informal linework and doodle-like charm. Pastel and marker colors on an off-white paper feel. Intimate diary aesthetic — imperfect, personal, and warmly handmade.
+        Hand-drawn illustrated journal artwork. Loose sketch lines, colored pencil textures, marker rendering, handwritten sketchbook energy, personal diary charm, and expressive imperfect drawing.
+        NOT photorealistic.
+        Everything should feel hand-drawn by an artist in a personal journal. Visible sketch lines, artistic imperfections, and traditional drawing textures are encouraged.
+        The final result should look like illustrated journal pages, not realistic digital artwork.
         """
+
     default:
-        return "Illustrated art in the \(title) style. Fully commit to this aesthetic across every panel — do not default to generic anime or photorealism."
-    }
+        return """
+        Fully commit to the selected art style.
+        Preserve identity but not realism.
+        Reinterpret everything as stylized artwork rather than photography.
+        """
+    }   
 }
 
 private func artStyleAssetName(for title: String) -> String {
