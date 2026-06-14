@@ -38,8 +38,8 @@ struct ContentView: View {
                 selectedPage: $selectedPage,
                 generatedStoryboards: $generatedStoryboards
             )
-            .transition(.move(edge: .trailing))
-            .zIndex(1)
+            .transition(.identity)
+            .zIndex(0)
         case .journal:
             JournalView(selectedPage: $selectedPage)
                 .transition(.identity)
@@ -256,7 +256,7 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         case .fiveHorizontalPanels:
             return "5 Horiz."
         case .fiveClassic:
-            return "5 Classic"
+            return "5 Panels"
         case .sixSquares:
             return "6 Squares"
         }
@@ -296,7 +296,7 @@ private enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
         case .fiveHorizontalPanels:
             return "five full-width horizontal rectangle panels stacked evenly from top to bottom."
         case .fiveClassic:
-            return "row 1 has two equal panels side by side; row 2 has one wide full-width panel; row 3 has two equal panels side by side."
+            return "row 1 has two equal 50-50 rectangle panels side by side; row 2 has one centered wide horizontal rectangle panel; row 3 has two equal 50-50 rectangle panels side by side."
         case .sixSquares:
             return "six equal square panels in a clean 2-column by 3-row grid."
         }
@@ -446,7 +446,6 @@ private struct GeneratedStoryboardMetadata: Codable {
 
 private enum StoryboardGenerationError: LocalizedError {
     case missingAPIKey
-    case missingImages
     case invalidRequest
     case invalidResponse
     case noGeneratedImage
@@ -456,8 +455,6 @@ private enum StoryboardGenerationError: LocalizedError {
         switch self {
         case .missingAPIKey:
             return "Add an OpenAI API key before generating a storyboard."
-        case .missingImages:
-            return "Add at least one photo before generating a storyboard."
         case .invalidRequest:
             return "The storyboard request could not be prepared."
         case .invalidResponse:
@@ -471,7 +468,8 @@ private enum StoryboardGenerationError: LocalizedError {
 }
 
 private struct OpenAIImageGenerationService {
-    private let endpoint = URL(string: "https://api.openai.com/v1/images/edits")!
+    private let editsEndpoint = URL(string: "https://api.openai.com/v1/images/edits")!
+    private let generationsEndpoint = URL(string: "https://api.openai.com/v1/images/generations")!
     private let requestTimeout: TimeInterval = 600
 
     func generateStoryboard(
@@ -485,12 +483,27 @@ private struct OpenAIImageGenerationService {
             throw StoryboardGenerationError.missingAPIKey
         }
 
-        guard !images.isEmpty else {
-            throw StoryboardGenerationError.missingImages
+        let prompt = makePrompt(text: text, artStyle: artStyle, layout: layout, imageCount: images.count)
+        let data = try await images.isEmpty
+            ? generateStoryboardWithoutReferences(apiKey: apiKey, prompt: prompt)
+            : generateStoryboardWithReferences(apiKey: apiKey, prompt: prompt, images: images)
+
+        guard
+            let imageData = Data(base64Encoded: data),
+            let image = UIImage(data: imageData)
+        else {
+            throw StoryboardGenerationError.noGeneratedImage
         }
 
-        let prompt = makePrompt(text: text, artStyle: artStyle, layout: layout, imageCount: images.count)
-        var request = URLRequest(url: endpoint)
+        return image
+    }
+
+    private func generateStoryboardWithReferences(
+        apiKey: String,
+        prompt: String,
+        images: [UIImage]
+    ) async throws -> String {
+        var request = URLRequest(url: editsEndpoint)
         let boundary = "Boundary-\(UUID().uuidString)"
         request.httpMethod = "POST"
         request.timeoutInterval = requestTimeout
@@ -503,7 +516,7 @@ private struct OpenAIImageGenerationService {
         body.appendMultipartField(name: "size", value: "1024x1536", boundary: boundary)
         body.appendMultipartField(name: "quality", value: "medium", boundary: boundary)
 
-        for (index, image) in images.prefix(6).enumerated() {
+        for (index, image) in images.prefix(5).enumerated() {
             guard let imageData = image.storytopiaPreparedJPEGData(maxDimension: 1536, compressionQuality: 0.76) else {
                 throw StoryboardGenerationError.invalidRequest
             }
@@ -520,6 +533,32 @@ private struct OpenAIImageGenerationService {
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
+        return try await performImageRequest(request)
+    }
+
+    private func generateStoryboardWithoutReferences(
+        apiKey: String,
+        prompt: String
+    ) async throws -> String {
+        var request = URLRequest(url: generationsEndpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = [
+            "model": OpenAITestConfig.imageModel,
+            "prompt": prompt,
+            "size": "1024x1536",
+            "quality": "medium"
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        return try await performImageRequest(request)
+    }
+
+    private func performImageRequest(_ request: URLRequest) async throws -> String {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = requestTimeout
         configuration.timeoutIntervalForResource = requestTimeout
@@ -539,15 +578,11 @@ private struct OpenAIImageGenerationService {
         }
 
         let decoded = try JSONDecoder().decode(OpenAIImageResponse.self, from: data)
-        guard
-            let base64Image = decoded.data.first?.b64JSON,
-            let imageData = Data(base64Encoded: base64Image),
-            let image = UIImage(data: imageData)
-        else {
+        guard let base64Image = decoded.data.first?.b64JSON else {
             throw StoryboardGenerationError.noGeneratedImage
         }
 
-        return image
+        return base64Image
     }
 
     private func makePrompt(
@@ -557,11 +592,45 @@ private struct OpenAIImageGenerationService {
         imageCount: Int
     ) -> String {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let storyText = trimmedText.isEmpty ? "No written story was provided. Infer a warm, visually coherent story about the moment from the uploaded photos." : trimmedText
-        let referencePhotoCount = min(imageCount, 6)
+        let hasReferencePhotos = imageCount > 0
+        let storyText: String
+
+        if trimmedText.isEmpty {
+            storyText = hasReferencePhotos
+                ? "No written story was provided. Infer a warm, visually coherent story about the moment from the uploaded photos."
+                : "No written story or reference photos were provided. Invent a warm, visually coherent everyday moment with a clear beginning, middle, and end."
+        } else {
+            storyText = trimmedText
+        }
+
+        let referencePhotoCount = min(imageCount, 5)
+        let creationSource = hasReferencePhotos
+            ? "using the user's \(referencePhotoCount) uploaded reference photo(s) and optional written story"
+            : "from the user's written story"
+        let identityInstruction = hasReferencePhotos
+            ? "Preserve the identity of people, pets, locations, clothing, and important objects from the reference photos, but DO NOT preserve photographic realism."
+            : "Create appealing, consistent characters, locations, clothing, and important objects that fit the user's story."
+        let referencePhotoInstructions = hasReferencePhotos
+            ? """
+            REFERENCE PHOTOS:
+            - Use ALL uploaded reference photos.
+            - Do not ignore uploaded photos.
+            - Use them as references for identity, pets, clothing, objects, locations, mood, and story details.
+            - Do NOT map photo 1 to panel 1, photo 2 to panel 2, and so on.
+            - You may combine details from multiple photos when it improves storytelling.
+            - Keep characters and important visual elements recognizable and consistent across panels.
+            - Reimagine every scene in the selected art style rather than recreating the original photographs.
+            """
+            : """
+            REFERENCE PHOTOS:
+            - No reference photos were provided.
+            - Do not imply that a photo reference exists.
+            - Build the storyboard from the written story, selected art style, and a coherent invented scene when details are missing.
+            - Keep characters and important visual elements consistent across panels.
+            """
 
         return """
-        Create a vertical illustrated comic/storyboard about the moment using the user's \(referencePhotoCount) uploaded reference photo(s) and optional written story.
+        Create a vertical illustrated comic/storyboard about the moment \(creationSource).
 
         USER STORY:
         \(storyText)
@@ -573,13 +642,13 @@ private struct OpenAIImageGenerationService {
         \(artStylePromptDescription(for: artStyle))
 
         The final image must fully commit to the selected art style.
-        Preserve the identity of people, pets, locations, clothing, and important objects from the reference photos, but DO NOT preserve photographic realism.
+        \(identityInstruction)
         Strongly reinterpret everything in the selected style.
         The result should look like authentic \(artStyle) artwork, not a photograph with an art filter applied.
         When there is a conflict between realism and the selected art style, always prioritize the selected art style.
 
         FORMAT:
-        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible gutters or borders.
+        - Output ONE single tall image divided into exactly 5 distinct comic panels with visible gutters or borders.
         - Panel layout (top to bottom): \(layout.promptDescription)
         - Create a coherent beginning, middle, and end.
         - Show a progression of events rather than repeating the same scene.
@@ -587,19 +656,12 @@ private struct OpenAIImageGenerationService {
         - Never create a photo collage, contact sheet, photomontage, or collection of separate photos.
         - Fully redraw every scene as original illustrated artwork.
 
-        REFERENCE PHOTOS:
-        - Use ALL uploaded reference photos.
-        - Do not ignore uploaded photos.
-        - Use them as references for identity, pets, clothing, objects, locations, mood, and story details.
-        - Do NOT map photo 1 to panel 1, photo 2 to panel 2, and so on.
-        - You may combine details from multiple photos when it improves storytelling.
-        - Keep characters and important visual elements recognizable and consistent across panels.
-        - Reimagine every scene in the selected art style rather than recreating the original photographs.
+        \(referencePhotoInstructions)
 
         TEXT:
-        - Minimal text.
-        - Minimal speech bubbles.
-        - Minimal captions.
+        - Include readable text in every panel.
+        - Use concise captions and/or speech bubbles that support the story.
+        - Keep text short enough to fit cleanly inside each panel.
         - Prioritize visual storytelling.
         """
     }
@@ -1585,8 +1647,9 @@ private struct CreateEntryView: View {
     @Binding var generatedStoryboards: [GeneratedStoryboard]
 
     @State private var selectedArtStyle = "Anime"
-    @State private var previewLayout = StoryboardLayoutOption.fourSquares
-    @State private var storyboardPhotos: [UIImage?] = Array(repeating: nil, count: 6)
+    private let previewLayout = StoryboardLayoutOption.fiveClassic
+
+    @State private var storyboardPhotos: [UIImage?] = Array(repeating: nil, count: 5)
     @State private var selectedPhotoSlot: Int?
     @State private var isShowingPhotoSourceDialog = false
     @State private var isShowingPhotoLibrary = false
@@ -1612,25 +1675,26 @@ private struct CreateEntryView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.homePageBackground
-                .ignoresSafeArea()
-                .onTapGesture {
-                    dismissKeyboard()
-                }
+        NavigationStack {
+            ZStack {
+                Color.homePageBackground
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
 
-            layoutPage
+                layoutPage
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+            .navigationDestination(isPresented: $isShowingExpandedEditor) {
+                ExpandedEntryEditor(entryText: $entryText)
+            }
         }
         .sheet(isPresented: $isShowingCamera) {
             CameraPhotoPicker { image in
                 setStoryboardPhoto(image)
             }
             .ignoresSafeArea()
-        }
-        .sheet(isPresented: $isShowingExpandedEditor) {
-            ExpandedEntryEditor(entryText: $entryText)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingArtStyleGrid) {
             ArtStyleGridSheet(
@@ -1643,7 +1707,7 @@ private struct CreateEntryView: View {
         .photosPicker(
             isPresented: $isShowingPhotoLibrary,
             selection: $selectedPhotoPickerItems,
-            maxSelectionCount: nil,
+            maxSelectionCount: max(1, storyboardPhotos.filter { $0 == nil }.count),
             selectionBehavior: .ordered,
             matching: .images
         )
@@ -1723,12 +1787,7 @@ private struct CreateEntryView: View {
         }
 
         let photos = storyboardPhotos.compactMap { $0 }
-        guard !photos.isEmpty else {
-            generationErrorMessage = StoryboardGenerationError.missingImages.localizedDescription
-            return
-        }
-
-        let layout = StoryboardLayoutOption.random(for: photos.count)
+        let layout = StoryboardLayoutOption.fiveClassic
         isGeneratingStoryboard = true
 
         Task {
@@ -1764,19 +1823,23 @@ private struct CreateEntryView: View {
     }
 
     private var layoutPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            pageHeader(title: "New Entry")
+        ZStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                pageHeader(title: "New Entry")
 
-            ScrollView(showsIndicators: false) {
-                createEntryContent
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 24)
+                ScrollView(showsIndicators: false) {
+                    createEntryContent
+                        .padding(.horizontal, 16)
+                        .padding(.top, 14)
+                        .padding(.bottom, 108)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .background(pageTapBackground)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(pageTapBackground)
+            .background(Color.homePageBackground)
+
+            BottomNavigationBar(selectedPage: $selectedPage)
         }
-        .background(Color.homePageBackground)
     }
 
     private var pageTapBackground: some View {
@@ -1789,20 +1852,6 @@ private struct CreateEntryView: View {
 
     private func pageHeader(title: String) -> some View {
         HStack(alignment: .center) {
-            Button {
-                dismissKeyboard()
-                withAnimation(.snappy(duration: 0.32)) {
-                    selectedPage = .home
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, -10)
-
             Text(title)
                 .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
@@ -1851,24 +1900,23 @@ private struct CreateEntryView: View {
     }
 
     private var photoStripSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 23, weight: .light))
+                    .foregroundStyle(Color.storyInk.opacity(0.86))
+                    .rotationEffect(.degrees(-18))
+                    .frame(width: 24, height: 24)
+
                 Text("Reference Photos")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
                     .foregroundStyle(Color.storyInk)
 
                 Spacer(minLength: 10)
-
-                Text("Long press to reorder")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.homeMutedText.opacity(storyboardPhotos.compactMap { $0 }.count > 1 ? 1 : 0.72))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
             }
-            .padding(.horizontal, 2)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                HStack(spacing: 9) {
                     ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
                         StoryboardPhotoStripThumbnail(image: image) {
                             removeStoryboardPhoto(at: index)
@@ -1887,20 +1935,31 @@ private struct CreateEntryView: View {
                             )
                     }
 
-                    Button {
-                        dismissKeyboard()
-                        selectedPhotoSlot = nextAvailablePhotoSlot
-                        isShowingPhotoSourceDialog = true
-                    } label: {
-                        StoryboardPhotoStripAddButton()
+                    if nextAvailablePhotoSlot != nil {
+                        Button {
+                            dismissKeyboard()
+                            selectedPhotoSlot = nextAvailablePhotoSlot
+                            isShowingPhotoSourceDialog = true
+                        } label: {
+                            StoryboardPhotoStripAddButton()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add reference photos")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Add reference photos")
                 }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 2)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -1951,7 +2010,7 @@ private struct CreateEntryView: View {
                             .foregroundStyle(Color.storyGold)
                     }
 
-                    Text("Layout changes each time you generate")
+                    Text("Every storyboard uses 5 panels with text")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.homeMutedText)
                 }
@@ -1959,8 +2018,7 @@ private struct CreateEntryView: View {
                 Spacer(minLength: 8)
 
                 HStack(spacing: 5) {
-                    let photoCount = storyboardPhotos.compactMap { $0 }.count
-                    Text("\(previewLayout.title) · \(storyboardPanelCount(for: photoCount)) panels")
+                    Text("\(previewLayout.title) · 5 panels")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.7))
 
@@ -2115,7 +2173,7 @@ private struct CreateEntryView: View {
     }
 
     private var nextAvailablePhotoSlot: Int? {
-        storyboardPhotos.firstIndex(where: { $0 == nil }) ?? storyboardPhotos.indices.last
+        storyboardPhotos.firstIndex(where: { $0 == nil })
     }
 
     private func setStoryboardPhoto(_ image: UIImage) {
@@ -2190,7 +2248,7 @@ private struct CreateEntryView: View {
     }
 
     private var editorCard: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "calendar")
@@ -2228,13 +2286,12 @@ private struct CreateEntryView: View {
             .padding(.horizontal, 2)
 
             ZStack(alignment: .topLeading) {
-                journalPaperBackground
+                NotebookPaperBackground(showsPaperWash: false)
 
                 VStack(alignment: .leading, spacing: 14) {
                     Text("What's on your mind?")
-                        .font(.system(size: 22, weight: .regular, design: .serif))
-                        .italic()
-                        .foregroundStyle(Color.storyInk.opacity(0.66))
+                        .font(.system(size: 20, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
 
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $entryText)
@@ -2247,6 +2304,7 @@ private struct CreateEntryView: View {
                             .focused($isEditorFocused)
                             .padding(.horizontal, -5)
                             .padding(.vertical, -7)
+                            .padding(.top, 7)
                             .padding(.bottom, 28)
                             .onTapGesture {
                                 isEditorFocused = true
@@ -2256,21 +2314,39 @@ private struct CreateEntryView: View {
                             Text("Today was...")
                                 .font(.system(size: 16, weight: .regular))
                                 .foregroundStyle(Color.storyGray.opacity(0.46))
-                                .padding(.vertical, 1)
+                                .padding(.top, 15)
                                 .allowsHitTesting(false)
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.top, 2)
+                .padding(.leading, 54)
+                .padding(.trailing, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 18)
             }
-            .frame(height: 252)
+            .frame(height: 504)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                HStack {
+                    Rectangle()
+                        .fill(Color.storyBorder.opacity(0.72))
+                        .frame(width: 1)
+
+                    Spacer()
+
+                    Rectangle()
+                        .fill(Color.storyBorder.opacity(0.72))
+                        .frame(width: 1)
+                }
+            )
             .overlay(alignment: .bottomTrailing) {
                 Button {
                     dismissKeyboard()
                     isShowingExpandedEditor = true
                 } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 13, weight: .bold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Color.storyPurple)
                         .frame(width: 34, height: 34)
                         .background(Color.storyPurple.opacity(0.1), in: Circle())
@@ -2280,27 +2356,14 @@ private struct CreateEntryView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Expand writing box")
+                .accessibilityLabel("Open writing page")
                 .padding(8)
             }
+            .padding(.horizontal, -28)
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 2)
-    }
-
-    private var journalPaperBackground: some View {
-        Color.clear
-            .overlay {
-                VStack(spacing: 25) {
-                    ForEach(0..<9, id: \.self) { _ in
-                        Rectangle()
-                            .fill(Color.storyPurple.opacity(0.035))
-                            .frame(height: 1)
-                    }
-                }
-                .padding(.top, 69)
-            }
     }
 
     private var storyDetailsCard: some View {
@@ -2481,6 +2544,15 @@ private struct CreateEntryView: View {
                 .padding(.vertical, 1)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
     }
 
     private var generateStoryboardButton: some View {
@@ -2523,61 +2595,148 @@ private struct CreateEntryView: View {
 private struct ExpandedEntryEditor: View {
     @Binding var entryText: String
 
-    @Environment(\.dismiss) private var dismiss
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                Text("Write about this storyboard")
-                    .font(.system(size: 22, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
+        notebookPage
+            .ignoresSafeArea()
+            .navigationTitle("Write about this storyboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .onAppear {
+                isFocused = true
+            }
+    }
 
+    private var notebookPage: some View {
+        ZStack(alignment: .topLeading) {
+            NotebookPaperBackground()
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Write about this storyboard")
+                            .font(.system(size: 20, weight: .bold, design: .serif))
+                            .foregroundStyle(Color.storyInk)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(Date().formatted(date: .abbreviated, time: .omitted))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.homeMutedText.opacity(0.78))
+                    }
+
+                    Spacer(minLength: 12)
+                }
+                .padding(.leading, 54)
+
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $entryText)
+                        .font(.system(size: 16, weight: .regular))
+                        .lineSpacing(7)
+                        .foregroundStyle(Color.storyInk.opacity(0.78))
+                        .scrollContentBackground(.hidden)
+                        .scrollIndicators(.visible, axes: .vertical)
+                        .scrollDismissesKeyboard(.interactively)
+                        .background(Color.clear)
+                        .tint(Color.storyPurple)
+                        .focused($isFocused)
+                        .padding(.horizontal, -5)
+                        .padding(.vertical, -7)
+                        .padding(.top, 7)
+
+                    if entryText.isEmpty {
+                        Text("Start writing...")
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(Color.storyGray.opacity(0.46))
+                            .padding(.top, 15)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .padding(.leading, 54)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 26)
+            .padding(.bottom, 22)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.72), lineWidth: 1)
+        )
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
 
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Done")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                        .frame(height: 38)
+                Button("Done") {
+                    isFocused = false
                 }
+                .font(.system(size: 14, weight: .bold))
             }
-
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $entryText)
-                    .font(.system(size: 16, weight: .regular))
-                    .lineSpacing(5)
-                    .foregroundStyle(Color.storyInk.opacity(0.86))
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .focused($isFocused)
-                    .padding(.horizontal, -5)
-                    .padding(.vertical, -7)
-
-                if entryText.isEmpty {
-                    Text("Start writing...")
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(Color.storyGray.opacity(0.46))
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-            )
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 22)
-        .padding(.bottom, 18)
-        .background(Color.homePageBackground)
-        .onAppear {
-            isFocused = true
+    }
+}
+
+private struct NotebookPaperBackground: View {
+    private let paperColor = Color.homePageBackground
+    var showsPaperWash = true
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                paperColor
+
+                if showsPaperWash {
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.34),
+                            .clear,
+                            Color.storyGold.opacity(0.06)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+
+                ruledLines(in: proxy.size)
+
+                Rectangle()
+                    .fill(Color.storyRose.opacity(0.52))
+                    .frame(width: 1.2)
+                    .padding(.leading, 54)
+
+                pageHoles
+                    .padding(.leading, 20)
+                    .padding(.top, 92)
+            }
+        }
+    }
+
+    private func ruledLines(in size: CGSize) -> some View {
+        Path { path in
+            var y: CGFloat = 135
+            while y < size.height - 18 {
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                y += 35
+            }
+        }
+        .stroke(Color(red: 0.45, green: 0.58, blue: 0.78).opacity(0.24), lineWidth: 1)
+    }
+
+    private var pageHoles: some View {
+        VStack(spacing: 96) {
+            ForEach(0..<5, id: \.self) { _ in
+                Circle()
+                    .fill(Color.white.opacity(0.82))
+                    .frame(width: 13, height: 13)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.storyBorder.opacity(0.32), lineWidth: 1)
+                    )
+            }
         }
     }
 }
@@ -2679,16 +2838,22 @@ private struct StoryboardPhotoStripThumbnail: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white)
+                .frame(width: 56, height: 56)
+                .shadow(color: .black.opacity(0.13), radius: 5, x: 0, y: 3)
+
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 82, height: 82)
+                .frame(width: 48, height: 48)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .stroke(Color.storyInk.opacity(0.72), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(Color.storyInk.opacity(0.58), lineWidth: 1)
                 )
+                .padding(4)
 
             Button {
                 removeAction()
@@ -2696,15 +2861,14 @@ private struct StoryboardPhotoStripThumbnail: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 18, height: 18)
+                    .frame(width: 17, height: 17)
                     .background(Color.black.opacity(0.58), in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(3)
+            .padding(-4)
             .accessibilityLabel("Remove photo")
         }
-        .frame(width: 82, height: 82)
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        .frame(width: 56, height: 56)
     }
 }
 
@@ -2712,14 +2876,14 @@ private struct StoryboardPhotoStripAddButton: View {
     var body: some View {
         VStack {
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.storyPurple)
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(Color.storyInk.opacity(0.82))
         }
-        .frame(width: 82, height: 82)
-        .background(Color.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .frame(width: 56, height: 56)
+        .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .stroke(Color.storyPurple.opacity(0.32), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.storyPurple.opacity(0.34), style: StrokeStyle(lineWidth: 1.1, dash: [4, 3]))
         )
         .accessibilityLabel("Add photos")
     }
@@ -2868,7 +3032,7 @@ private struct InlineArtStyleOption: View {
             Image(inlineArtStyleAssetName(for: title))
                 .resizable()
                 .scaledToFill()
-                .frame(width: 92, height: 92)
+                .frame(width: 72, height: 72)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -2888,7 +3052,7 @@ private struct InlineArtStyleOption: View {
                 .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.82))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                .frame(width: 96)
+                .frame(width: 76)
         }
     }
 }
@@ -3082,15 +3246,6 @@ private struct BottomNavigationBar: View {
                 selectedColor: .homeAccent
             ) {
                 selectedPage = .home
-            }
-            Spacer()
-            NavItem(
-                title: "Explore",
-                systemName: selectedPage == .explore ? "safari.fill" : "safari",
-                isSelected: selectedPage == .explore,
-                selectedColor: .homeAccent
-            ) {
-                selectedPage = .explore
             }
             Spacer()
             CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
