@@ -23,7 +23,6 @@ struct CreateEntryView: View {
     @State private var generationErrorMessage: String?
     @State private var isShowingExpandedEditor = false
     @State private var isShowingArtStyleGrid = false
-    @State private var isShowingClearTextConfirmation = false
     @State private var storyTitle = ""
     @State private var storyLocation = ""
     @State private var storyDate = Date()
@@ -31,9 +30,11 @@ struct CreateEntryView: View {
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
+    @FocusState private var isTitleFocused: Bool
     @FocusState private var isEditorFocused: Bool
 
     private func dismissKeyboard() {
+        isTitleFocused = false
         isEditorFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
@@ -117,17 +118,6 @@ struct CreateEntryView: View {
         } message: {
             Text(generationErrorMessage ?? "")
         }
-        .alert("Clear writing?", isPresented: $isShowingClearTextConfirmation) {
-            Button("Clear", role: .destructive) {
-                entryText = ""
-                dismissKeyboard()
-            }
-
-            Button("Cancel", role: .cancel) {
-            }
-        } message: {
-            Text("Are you sure? This will remove everything you've written in this entry.")
-        }
         .onChange(of: selectedPhotoPickerItems) { items in
             guard !items.isEmpty else {
                 return
@@ -187,23 +177,19 @@ struct CreateEntryView: View {
     }
 
     private var layoutPage: some View {
-        ZStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                pageHeader(title: "New Entry")
+        VStack(alignment: .leading, spacing: 0) {
+            pageHeader
 
-                ScrollView(showsIndicators: false) {
-                    createEntryContent
-                        .padding(.horizontal, 16)
-                        .padding(.top, 14)
-                        .padding(.bottom, 108)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .background(pageTapBackground)
+            ScrollView(showsIndicators: false) {
+                createEntryContent
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
             }
-            .background(Color.homePageBackground)
-
-            BottomNavigationBar(selectedPage: $selectedPage)
+            .scrollDismissesKeyboard(.interactively)
+            .background(pageTapBackground)
         }
+        .background(Color.homePageBackground)
     }
 
     private var pageTapBackground: some View {
@@ -214,11 +200,20 @@ struct CreateEntryView: View {
             }
     }
 
-    private func pageHeader(title: String) -> some View {
+    private var pageHeader: some View {
         HStack(alignment: .center) {
-            Text(title)
-                .font(.system(size: 24, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.storyPurple.opacity(0.72))
+
+                Text(storyDate.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 17, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .layoutPriority(1)
 
             Spacer()
 
@@ -613,49 +608,24 @@ struct CreateEntryView: View {
 
     private var editorCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.storyPurple.opacity(0.58))
-
-                    Text(storyDate.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.homeMutedText)
-
-                    Circle()
-                        .fill(Color.homeMutedText.opacity(0.38))
-                        .frame(width: 3, height: 3)
-
-                    Text("New entry")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.homeMutedText)
-                }
-
-                Spacer(minLength: 12)
-
-                Button {
-                    dismissKeyboard()
-                    isShowingClearTextConfirmation = true
-                } label: {
-                    Text("Edit")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(entryText.isEmpty ? Color.storyGray.opacity(0.42) : Color.storyPurple)
-                        .frame(height: 32)
-                }
-                .buttonStyle(.plain)
-                .disabled(entryText.isEmpty)
-                .accessibilityLabel("Clear writing")
-            }
-            .padding(.horizontal, 2)
-
             ZStack(alignment: .topLeading) {
-                NotebookPaperBackground(showsPaperWash: false)
+                NotebookPaperBackground(showsPaperWash: false, firstRuledLineY: 56)
 
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("This is the title of your story")
-                        .font(.system(size: 20, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
+                    TextField(
+                        "",
+                        text: $storyTitle,
+                        prompt: Text("This is the title of your story")
+                            .foregroundColor(Color.storyGray.opacity(0.46))
+                    )
+                    .font(.system(size: 20, weight: .bold, design: .serif))
+                    .foregroundColor(storyTitle.isEmpty ? Color.storyGray.opacity(0.46) : Color.storyInk)
+                    .focused($isTitleFocused)
+                    .textFieldStyle(.plain)
+                    .submitLabel(.next)
+                    .onSubmit {
+                        isEditorFocused = true
+                    }
 
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $entryText)
@@ -1046,6 +1016,7 @@ struct ExpandedEntryEditor: View {
 struct NotebookPaperBackground: View {
     private let paperColor = Color.homePageBackground
     var showsPaperWash = true
+    var firstRuledLineY: CGFloat = 135
 
     var body: some View {
         GeometryReader { proxy in
@@ -1080,7 +1051,7 @@ struct NotebookPaperBackground: View {
 
     private func ruledLines(in size: CGSize) -> some View {
         Path { path in
-            var y: CGFloat = 135
+            var y = firstRuledLineY
             while y < size.height - 18 {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
