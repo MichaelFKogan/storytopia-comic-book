@@ -619,7 +619,7 @@ struct CreateEntryView: View {
                             .foregroundColor(Color.storyGray.opacity(0.46))
                     )
                     .font(.system(size: 20, weight: .bold, design: .serif))
-                    .foregroundColor(storyTitle.isEmpty ? Color.storyGray.opacity(0.46) : Color.storyInk)
+                    .foregroundStyle(Color.black)
                     .focused($isTitleFocused)
                     .textFieldStyle(.plain)
                     .submitLabel(.next)
@@ -708,16 +708,6 @@ struct CreateEntryView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
-
-            storyTextFieldRow(
-                icon: "pencil",
-                title: "Title",
-                placeholder: "Give your story a title",
-                text: $storyTitle
-            )
-
-            Divider()
-                .padding(.leading, 44)
 
             storyTextFieldRow(
                 icon: "location",
