@@ -1019,7 +1019,7 @@ private struct JournalView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("Journal")
+            Text("Chapters")
                 .font(.system(size: 30, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
@@ -1891,7 +1891,7 @@ private struct CreateEntryView: View {
         VStack(alignment: .leading, spacing: 14) {
             editorCard
             photoStripSection
-            artStylePickerSection
+            // artStylePickerSection
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
@@ -2289,7 +2289,7 @@ private struct CreateEntryView: View {
                 NotebookPaperBackground(showsPaperWash: false)
 
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("What's on your mind?")
+                    Text("This is the title of your story")
                         .font(.system(size: 20, weight: .bold, design: .serif))
                         .foregroundStyle(Color.storyInk)
 
@@ -2836,24 +2836,34 @@ private struct StoryboardPhotoStripThumbnail: View {
     let image: UIImage
     let removeAction: () -> Void
 
+    private let size: CGFloat = 64
+    private let bottomPadding: CGFloat = 16
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(Color.white)
-                .frame(width: 56, height: 56)
+                .frame(width: size, height: size + bottomPadding)
                 .shadow(color: .black.opacity(0.13), radius: 5, x: 0, y: 3)
 
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .stroke(Color.storyInk.opacity(0.58), lineWidth: 1)
-                )
-                .padding(4)
+            VStack(spacing: 0) {
+
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size - 10, height: size - 10)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Color.storyInk.opacity(0.45), lineWidth: 0.8)
+                    )
+                    .padding(.top, 5)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: size, height: size + bottomPadding)
 
             Button {
                 removeAction()
@@ -2865,10 +2875,9 @@ private struct StoryboardPhotoStripThumbnail: View {
                     .background(Color.black.opacity(0.58), in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(-4)
-            .accessibilityLabel("Remove photo")
+            .padding(3)
         }
-        .frame(width: 56, height: 56)
+        .frame(width: size, height: size + bottomPadding)
     }
 }
 
@@ -3255,7 +3264,7 @@ private struct BottomNavigationBar: View {
             }
             Spacer()
             NavItem(
-                title: "Journal",
+                title: "Chapters",
                 systemName: selectedPage == .journal ? "book.closed.fill" : "book.closed",
                 isSelected: selectedPage == .journal,
                 selectedColor: .homeAccent
