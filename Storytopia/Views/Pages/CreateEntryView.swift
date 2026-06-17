@@ -31,11 +31,10 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @FocusState private var isTitleFocused: Bool
-    @FocusState private var isEditorFocused: Bool
+    @State private var editorFocusRequestID = 0
 
     private func dismissKeyboard() {
         isTitleFocused = false
-        isEditorFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
@@ -52,7 +51,7 @@ struct CreateEntryView: View {
                     .toolbar(.hidden, for: .navigationBar)
             }
             .navigationDestination(isPresented: $isShowingExpandedEditor) {
-                ExpandedEntryEditor(entryText: $entryText)
+                ExpandedEntryEditor(entryText: $entryText, storyTitle: $storyTitle)
             }
         }
         .sheet(isPresented: $isShowingCamera) {
@@ -202,18 +201,10 @@ struct CreateEntryView: View {
 
     private var pageHeader: some View {
         HStack(alignment: .center) {
-            HStack(spacing: 8) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.storyPurple.opacity(0.72))
-
-                Text(storyDate.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 17, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .layoutPriority(1)
+            Text("New Entry")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundColor(Color.storyGray.opacity(0.46))
+                .layoutPriority(1)
 
             Spacer()
 
@@ -609,78 +600,44 @@ struct CreateEntryView: View {
     private var editorCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
-                NotebookPaperBackground(showsPaperWash: false, firstRuledLineY: 56)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    TextField(
-                        "",
-                        text: $storyTitle,
-                        prompt: Text("This is the title of your story")
-                            .foregroundColor(Color.storyGray.opacity(0.46))
-                    )
-                    .font(.system(size: 20, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.black)
-                    .focused($isTitleFocused)
-                    .textFieldStyle(.plain)
-                    .submitLabel(.next)
-                    .onSubmit {
-                        isEditorFocused = true
-                    }
-
+                ScrollView {
                     ZStack(alignment: .topLeading) {
-                        TextEditor(text: $entryText)
-                            .font(.system(size: 16, weight: .regular))
-                            .lineSpacing(7)
-                            .foregroundStyle(Color.storyInk.opacity(0.78))
-                            .scrollContentBackground(.hidden)
-                            .scrollIndicators(.visible, axes: .vertical)
-                            .background(Color.clear)
-                            .focused($isEditorFocused)
-                            .padding(.horizontal, -5)
-                            .padding(.vertical, -7)
-                            .padding(.top, 7)
-                            .padding(.bottom, 28)
-                            .onTapGesture {
-                                isEditorFocused = true
-                            }
+                        NotebookPaperBackground(
+                            showsPaperWash: false,
+                            showsRuledLines: true,
+                            firstRuledLineY: NotebookMetrics.firstNotebookRuleY
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 504, maxHeight: .infinity)
 
-                        if entryText.isEmpty {
-                            Text("Today was...")
-                                .font(.system(size: 16, weight: .regular))
-                                .foregroundStyle(Color.storyGray.opacity(0.46))
-                                .padding(.top, 15)
-                                .allowsHitTesting(false)
-                        }
+                        NotebookEditorContent(
+                            storyTitle: $storyTitle,
+                            entryText: $entryText,
+                            isTitleFocused: $isTitleFocused,
+                            editorFocusRequestID: editorFocusRequestID,
+                            bodyPlaceholder: "Start writing...",
+                            scrollsInternally: false,
+                            pageHeight: 504,
+                            onTitleSubmit: {
+                                editorFocusRequestID += 1
+                            }
+                        )
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 504)
                 }
-                .padding(.leading, 54)
-                .padding(.trailing, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 18)
+                .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
             }
             .frame(height: 504)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                HStack {
-                    Rectangle()
-                        .fill(Color.storyBorder.opacity(0.72))
-                        .frame(width: 1)
-
-                    Spacer()
-
-                    Rectangle()
-                        .fill(Color.storyBorder.opacity(0.72))
-                        .frame(width: 1)
-                }
-            )
+            .notebookPageChrome()
             .overlay(alignment: .bottomTrailing) {
                 Button {
                     dismissKeyboard()
                     isShowingExpandedEditor = true
                 } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .bold))
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyPurple)
                         .frame(width: 34, height: 34)
                         .background(Color.storyPurple.opacity(0.1), in: Circle())
@@ -690,7 +647,7 @@ struct CreateEntryView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Open writing page")
+                .accessibilityLabel("Expand to full page")
                 .padding(8)
             }
             .padding(.horizontal, -28)
@@ -918,84 +875,63 @@ struct CreateEntryView: View {
 
 struct ExpandedEntryEditor: View {
     @Binding var entryText: String
+    @Binding var storyTitle: String
 
-    @FocusState private var isFocused: Bool
+    @FocusState private var isTitleFocused: Bool
+    @State private var editorFocusRequestID = 0
 
     var body: some View {
-        notebookPage
-            .ignoresSafeArea()
-            .navigationTitle("Write about this storyboard")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.visible, for: .navigationBar)
-            .toolbarBackground(Color.homePageBackground, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .onAppear {
-                isFocused = true
-            }
-    }
-
-    private var notebookPage: some View {
-        ZStack(alignment: .topLeading) {
-            NotebookPaperBackground()
-
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Write about this storyboard")
-                            .font(.system(size: 20, weight: .bold, design: .serif))
-                            .foregroundStyle(Color.storyInk)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text(Date().formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.homeMutedText.opacity(0.78))
-                    }
-
-                    Spacer(minLength: 12)
-                }
-                .padding(.leading, 54)
-
+        GeometryReader { proxy in
+            ScrollView {
                 ZStack(alignment: .topLeading) {
-                    TextEditor(text: $entryText)
-                        .font(.system(size: 16, weight: .regular))
-                        .lineSpacing(7)
-                        .foregroundStyle(Color.storyInk.opacity(0.78))
-                        .scrollContentBackground(.hidden)
-                        .scrollIndicators(.visible, axes: .vertical)
-                        .scrollDismissesKeyboard(.interactively)
-                        .background(Color.clear)
-                        .tint(Color.storyPurple)
-                        .focused($isFocused)
-                        .padding(.horizontal, -5)
-                        .padding(.vertical, -7)
-                        .padding(.top, 7)
+                    NotebookPaperBackground(
+                        showsPaperWash: false,
+                        showsRuledLines: true,
+                        firstRuledLineY: NotebookMetrics.firstNotebookRuleY
+                    )
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height, maxHeight: .infinity)
 
-                    if entryText.isEmpty {
-                        Text("Start writing...")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(Color.storyGray.opacity(0.46))
-                            .padding(.top, 15)
-                            .allowsHitTesting(false)
-                    }
+                    NotebookEditorContent(
+                        storyTitle: $storyTitle,
+                        entryText: $entryText,
+                        isTitleFocused: $isTitleFocused,
+                        editorFocusRequestID: editorFocusRequestID,
+                        bodyPlaceholder: "Start writing...",
+                        scrollsInternally: false,
+                        pageHeight: proxy.size.height,
+                        onBodyTap: {
+                            isTitleFocused = false
+                            editorFocusRequestID += 1
+                        },
+                        onTitleSubmit: {
+                            editorFocusRequestID += 1
+                        }
+                    )
                 }
-                .padding(.leading, 54)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 26)
-            .padding(.bottom, 22)
+            .scrollDismissesKeyboard(.interactively)
+            .background(Color.homePageBackground)
+            .notebookPageChrome()
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.72), lineWidth: 1)
-        )
+        .background(Color.homePageBackground)
+        .navigationTitle("Write")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
 
                 Button("Done") {
-                    isFocused = false
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
                 }
                 .font(.system(size: 14, weight: .bold))
             }
@@ -1006,6 +942,7 @@ struct ExpandedEntryEditor: View {
 struct NotebookPaperBackground: View {
     private let paperColor = Color.homePageBackground
     var showsPaperWash = true
+    var showsRuledLines = true
     var firstRuledLineY: CGFloat = 135
 
     var body: some View {
@@ -1025,12 +962,14 @@ struct NotebookPaperBackground: View {
                     )
                 }
 
-                ruledLines(in: proxy.size)
+                if showsRuledLines {
+                    ruledLines(in: proxy.size)
+                }
 
                 Rectangle()
                     .fill(Color.storyRose.opacity(0.52))
                     .frame(width: 1.2)
-                    .padding(.leading, 54)
+                    .padding(.leading, NotebookMetrics.marginLeading)
 
                 pageHoles
                     .padding(.leading, 20)
@@ -1042,13 +981,13 @@ struct NotebookPaperBackground: View {
     private func ruledLines(in size: CGSize) -> some View {
         Path { path in
             var y = firstRuledLineY
-            while y < size.height - 18 {
+            while y <= size.height {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
-                y += 35
+                y += NotebookMetrics.ruleSpacing
             }
         }
-        .stroke(Color(red: 0.45, green: 0.58, blue: 0.78).opacity(0.24), lineWidth: 1)
+        .stroke(NotebookMetrics.ruleColor, lineWidth: 1)
     }
 
     private var pageHoles: some View {
