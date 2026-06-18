@@ -88,8 +88,8 @@ struct BottomNavigationBar: View {
             }
             Spacer()
             NavItem(
-                title: "Chapters",
-                systemName: selectedPage == .journal ? "book.closed.fill" : "book.closed",
+                title: "Stories",
+                systemName: selectedPage == .journal ? "book.fill" : "book",
                 isSelected: selectedPage == .journal,
                 selectedColor: .homeAccent
             ) {

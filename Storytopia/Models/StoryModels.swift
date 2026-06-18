@@ -131,6 +131,197 @@ enum OpenAITestConfig {
     static let imageModel = "gpt-image-2"
 }
 
+struct CreateEntryDraft: Identifiable {
+    let id: UUID
+    let title: String
+    let text: String
+    let photos: [UIImage]
+    let artStyle: String
+    let location: String
+    let date: Date
+    let savesDraft: Bool
+    let isPrivate: Bool
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+enum CreateEntryDraftStore {
+    private static let metadataFileName = "draft.json"
+
+    static func loadAll() -> [CreateEntryDraft] {
+        migrateLegacyDraftIfNeeded()
+
+        guard
+            let draftURLs = try? FileManager.default.contentsOfDirectory(
+                at: draftsDirectory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return []
+        }
+
+        return draftURLs
+            .compactMap(loadDraft(at:))
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    static func load(id: UUID) -> CreateEntryDraft? {
+        migrateLegacyDraftIfNeeded()
+        return loadDraft(at: directory(for: id))
+    }
+
+    @discardableResult
+    static func save(
+        id: UUID?,
+        title: String,
+        text: String,
+        photos: [UIImage],
+        artStyle: String,
+        location: String,
+        date: Date,
+        savesDraft: Bool,
+        isPrivate: Bool
+    ) -> UUID? {
+        let draftID = id ?? UUID()
+        let draftDirectory = directory(for: draftID)
+        let existingDraft = id.flatMap(load(id:))
+
+        try? FileManager.default.removeItem(at: draftDirectory)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: draftDirectory,
+                withIntermediateDirectories: true
+            )
+
+            var photoFileNames: [String] = []
+            for (index, photo) in photos.enumerated() {
+                guard let data = photo.jpegData(compressionQuality: 0.88) else {
+                    continue
+                }
+
+                let fileName = "photo-\(index).jpg"
+                try data.write(
+                    to: draftDirectory.appendingPathComponent(fileName),
+                    options: [.atomic]
+                )
+                photoFileNames.append(fileName)
+            }
+
+            let now = Date()
+            let metadata = CreateEntryDraftMetadata(
+                id: draftID,
+                title: title,
+                text: text,
+                photoFileNames: photoFileNames,
+                artStyle: artStyle,
+                location: location,
+                date: date,
+                savesDraft: savesDraft,
+                isPrivate: isPrivate,
+                createdAt: existingDraft?.createdAt ?? now,
+                updatedAt: now
+            )
+            let metadataData = try JSONEncoder().encode(metadata)
+            try metadataData.write(
+                to: draftDirectory.appendingPathComponent(metadataFileName),
+                options: [.atomic]
+            )
+            return draftID
+        } catch {
+            try? FileManager.default.removeItem(at: draftDirectory)
+            return nil
+        }
+    }
+
+    static func delete(id: UUID) {
+        try? FileManager.default.removeItem(at: directory(for: id))
+    }
+
+    private static func loadDraft(at draftDirectory: URL) -> CreateEntryDraft? {
+        let metadataURL = draftDirectory.appendingPathComponent(metadataFileName)
+        guard
+            let data = try? Data(contentsOf: metadataURL),
+            let metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
+        else {
+            return nil
+        }
+
+        let photos = metadata.photoFileNames.compactMap { fileName -> UIImage? in
+            let photoURL = draftDirectory.appendingPathComponent(fileName)
+            guard let data = try? Data(contentsOf: photoURL) else {
+                return nil
+            }
+            return UIImage(data: data)
+        }
+
+        return CreateEntryDraft(
+            id: metadata.id ?? UUID(),
+            title: metadata.title,
+            text: metadata.text,
+            photos: photos,
+            artStyle: metadata.artStyle ?? "Anime",
+            location: metadata.location ?? "",
+            date: metadata.date ?? Date(),
+            savesDraft: metadata.savesDraft ?? true,
+            isPrivate: metadata.isPrivate ?? false,
+            createdAt: metadata.createdAt ?? Date(),
+            updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date()
+        )
+    }
+
+    private static func migrateLegacyDraftIfNeeded() {
+        guard
+            !FileManager.default.fileExists(atPath: draftsDirectory.path),
+            let legacyDraft = loadDraft(at: legacyDraftDirectory)
+        else {
+            return
+        }
+
+        _ = save(
+            id: nil,
+            title: legacyDraft.title,
+            text: legacyDraft.text,
+            photos: legacyDraft.photos,
+            artStyle: legacyDraft.artStyle,
+            location: legacyDraft.location,
+            date: legacyDraft.date,
+            savesDraft: legacyDraft.savesDraft,
+            isPrivate: legacyDraft.isPrivate
+        )
+        try? FileManager.default.removeItem(at: legacyDraftDirectory)
+    }
+
+    private static func directory(for id: UUID) -> URL {
+        draftsDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    private static var draftsDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CreateEntryDrafts", isDirectory: true)
+    }
+
+    private static var legacyDraftDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CreateEntryDraft", isDirectory: true)
+    }
+}
+
+private struct CreateEntryDraftMetadata: Codable {
+    let id: UUID?
+    let title: String
+    let text: String
+    let photoFileNames: [String]
+    let artStyle: String?
+    let location: String?
+    let date: Date?
+    let savesDraft: Bool?
+    let isPrivate: Bool?
+    let createdAt: Date?
+    let updatedAt: Date?
+}
+
 enum GeneratedStoryboardStore {
     private static let metadataKey = "StorytopiaGeneratedStoryboardMetadata"
 
@@ -184,6 +375,17 @@ enum GeneratedStoryboardStore {
         }
 
         UserDefaults.standard.set(metadataData, forKey: metadataKey)
+    }
+
+    static func delete(_ storyboards: [GeneratedStoryboard]) {
+        for storyboard in storyboards {
+            guard let imageFileName = storyboard.imageFileName else {
+                continue
+            }
+
+            let imageURL = imagesDirectory.appendingPathComponent(imageFileName)
+            try? FileManager.default.removeItem(at: imageURL)
+        }
     }
 
     static func persistedStoryboard(

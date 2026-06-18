@@ -7,23 +7,25 @@ struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
 
     @Binding var entryText: String
+    @Binding var storyTitle: String
+    @Binding var storyboardPhotos: [UIImage?]
+    @Binding var isDraftSaved: Bool
+    @Binding var activeDraftID: UUID?
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
 
     @State private var selectedArtStyle = "Anime"
     private let previewLayout = StoryboardLayoutOption.fiveClassic
 
-    @State private var storyboardPhotos: [UIImage?] = Array(repeating: nil, count: 5)
     @State private var selectedPhotoSlot: Int?
     @State private var isShowingPhotoSourceDialog = false
     @State private var isShowingPhotoLibrary = false
     @State private var isShowingCamera = false
-    @State private var isShowingDraftSavedConfirmation = false
+    @State private var isShowingExitConfirmation = false
     @State private var isGeneratingStoryboard = false
     @State private var generationErrorMessage: String?
     @State private var isShowingExpandedEditor = false
     @State private var isShowingArtStyleGrid = false
-    @State private var storyTitle = ""
     @State private var storyLocation = ""
     @State private var storyDate = Date()
     @State private var savesDraft = true
@@ -95,11 +97,19 @@ struct CreateEntryView: View {
             Button("Cancel", role: .cancel) {
             }
         }
-        .alert("Draft saved", isPresented: $isShowingDraftSavedConfirmation) {
-            Button("OK", role: .cancel) {
+        .alert("Save this draft?", isPresented: $isShowingExitConfirmation) {
+            Button("Save as Draft") {
+                saveDraftAndExit()
+            }
+
+            Button("Discard", role: .destructive) {
+                discardDraftAndExit()
+            }
+
+            Button("Cancel", role: .cancel) {
             }
         } message: {
-            Text("You can keep editing this entry whenever you're ready.")
+            Text("You’ve started an entry. Would you like to save it before leaving?")
         }
         .alert(
             "Storyboard generation failed",
@@ -125,6 +135,9 @@ struct CreateEntryView: View {
             Task {
                 await loadPhotoLibraryImages(from: items)
             }
+        }
+        .onAppear {
+            loadSavedDraftIfNeeded()
         }
     }
 
@@ -163,6 +176,12 @@ struct CreateEntryView: View {
                 await MainActor.run {
                     generatedStoryboards.insert(storyboard, at: 0)
                     GeneratedStoryboardStore.save(generatedStoryboards)
+                    clearEditor()
+                    if let activeDraftID {
+                        CreateEntryDraftStore.delete(id: activeDraftID)
+                    }
+                    self.activeDraftID = nil
+                    isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
                     isGeneratingStoryboard = false
                     selectedPage = .profile
                 }
@@ -200,7 +219,19 @@ struct CreateEntryView: View {
     }
 
     private var pageHeader: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 10) {
+            Button {
+                requestExit()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.72))
+                    .frame(width: 34, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+
             Text("New Entry")
                 .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundColor(Color.storyGray.opacity(0.46))
@@ -209,14 +240,14 @@ struct CreateEntryView: View {
             Spacer()
 
             Button {
-                dismissKeyboard()
-                isShowingDraftSavedConfirmation = true
+                saveDraftAndExit()
             } label: {
-                Text("Save Draft")
+                Text("Save as Draft")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color.storyPurple)
                     .frame(height: 44)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -224,6 +255,93 @@ struct CreateEntryView: View {
         .onTapGesture {
             dismissKeyboard()
         }
+    }
+
+    private var hasDraftContent: Bool {
+        !storyTitle.isEmpty || !entryText.isEmpty || storyboardPhotos.contains { $0 != nil }
+    }
+
+    private func requestExit() {
+        dismissKeyboard()
+
+        if hasDraftContent {
+            isShowingExitConfirmation = true
+        } else {
+            exitToHome()
+        }
+    }
+
+    private func exitToHome() {
+        dismissKeyboard()
+        selectedPage = .home
+    }
+
+    private func saveDraftAndExit() {
+        dismissKeyboard()
+
+        if hasDraftContent {
+            _ = CreateEntryDraftStore.save(
+                id: activeDraftID,
+                title: storyTitle,
+                text: entryText,
+                photos: storyboardPhotos.compactMap { $0 },
+                artStyle: selectedArtStyle,
+                location: storyLocation,
+                date: storyDate,
+                savesDraft: savesDraft,
+                isPrivate: isPrivateEntry
+            )
+            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+        }
+
+        clearEditor()
+        activeDraftID = nil
+        selectedPage = .journal
+    }
+
+    private func discardDraftAndExit() {
+        clearEditor()
+        if let activeDraftID {
+            CreateEntryDraftStore.delete(id: activeDraftID)
+        }
+        activeDraftID = nil
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+        selectedPage = .home
+    }
+
+    private func clearEditor() {
+        storyTitle = ""
+        entryText = ""
+        storyboardPhotos = Array(repeating: nil, count: 5)
+        selectedArtStyle = "Anime"
+        storyLocation = ""
+        storyDate = Date()
+        savesDraft = true
+        isPrivateEntry = false
+    }
+
+    private func loadSavedDraftIfNeeded() {
+        guard let activeDraftID else {
+            return
+        }
+
+        guard let draft = CreateEntryDraftStore.load(id: activeDraftID) else {
+            self.activeDraftID = nil
+            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+            clearEditor()
+            return
+        }
+
+        storyTitle = draft.title
+        entryText = draft.text
+        let photos = Array(draft.photos.prefix(5))
+        storyboardPhotos = photos.map(Optional.some)
+            + Array(repeating: nil, count: max(0, 5 - photos.count))
+        selectedArtStyle = draft.artStyle
+        storyLocation = draft.location
+        storyDate = draft.date
+        savesDraft = draft.savesDraft
+        isPrivateEntry = draft.isPrivate
     }
 
     private var createEntryContent: some View {

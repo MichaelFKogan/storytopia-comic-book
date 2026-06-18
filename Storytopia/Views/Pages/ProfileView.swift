@@ -1,10 +1,16 @@
 import SwiftUI
+import UIKit
 
 struct ProfileView: View {
     @Binding var selectedPage: StoryPage
-    let generatedStoryboards: [GeneratedStoryboard]
+    @Binding var generatedStoryboards: [GeneratedStoryboard]
 
-    @State private var selectedStoryboard: GeneratedStoryboard?
+    @State private var selectedStoryboardIndex: Int?
+    @State private var isSelecting = false
+    @State private var selectedStoryboardIDs: Set<UUID> = []
+    @State private var storyboardsToShare: [GeneratedStoryboard] = []
+    @State private var isShowingShareSheet = false
+    @State private var isShowingDeleteConfirmation = false
 
     private let storyboardColumns = [
         GridItem(.flexible(), spacing: 1),
@@ -29,14 +35,60 @@ struct ProfileView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
-                .padding(.bottom, 96)
+                .padding(.bottom, isSelecting ? 150 : 96)
             }
 
-            BottomNavigationBar(selectedPage: $selectedPage)
+            VStack(spacing: 0) {
+                if isSelecting {
+                    selectionActionBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                BottomNavigationBar(selectedPage: $selectedPage)
+            }
         }
-        .fullScreenCover(item: $selectedStoryboard) { storyboard in
-            StoryboardImageViewer(storyboard: storyboard)
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { selectedStoryboardIndex != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedStoryboardIndex = nil
+                    }
+                }
+            )
+        ) {
+            if let selectedStoryboardIndex {
+                StoryboardImageViewer(
+                    storyboards: generatedStoryboards,
+                    initialIndex: selectedStoryboardIndex
+                )
                 .presentationBackground(.clear)
+            }
+        }
+        .sheet(isPresented: $isShowingShareSheet) {
+            ActivityView(activityItems: storyboardsToShare.map(\.image))
+                .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog(
+            deleteConfirmationTitle,
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(selectedStoryboardIDs.count) \(storyboardNoun)", role: .destructive) {
+                deleteSelectedStoryboards()
+            }
+
+            Button("Cancel", role: .cancel) {
+            }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .onChange(of: generatedStoryboards.map(\.id)) { availableIDs in
+            selectedStoryboardIDs.formIntersection(Set(availableIDs))
+
+            if generatedStoryboards.isEmpty {
+                endSelection()
+            }
         }
     }
 
@@ -113,16 +165,23 @@ struct ProfileView: View {
 
                 Spacer()
 
-                Button {
-                } label: {
-                    HStack(spacing: 7) {
-                        Text("View all")
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
+                if !generatedStoryboards.isEmpty {
+                    Button {
+                        withAnimation(.snappy(duration: 0.24)) {
+                            if isSelecting {
+                                endSelection()
+                            } else {
+                                isSelecting = true
+                            }
+                        }
+                    } label: {
+                        Text(isSelecting ? "Done" : "Select")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(height: 32)
                     }
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
-                    .frame(height: 32)
+                    .buttonStyle(.plain)
+                    .accessibilityHint(isSelecting ? "Ends storyboard selection" : "Selects multiple storyboards")
                 }
             }
 
@@ -134,17 +193,122 @@ struct ProfileView: View {
                 }
             } else {
                 LazyVGrid(columns: storyboardColumns, spacing: 1) {
-                    ForEach(generatedStoryboards) { storyboard in
+                    ForEach(Array(generatedStoryboards.enumerated()), id: \.element.id) { index, storyboard in
                         Button {
-                            selectedStoryboard = storyboard
+                            if isSelecting {
+                                toggleSelection(for: storyboard)
+                            } else {
+                                selectedStoryboardIndex = index
+                            }
                         } label: {
-                            GeneratedStoryboardThumbnail(storyboard: storyboard)
+                            GeneratedStoryboardThumbnail(
+                                storyboard: storyboard,
+                                isSelecting: isSelecting,
+                                isSelected: selectedStoryboardIDs.contains(storyboard.id)
+                            )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            isSelecting
+                                ? "\(selectedStoryboardIDs.contains(storyboard.id) ? "Selected" : "Not selected") storyboard"
+                                : "Open storyboard"
+                        )
+                        .accessibilityAddTraits(
+                            selectedStoryboardIDs.contains(storyboard.id) ? .isSelected : []
+                        )
                     }
                 }
             }
         }
+    }
+
+    private var selectedStoryboards: [GeneratedStoryboard] {
+        generatedStoryboards.filter { selectedStoryboardIDs.contains($0.id) }
+    }
+
+    private var areAllStoryboardsSelected: Bool {
+        !generatedStoryboards.isEmpty && selectedStoryboardIDs.count == generatedStoryboards.count
+    }
+
+    private var storyboardNoun: String {
+        selectedStoryboardIDs.count == 1 ? "Storyboard" : "Storyboards"
+    }
+
+    private var deleteConfirmationTitle: String {
+        "Delete \(selectedStoryboardIDs.count) \(storyboardNoun)?"
+    }
+
+    private var selectionActionBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    if areAllStoryboardsSelected {
+                        selectedStoryboardIDs.removeAll()
+                    } else {
+                        selectedStoryboardIDs = Set(generatedStoryboards.map(\.id))
+                    }
+                }
+            } label: {
+                Label(
+                    areAllStoryboardsSelected ? "Deselect All" : "Select All",
+                    systemImage: areAllStoryboardsSelected ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+            }
+            .selectionActionStyle()
+
+            Spacer(minLength: 4)
+
+            Button {
+                storyboardsToShare = selectedStoryboards
+                isShowingShareSheet = true
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .selectionActionStyle()
+            .disabled(selectedStoryboardIDs.isEmpty)
+
+            Button(role: .destructive) {
+                isShowingDeleteConfirmation = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .selectionActionStyle(color: .red)
+            .disabled(selectedStoryboardIDs.isEmpty)
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.storyBorder.opacity(0.7))
+                .frame(height: 1)
+        }
+    }
+
+    private func toggleSelection(for storyboard: GeneratedStoryboard) {
+        withAnimation(.snappy(duration: 0.18)) {
+            if selectedStoryboardIDs.contains(storyboard.id) {
+                selectedStoryboardIDs.remove(storyboard.id)
+            } else {
+                selectedStoryboardIDs.insert(storyboard.id)
+            }
+        }
+    }
+
+    private func deleteSelectedStoryboards() {
+        let storyboards = selectedStoryboards
+        let deletedIDs = selectedStoryboardIDs
+
+        GeneratedStoryboardStore.delete(storyboards)
+        generatedStoryboards.removeAll { deletedIDs.contains($0.id) }
+        GeneratedStoryboardStore.save(generatedStoryboards)
+        endSelection()
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        selectedStoryboardIDs.removeAll()
     }
 }
 
@@ -204,23 +368,288 @@ struct StoryboardPlaceholderCard: View {
 
 struct GeneratedStoryboardThumbnail: View {
     let storyboard: GeneratedStoryboard
+    var isSelecting = false
+    var isSelected = false
 
     var body: some View {
         GeometryReader { proxy in
-            Image(uiImage: storyboard.image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .clipped()
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: storyboard.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+
+                if isSelecting {
+                    Color.black
+                        .opacity(isSelected ? 0.18 : 0.04)
+
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.storyPurple : .white)
+                        .background(
+                            Circle()
+                                .fill(isSelected ? Color.white : Color.black.opacity(0.28))
+                                .padding(2)
+                        )
+                        .shadow(color: .black.opacity(0.24), radius: 2, y: 1)
+                        .padding(8)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(0.72, contentMode: .fit)
         .clipped()
         .contentShape(Rectangle())
+        .overlay {
+            if isSelected {
+                Rectangle()
+                    .stroke(Color.storyPurple, lineWidth: 3)
+            }
+        }
+    }
+}
+
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIActivityViewController,
+        context: Context
+    ) {
+    }
+}
+
+private extension View {
+    func selectionActionStyle(color: Color = .storyInk) -> some View {
+        self
+            .foregroundStyle(color)
+            .padding(.horizontal, 11)
+            .frame(height: 38)
+            .background(Color.white.opacity(0.8), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            }
     }
 }
 
 struct StoryboardImageViewer: View {
+    let storyboards: [GeneratedStoryboard]
+    let initialIndex: Int
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var visibleIndex: Int
+
+    init(storyboards: [GeneratedStoryboard], initialIndex: Int) {
+        self.storyboards = storyboards
+        self.initialIndex = initialIndex
+        _visibleIndex = State(initialValue: initialIndex)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.storyInk
+                .ignoresSafeArea()
+
+            ZoomableVerticalStoryboardView(
+                images: storyboards.map(\.image),
+                initialIndex: initialIndex,
+                visibleIndex: $visibleIndex
+            )
+            .background(Color.black)
+
+            HStack {
+                Text("\(visibleIndex + 1) of \(storyboards.count)")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(.black.opacity(0.62), in: Capsule())
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Color.storyPurple.opacity(0.94), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close storyboard viewer")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
+    }
+}
+
+private struct ZoomableVerticalStoryboardView: UIViewRepresentable {
+    let images: [UIImage]
+    let initialIndex: Int
+    @Binding var visibleIndex: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .black
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 5
+        scrollView.bouncesZoom = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+
+        let stackView = UIStackView()
+        stackView.axis = .vertical
+        stackView.alignment = .fill
+        stackView.spacing = 0
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor)
+        ])
+
+        context.coordinator.stackView = stackView
+        context.coordinator.imageViews = images.enumerated().map { index, image in
+            if index > 0 {
+                stackView.addArrangedSubview(
+                    makeImageBoundary(nextIndex: index, totalCount: images.count)
+                )
+            }
+
+            let imageView = UIImageView(image: image)
+            imageView.contentMode = .scaleAspectFit
+            imageView.backgroundColor = .black
+            imageView.clipsToBounds = true
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.heightAnchor.constraint(
+                equalTo: imageView.widthAnchor,
+                multiplier: image.size.height / max(image.size.width, 1)
+            ).isActive = true
+            stackView.addArrangedSubview(imageView)
+            return imageView
+        }
+
+        DispatchQueue.main.async {
+            context.coordinator.scrollToInitialImage(in: scrollView)
+        }
+
+        return scrollView
+    }
+
+    private func makeImageBoundary(nextIndex _: Int, totalCount _: Int) -> UIView {
+        let container = UIView()
+        container.backgroundColor = UIColor(white: 0.035, alpha: 1)
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.heightAnchor.constraint(equalToConstant: 58).isActive = true
+
+        let line = UIView()
+        line.backgroundColor = UIColor.systemPurple.withAlphaComponent(0.72)
+        line.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(line)
+
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            line.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
+            line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1)
+        ])
+
+        return container
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var parent: ZoomableVerticalStoryboardView
+        weak var stackView: UIStackView?
+        var imageViews: [UIImageView] = []
+        private var didScrollToInitialImage = false
+
+        init(parent: ZoomableVerticalStoryboardView) {
+            self.parent = parent
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            stackView
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateVisibleIndex(in: scrollView)
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            updateVisibleIndex(in: scrollView)
+        }
+
+        func scrollToInitialImage(in scrollView: UIScrollView) {
+            guard
+                !didScrollToInitialImage,
+                imageViews.indices.contains(parent.initialIndex)
+            else {
+                return
+            }
+
+            scrollView.layoutIfNeeded()
+            stackView?.layoutIfNeeded()
+
+            let imageView = imageViews[parent.initialIndex]
+            let targetY = max(
+                0,
+                imageView.frame.midY - (scrollView.bounds.height / 2)
+            )
+            scrollView.setContentOffset(CGPoint(x: 0, y: targetY), animated: false)
+            didScrollToInitialImage = true
+            updateVisibleIndex(in: scrollView)
+        }
+
+        private func updateVisibleIndex(in scrollView: UIScrollView) {
+            guard !imageViews.isEmpty else {
+                return
+            }
+
+            let viewportCenterY = scrollView.contentOffset.y + (scrollView.bounds.height / 2)
+            let zoomScale = scrollView.zoomScale
+            let closestIndex = imageViews.indices.min { left, right in
+                abs((imageViews[left].frame.midY * zoomScale) - viewportCenterY)
+                    < abs((imageViews[right].frame.midY * zoomScale) - viewportCenterY)
+            }
+
+            guard
+                let closestIndex,
+                closestIndex != parent.visibleIndex
+            else {
+                return
+            }
+
+            parent.visibleIndex = closestIndex
+        }
+    }
+}
+
+private struct LegacyStoryboardImageViewer: View {
     let storyboard: GeneratedStoryboard
 
     @Environment(\.dismiss) private var dismiss
