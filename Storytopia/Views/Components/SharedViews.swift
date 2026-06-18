@@ -97,6 +97,15 @@ struct BottomNavigationBar: View {
             }
             Spacer()
             NavItem(
+                title: "Stories List",
+                systemName: selectedPage == .storiesList ? "list.bullet.rectangle.fill" : "list.bullet.rectangle",
+                isSelected: selectedPage == .storiesList,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .storiesList
+            }
+            Spacer()
+            NavItem(
                 title: "Profile",
                 systemName: selectedPage == .profile ? "person.fill" : "person",
                 isSelected: selectedPage == .profile,
@@ -133,9 +142,12 @@ struct NavItem: View {
 
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
             .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
-            .frame(width: 50, height: 44)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
         }
     }
 }

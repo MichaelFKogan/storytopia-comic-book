@@ -560,20 +560,7 @@ private struct ZoomableVerticalStoryboardView: UIViewRepresentable {
         let container = UIView()
         container.backgroundColor = UIColor(white: 0.035, alpha: 1)
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.heightAnchor.constraint(equalToConstant: 58).isActive = true
-
-        let line = UIView()
-        line.backgroundColor = UIColor.systemPurple.withAlphaComponent(0.72)
-        line.translatesAutoresizingMaskIntoConstraints = false
-
-        container.addSubview(line)
-
-        NSLayoutConstraint.activate([
-            line.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
-            line.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            line.heightAnchor.constraint(equalToConstant: 1)
-        ])
+        container.heightAnchor.constraint(equalToConstant: 29).isActive = true
 
         return container
     }
