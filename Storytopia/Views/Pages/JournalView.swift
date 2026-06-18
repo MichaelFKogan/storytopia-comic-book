@@ -6,9 +6,17 @@ struct JournalView: View {
     @State private var selectedFilter = "All"
     @State private var searchText = ""
     @State private var showsPrototypeData = true
+    @State private var chapters: [PrototypeChapter]
+    @State private var isShowingNewChapter = false
 
     private let filters = ["All", "Journal", "Storyboards", "Favorites"]
-    private let chapters = PrototypeChapter.samples
+
+    init(selectedPage: Binding<StoryPage>) {
+        _selectedPage = selectedPage
+        _chapters = State(
+            initialValue: UserChapterStore.load() + PrototypeChapter.samples
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,6 +43,17 @@ struct JournalView: View {
                 BottomNavigationBar(selectedPage: $selectedPage)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $isShowingNewChapter) {
+                NewChapterSheet { chapter in
+                    chapters.insert(chapter, at: 0)
+                    UserChapterStore.add(chapter)
+                    showsPrototypeData = true
+                    selectedFilter = "All"
+                    searchText = ""
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -45,6 +64,18 @@ struct JournalView: View {
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
+
+            Button {
+                isShowingNewChapter = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 31, height: 31)
+                    .background(Color.storyPurple, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Create a new chapter")
 
             Menu {
                 Button {
@@ -287,6 +318,232 @@ struct JournalView: View {
     }
 }
 
+private struct NewChapterSheet: View {
+    private struct CoverOption: Identifiable {
+        let id: String
+        let symbol: String
+        let color: Color
+    }
+
+    let onCreate: (PrototypeChapter) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var subtitle = ""
+    @State private var kind: PrototypeChapter.Kind = .journal
+    @State private var selectedCoverID = "sparkles"
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case title
+        case subtitle
+    }
+
+    private let coverOptions = [
+        CoverOption(id: "sparkles", symbol: "sparkles", color: Color(red: 0.34, green: 0.55, blue: 0.92)),
+        CoverOption(id: "sun", symbol: "sun.max.fill", color: Color(red: 0.97, green: 0.62, blue: 0.28)),
+        CoverOption(id: "moon", symbol: "moon.stars.fill", color: Color(red: 0.43, green: 0.38, blue: 0.78)),
+        CoverOption(id: "places", symbol: "building.2.fill", color: Color(red: 0.29, green: 0.70, blue: 0.65)),
+        CoverOption(id: "heart", symbol: "heart.fill", color: Color.storyRose),
+        CoverOption(id: "leaf", symbol: "leaf.fill", color: Color(red: 0.35, green: 0.64, blue: 0.43))
+    ]
+
+    private var selectedCover: CoverOption {
+        coverOptions.first { $0.id == selectedCoverID } ?? coverOptions[0]
+    }
+
+    private var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSubtitle: String {
+        subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.storyCream, .white, Color.storyBlush],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 22) {
+                        coverPreview
+                        chapterDetails
+                        chapterType
+                        coverPicker
+                    }
+                    .padding(20)
+                    .padding(.bottom, 24)
+                }
+                .scrollDismissesKeyboard(.interactively)
+            }
+            .navigationTitle("New Chapter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        createChapter()
+                    }
+                    .fontWeight(.bold)
+                    .disabled(trimmedTitle.isEmpty)
+                }
+            }
+            .onAppear {
+                focusedField = .title
+            }
+        }
+    }
+
+    private var coverPreview: some View {
+        HStack(spacing: 18) {
+            NotebookCover(
+                color: selectedCover.color,
+                symbol: selectedCover.symbol,
+                imageName: nil,
+                width: 72,
+                height: 90
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(trimmedTitle.isEmpty ? "Your new chapter" : trimmedTitle)
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Text(trimmedSubtitle.isEmpty ? "A place for the stories that belong together." : trimmedSubtitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.storyGray)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(selectedCover.color.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private var chapterDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionLabel("Chapter details")
+
+            VStack(spacing: 0) {
+                TextField("Chapter title", text: $title)
+                    .focused($focusedField, equals: .title)
+                    .submitLabel(.next)
+                    .onSubmit {
+                        focusedField = .subtitle
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 50)
+
+                Divider()
+                    .padding(.leading, 14)
+
+                TextField("Short description (optional)", text: $subtitle)
+                    .focused($focusedField, equals: .subtitle)
+                    .submitLabel(.done)
+                    .padding(.horizontal, 14)
+                    .frame(height: 50)
+            }
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Color.storyInk)
+            .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var chapterType: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionLabel("Chapter type")
+
+            Picker("Chapter type", selection: $kind) {
+                Text("Journal").tag(PrototypeChapter.Kind.journal)
+                Text("Storyboard").tag(PrototypeChapter.Kind.storyboard)
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var coverPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionLabel("Cover")
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                ForEach(coverOptions) { option in
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            selectedCoverID = option.id
+                        }
+                    } label: {
+                        NotebookCover(
+                            color: option.color,
+                            symbol: option.symbol,
+                            imageName: nil,
+                            width: 54,
+                            height: 68
+                        )
+                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            selectedCoverID == option.id ? option.color.opacity(0.12) : Color.white.opacity(0.7),
+                            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .stroke(
+                                    selectedCoverID == option.id ? option.color : Color.storyBorder.opacity(0.4),
+                                    lineWidth: selectedCoverID == option.id ? 2 : 1
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Select \(option.id) cover")
+                    .accessibilityAddTraits(selectedCoverID == option.id ? .isSelected : [])
+                }
+            }
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 16, weight: .bold, design: .serif))
+            .foregroundStyle(Color.storyInk)
+    }
+
+    private func createChapter() {
+        guard !trimmedTitle.isEmpty else {
+            return
+        }
+
+        onCreate(
+            PrototypeChapter(
+                title: trimmedTitle,
+                subtitle: trimmedSubtitle.isEmpty ? "A new collection of stories" : trimmedSubtitle,
+                color: selectedCover.color,
+                symbol: selectedCover.symbol,
+                coverImageName: nil,
+                kind: kind,
+                isFavorite: false,
+                entries: []
+            )
+        )
+        dismiss()
+    }
+}
+
 private struct PrototypeChapterRow: View {
     let chapter: PrototypeChapter
 
@@ -312,11 +569,6 @@ private struct PrototypeChapterRow: View {
                     }
                 }
 
-                Text(chapter.subtitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.storyGray)
-                    .lineLimit(1)
-
                 HStack(spacing: 10) {
                     Label(chapter.entryCountText, systemImage: "doc.text")
 
@@ -334,12 +586,12 @@ private struct PrototypeChapterRow: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.storyGray.opacity(0.52))
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.44), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
@@ -350,6 +602,8 @@ private struct NotebookCover: View {
     let color: Color
     let symbol: String
     let imageName: String?
+    var width: CGFloat = 48
+    var height: CGFloat = 58
 
     var body: some View {
         ZStack {
@@ -380,7 +634,7 @@ private struct NotebookCover: View {
                 Spacer()
             }
         }
-        .frame(width: 58, height: 72)
+        .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -470,7 +724,9 @@ private struct PrototypeChapterDetailView: View {
             NotebookCover(
                 color: chapter.color,
                 symbol: chapter.symbol,
-                imageName: chapter.coverImageName
+                imageName: chapter.coverImageName,
+                width: 58,
+                height: 72
             )
             .scaleEffect(1.14)
             .frame(width: 68, height: 82)
@@ -527,7 +783,12 @@ private struct PrototypeChapterDetailView: View {
     private var entriesList: some View {
         LazyVStack(spacing: 0) {
             ForEach(Array(chapter.entries.enumerated()), id: \.element.id) { index, entry in
-                PrototypeEntryRow(entry: entry, accentColor: chapter.color)
+                NavigationLink {
+                    PrototypeEntryDetailView(entry: entry, chapter: chapter)
+                } label: {
+                    PrototypeEntryRow(entry: entry, accentColor: chapter.color)
+                }
+                .buttonStyle(.plain)
 
                 if index < chapter.entries.count - 1 {
                     Divider()
@@ -562,6 +823,348 @@ private struct PrototypeChapterDetailView: View {
                             .stroke(Color.white.opacity(0.9), lineWidth: 2)
                     )
             }
+        }
+    }
+}
+
+private struct PrototypeEntryDetailView: View {
+    let entry: PrototypeEntry
+    let chapter: PrototypeChapter
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var isFavorite = false
+    @State private var selectedImageName: String?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    chapter.color.opacity(0.14),
+                    Color.storyCream,
+                    Color.storyBlush.opacity(0.48)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                entryHeader
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        entryIntroduction
+
+                        if !entry.imageNames.isEmpty {
+                            photoStory
+                        }
+
+                        journalPage
+                        entryDetails
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 36)
+                }
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(
+            isPresented: Binding(
+                get: { selectedImageName != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedImageName = nil
+                    }
+                }
+            )
+        ) {
+            if let selectedImageName {
+                PhotoViewer(imageName: selectedImageName, accentColor: chapter.color)
+            }
+        }
+    }
+
+    private var entryHeader: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.82), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to \(chapter.title)")
+
+            Spacer()
+
+            Text("Journal Entry")
+                .font(.system(size: 18, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            Menu {
+                Button {
+                    isFavorite.toggle()
+                } label: {
+                    Label(
+                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                        systemImage: isFavorite ? "heart.slash" : "heart"
+                    )
+                }
+
+                Button {
+                } label: {
+                    Label("Edit Entry", systemImage: "pencil")
+                }
+
+                Button {
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.82), in: Circle())
+            }
+            .accessibilityLabel("Entry options")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var entryIntroduction: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                VStack(spacing: 1) {
+                    Text(entry.weekday)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(chapter.color)
+
+                    Text(entry.day)
+                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
+                .frame(width: 48, height: 54)
+                .background(chapter.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(chapter.title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(chapter.color)
+
+                    Text(entry.time)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.storyGray)
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.72)) {
+                        isFavorite.toggle()
+                    }
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isFavorite ? Color.storyRose : Color.storyInk.opacity(0.58))
+                        .frame(width: 38, height: 38)
+                        .background(Color.white.opacity(0.72), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFavorite ? "Remove from favorites" : "Add to favorites")
+            }
+
+            Text(entry.title)
+                .font(.system(size: 30, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let location = entry.location {
+                Label(location, systemImage: "mappin.and.ellipse")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.storyInk.opacity(0.64))
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(chapter.color.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private var photoStory: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("The moment")
+                .font(.system(size: 19, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            if let firstImageName = entry.imageNames.first {
+                Button {
+                    selectedImageName = firstImageName
+                } label: {
+                    Image(firstImageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: entry.imageNames.count == 1 ? 240 : 205)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .background(.black.opacity(0.46), in: Circle())
+                                .padding(10)
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+
+            if entry.imageNames.count > 1 {
+                HStack(spacing: 8) {
+                    ForEach(Array(entry.imageNames.dropFirst().prefix(3)), id: \.self) { imageName in
+                        Button {
+                            selectedImageName = imageName
+                        } label: {
+                            Image(imageName)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 78)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var journalPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("My story", systemImage: "text.quote")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(chapter.color)
+
+                Spacer()
+
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyGold)
+            }
+
+            Text(entry.body)
+                .font(.system(size: 17, weight: .regular, design: .serif))
+                .lineSpacing(7)
+                .foregroundStyle(Color.storyInk.opacity(0.88))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Rectangle()
+                .fill(chapter.color.opacity(0.18))
+                .frame(height: 1)
+
+            Text(entry.reflection)
+                .font(.system(size: 15, weight: .regular, design: .serif))
+                .italic()
+                .lineSpacing(5)
+                .foregroundStyle(Color.storyInk.opacity(0.67))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .background {
+            ZStack {
+                Color.white.opacity(0.88)
+
+                VStack(spacing: 27) {
+                    ForEach(0..<12, id: \.self) { _ in
+                        Rectangle()
+                            .fill(chapter.color.opacity(0.07))
+                            .frame(height: 1)
+                    }
+                }
+                .padding(.top, 28)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.46), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
+    }
+
+    private var entryDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Entry details")
+                .font(.system(size: 17, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            HStack(spacing: 10) {
+                DetailPill(systemName: "clock", text: entry.time, color: chapter.color)
+
+                if let location = entry.location {
+                    DetailPill(systemName: "location", text: location, color: chapter.color)
+                }
+            }
+        }
+    }
+}
+
+private struct DetailPill: View {
+    let systemName: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Label(text, systemImage: systemName)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color.storyInk.opacity(0.72))
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(color.opacity(0.1), in: Capsule())
+    }
+}
+
+private struct PhotoViewer: View {
+    let imageName: String
+    let accentColor: Color
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.storyInk
+                    .ignoresSafeArea()
+
+                Image(imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(.horizontal, 8)
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(accentColor.opacity(0.9), in: Circle())
+                    }
+                }
+            }
+            .toolbarBackground(Color.storyInk, for: .navigationBar)
         }
     }
 }
@@ -630,6 +1233,11 @@ private struct PrototypeEntryRow: View {
             }
 
             Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.storyGray.opacity(0.4))
+                .padding(.top, 4)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 14)
@@ -780,6 +1388,81 @@ private struct PrototypeChapter: Identifiable {
     ]
 }
 
+private enum UserChapterStore {
+    private struct Record: Codable {
+        let title: String
+        let subtitle: String
+        let symbol: String
+        let kind: String
+    }
+
+    private static let storageKey = "StorytopiaUserChapters"
+
+    static func load() -> [PrototypeChapter] {
+        guard
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let records = try? JSONDecoder().decode([Record].self, from: data)
+        else {
+            return []
+        }
+
+        return records.map { record in
+            PrototypeChapter(
+                title: record.title,
+                subtitle: record.subtitle,
+                color: color(for: record.symbol),
+                symbol: record.symbol,
+                coverImageName: nil,
+                kind: record.kind == "storyboard" ? .storyboard : .journal,
+                isFavorite: false,
+                entries: []
+            )
+        }
+    }
+
+    static func add(_ chapter: PrototypeChapter) {
+        let existingRecords: [Record]
+        if
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let decodedRecords = try? JSONDecoder().decode([Record].self, from: data)
+        {
+            existingRecords = decodedRecords
+        } else {
+            existingRecords = []
+        }
+
+        let newRecord = Record(
+            title: chapter.title,
+            subtitle: chapter.subtitle,
+            symbol: chapter.symbol,
+            kind: chapter.kind == .storyboard ? "storyboard" : "journal"
+        )
+
+        guard let data = try? JSONEncoder().encode([newRecord] + existingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private static func color(for symbol: String) -> Color {
+        switch symbol {
+        case "sun.max.fill":
+            return Color(red: 0.97, green: 0.62, blue: 0.28)
+        case "moon.stars.fill":
+            return Color(red: 0.43, green: 0.38, blue: 0.78)
+        case "building.2.fill":
+            return Color(red: 0.29, green: 0.70, blue: 0.65)
+        case "heart.fill":
+            return Color.storyRose
+        case "leaf.fill":
+            return Color(red: 0.35, green: 0.64, blue: 0.43)
+        default:
+            return Color(red: 0.34, green: 0.55, blue: 0.92)
+        }
+    }
+}
+
 private struct PrototypeEntry: Identifiable {
     let id = UUID()
     let weekday: String
@@ -789,4 +1472,27 @@ private struct PrototypeEntry: Identifiable {
     let time: String
     let location: String?
     let imageNames: [String]
+
+    var reflection: String {
+        switch title {
+        case "A slow morning in Williamsburg":
+            return "I want to remember how spacious the day felt before it filled up."
+        case "Sunday dinner":
+            return "Some traditions survive because nobody is ready for the conversation to end."
+        case "The first warm night":
+            return "The whole neighborhood felt like it had been waiting at the same window."
+        case "The road to the coast":
+            return "The detours became the parts of the trip we quoted on the way home."
+        case "Boardwalk at sunset":
+            return "For a few minutes, the sky and the old neon signs seemed to agree on a color."
+        case "The library under the ocean":
+            return "I woke up wondering who kept reading after I left."
+        case "Notes from the train":
+            return "A city tells on itself in the half-sentences people leave behind."
+        case "The corner flower stand":
+            return "Being remembered in a small way can change the shape of an ordinary morning."
+        default:
+            return "A small moment, kept here before it could slip away."
+        }
+    }
 }
