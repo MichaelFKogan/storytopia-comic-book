@@ -1860,9 +1860,8 @@ private struct PrototypeEntryDetailView: View {
                 } label: {
                     Image(firstImageName)
                         .resizable()
-                        .scaledToFill()
+                        .aspectRatio(momentImageAspectRatio(for: firstImageName), contentMode: .fit)
                         .frame(maxWidth: .infinity)
-                        .frame(height: entry.imageNames.count == 1 ? 240 : 205)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(alignment: .bottomTrailing) {
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -1875,25 +1874,15 @@ private struct PrototypeEntryDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if entry.imageNames.count > 1 {
-                HStack(spacing: 8) {
-                    ForEach(Array(entry.imageNames.dropFirst().prefix(3)), id: \.self) { imageName in
-                        Button {
-                            selectedImageName = imageName
-                        } label: {
-                            Image(imageName)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 78)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
         }
+    }
+
+    private func momentImageAspectRatio(for imageName: String) -> CGFloat {
+        guard let image = UIImage(named: imageName), image.size.height > 0 else {
+            return 1
+        }
+
+        return image.size.width / image.size.height
     }
 
     private var journalPage: some View {
