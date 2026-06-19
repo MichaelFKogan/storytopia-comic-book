@@ -20,12 +20,8 @@ struct ProfileView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [.white, .white, Color.storyBlush.opacity(0.2)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color.homePageBackground
+                .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -160,7 +156,7 @@ struct ProfileView: View {
 
                     Text("All the storyboards you've created.")
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color.storyGray)
+                        .foregroundStyle(Color.homeMutedText)
                 }
 
                 Spacer()
@@ -177,7 +173,7 @@ struct ProfileView: View {
                     } label: {
                         Text(isSelecting ? "Done" : "Select")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyPurple)
+                            .foregroundStyle(Color.homeAccent)
                             .frame(height: 32)
                     }
                     .buttonStyle(.plain)
@@ -281,7 +277,7 @@ struct ProfileView: View {
         .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(Color.storyBorder.opacity(0.7))
+                .fill(Color.homeBorder)
                 .frame(height: 1)
         }
     }
@@ -324,7 +320,7 @@ struct ProfileStat: View {
 
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.storyInk.opacity(0.72))
+                .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
@@ -336,27 +332,27 @@ struct StoryboardPlaceholderCard: View {
     var body: some View {
         ZStack {
             Rectangle()
-                .fill(Color.white.opacity(0.38))
+                .fill(Color.white)
                 .overlay(
                     Rectangle()
-                        .stroke(Color.storyBorder.opacity(0.56), lineWidth: 1)
+                        .stroke(Color.homeBorder, lineWidth: 1)
                 )
 
             VStack(spacing: 9) {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "photo")
                         .font(.system(size: 30, weight: .regular))
-                        .foregroundStyle(Color.storyPurple.opacity(0.28))
+                        .foregroundStyle(Color.homeAccent.opacity(0.28))
 
                     Image(systemName: "sparkles")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.storyPurple.opacity(0.38))
+                        .foregroundStyle(Color.homeAccent.opacity(0.38))
                         .offset(x: 13, y: -8)
                 }
 
                 Text("No storyboards yet")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.storyGray.opacity(0.72))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.72))
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
             }
@@ -386,7 +382,7 @@ struct GeneratedStoryboardThumbnail: View {
 
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(isSelected ? Color.storyPurple : .white)
+                        .foregroundStyle(isSelected ? Color.homeAccent : .white)
                         .background(
                             Circle()
                                 .fill(isSelected ? Color.white : Color.black.opacity(0.28))
@@ -405,7 +401,7 @@ struct GeneratedStoryboardThumbnail: View {
         .overlay {
             if isSelected {
                 Rectangle()
-                    .stroke(Color.storyPurple, lineWidth: 3)
+                    .stroke(Color.homeAccent, lineWidth: 3)
             }
         }
     }
@@ -431,10 +427,10 @@ private extension View {
             .foregroundStyle(color)
             .padding(.horizontal, 11)
             .frame(height: 38)
-            .background(Color.white.opacity(0.8), in: Capsule())
+            .background(Color.white, in: Capsule())
             .overlay {
                 Capsule()
-                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+                    .stroke(Color.homeBorder, lineWidth: 1)
             }
     }
 }

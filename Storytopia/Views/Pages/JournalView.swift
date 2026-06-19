@@ -79,7 +79,7 @@ struct JournalView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.storyGray.opacity(0.76))
+                .foregroundStyle(Color.homeMutedText.opacity(0.76))
 
             TextField("Search entries...", text: $searchText)
                 .font(.system(size: 14, weight: .medium))
@@ -90,17 +90,17 @@ struct JournalView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.storyGray.opacity(0.5))
+                        .foregroundStyle(Color.homeMutedText.opacity(0.5))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 12)
         .frame(height: 39)
-        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.44), lineWidth: 1)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
     }
 
@@ -126,7 +126,7 @@ struct JournalView: View {
                                 .font(.system(size: 9, weight: .bold))
                         }
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
+                        .foregroundStyle(Color.homeAccent)
                     }
                     .buttonStyle(.plain)
                 }
@@ -173,23 +173,23 @@ struct JournalView: View {
                         }
                     }
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
+                    .foregroundStyle(Color.homeAccent)
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.storyGray.opacity(0.52))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.52))
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.storyPurple.opacity(0.24), lineWidth: 1)
+                    .stroke(Color.homeBorder, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
     }
@@ -213,12 +213,12 @@ struct JournalView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.storyLavender.opacity(0.72))
+                .fill(Color.homeAccent.opacity(0.1))
                 .frame(width: 58, height: 70)
                 .overlay {
                     Image(systemName: "doc.text")
                         .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color.storyPurple)
+                        .foregroundStyle(Color.homeAccent)
                 }
         }
     }
@@ -227,24 +227,32 @@ struct JournalView: View {
         HStack(spacing: 10) {
             Image(systemName: "doc.badge.plus")
                 .font(.system(size: 20))
-                .foregroundStyle(Color.storyPurple.opacity(0.7))
+                .foregroundStyle(Color.homeAccent.opacity(0.7))
 
             Text("Drafts you save while creating a story will appear here.")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.storyGray)
+                .foregroundStyle(Color.homeMutedText)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.56), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
     private var noDraftSearchResults: some View {
         Text("No saved drafts match your search.")
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Color.storyGray)
+            .foregroundStyle(Color.homeMutedText)
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.56), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.homeBorder, lineWidth: 1)
+            )
     }
 
     private func draftDisplayTitle(_ draft: CreateEntryDraft) -> String {
@@ -279,11 +287,11 @@ struct JournalView: View {
         HStack(spacing: 9) {
             Image(systemName: "eye.fill")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyPurple)
+                .foregroundStyle(Color.homeAccent)
 
             Text("Previewing sample journal entries")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.storyInk.opacity(0.72))
+                .foregroundStyle(Color.homeMutedText)
 
             Spacer()
 
@@ -293,11 +301,15 @@ struct JournalView: View {
                 }
             }
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(Color.storyPurple)
+            .foregroundStyle(Color.homeAccent)
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
-        .background(Color.storyLavender.opacity(0.48), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
     private var chapterList: some View {
@@ -311,66 +323,54 @@ struct JournalView: View {
 
                 Text("\(chapters.count) days")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.storyGray)
+                    .foregroundStyle(Color.homeMutedText)
             }
             .padding(.top, 2)
 
             if chapters.isEmpty {
                 noSearchResults
             } else {
-                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
-                    let journalChapter = dateTitledChapter(from: chapter, dayOffset: index)
-
-                    NavigationLink {
-                        PrototypeChapterDetailView(
-                            chapter: journalChapter,
-                            entryDate: journalDate(dayOffset: index),
-                            presentation: .dailyJournal
-                        ) { entry in
-                            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
-                                return
-                            }
-
-                            chapters[chapterIndex].entries.insert(entry, at: 0)
-                            StoryEntryStore.add(entry, to: chapter.title)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                    alignment: .leading,
+                    spacing: 12
+                ) {
+                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                        NavigationLink {
+                            dailyJournalDetail(for: chapter, dayOffset: index)
+                        } label: {
+                            PrototypeChapterRow(
+                                chapter: DailyJournalData.dateTitledChapter(from: chapter, dayOffset: index),
+                                date: journalDate(dayOffset: index)
+                            )
                         }
-                    } label: {
-                        PrototypeChapterRow(
-                            chapter: journalChapter,
-                            date: journalDate(dayOffset: index)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
     private func journalDate(dayOffset: Int) -> Date {
-        Calendar.current.date(byAdding: .day, value: -dayOffset, to: Date()) ?? Date()
+        DailyJournalData.journalDate(dayOffset: dayOffset)
     }
 
-    private func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
-        let date = journalDate(dayOffset: dayOffset)
-        return PrototypeChapter(
-            title: Calendar.current.isDateInToday(date)
-                ? "Today"
-                : date.formatted(.dateTime.weekday(.wide)),
-            subtitle: date.formatted(date: .complete, time: .omitted),
-            color: chapter.color,
-            symbol: "calendar",
-            coverImageName: chapter.coverImageName,
-            kind: .journal,
-            isFavorite: chapter.isFavorite,
-            entries: chapter.entries
-        )
+    private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
+        DailyJournalData.detailView(for: chapter, dayOffset: dayOffset) { entry in
+            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
+                return
+            }
+
+            chapters[chapterIndex].entries.insert(entry, at: 0)
+            StoryEntryStore.add(entry, to: chapter.title)
+        }
     }
 
     private var noSearchResults: some View {
         VStack(spacing: 8) {
             Image(systemName: "text.magnifyingglass")
                 .font(.system(size: 28))
-                .foregroundStyle(Color.storyPurple.opacity(0.6))
+                .foregroundStyle(Color.homeAccent.opacity(0.6))
 
             Text("No journals yet")
                 .font(.system(size: 15, weight: .bold))
@@ -378,11 +378,15 @@ struct JournalView: View {
 
             Text("Your daily journals will appear here.")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.storyGray)
+                .foregroundStyle(Color.homeMutedText)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 38)
-        .background(Color.white.opacity(0.64), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
     private var emptyState: some View {
@@ -404,7 +408,7 @@ struct JournalView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineSpacing(2)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(Color.storyInk.opacity(0.76))
+                    .foregroundStyle(Color.homeMutedText)
             }
 
             Button {
@@ -415,7 +419,7 @@ struct JournalView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
                     .frame(height: 39)
-                    .background(Color.storyPurple, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .padding(.top, 10)
 
@@ -425,19 +429,105 @@ struct JournalView: View {
                 }
             }
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(Color.storyPurple)
+            .foregroundStyle(Color.homeAccent)
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var journalBackground: some View {
-        LinearGradient(
-            colors: [Color.storyCream, .white, Color.storyBlush],
-            startPoint: .top,
-            endPoint: .bottom
+        Color.homePageBackground
+            .ignoresSafeArea()
+    }
+}
+
+struct TodayJournalView: View {
+    @Binding var selectedPage: StoryPage
+    @State private var chapter = DailyJournalData.todayChapter()
+    @State private var isShowingNewEntryPage = false
+
+    var body: some View {
+        NavigationStack {
+            DailyJournalData.detailView(
+                for: chapter,
+                dayOffset: 0,
+                onNewEntryPresentationChange: { isShowingNewEntryPage = $0 }
+            ) { entry in
+                chapter.entries.insert(entry, at: 0)
+                StoryEntryStore.add(entry, to: chapter.title)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !isShowingNewEntryPage {
+                BottomNavigationBar(selectedPage: $selectedPage)
+            }
+        }
+    }
+}
+
+private enum DailyJournalData {
+    static func todayChapter() -> PrototypeChapter {
+        if let userChapter = UserChapterStore.load().first {
+            return chapterWithStoredEntries(userChapter)
+        }
+
+        if let sampleChapter = PrototypeChapter.samples.first(where: {
+            !DeletedSampleChapterStore.contains(title: $0.title)
+        }) {
+            return chapterWithStoredEntries(sampleChapter)
+        }
+
+        return PrototypeChapter(
+            title: "Today",
+            subtitle: Date().formatted(date: .complete, time: .omitted),
+            color: .storyPurple,
+            symbol: "calendar",
+            coverImageName: nil,
+            kind: .journal,
+            isFavorite: false,
+            entries: []
         )
-        .ignoresSafeArea()
+    }
+
+    static func journalDate(dayOffset: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: -dayOffset, to: Date()) ?? Date()
+    }
+
+    static func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
+        let date = journalDate(dayOffset: dayOffset)
+        return PrototypeChapter(
+            title: Calendar.current.isDateInToday(date)
+                ? "Today"
+                : date.formatted(.dateTime.weekday(.wide)),
+            subtitle: date.formatted(date: .complete, time: .omitted),
+            color: chapter.color,
+            symbol: "calendar",
+            coverImageName: chapter.coverImageName,
+            kind: .journal,
+            isFavorite: chapter.isFavorite,
+            entries: chapter.entries
+        )
+    }
+
+    static func detailView(
+        for chapter: PrototypeChapter,
+        dayOffset: Int,
+        onNewEntryPresentationChange: @escaping (Bool) -> Void = { _ in },
+        onAddEntry: @escaping (PrototypeEntry) -> Void
+    ) -> some View {
+        PrototypeChapterDetailView(
+            chapter: dateTitledChapter(from: chapter, dayOffset: dayOffset),
+            entryDate: journalDate(dayOffset: dayOffset),
+            presentation: .dailyJournal,
+            onNewEntryPresentationChange: onNewEntryPresentationChange,
+            onCreateStory: onAddEntry
+        )
+    }
+
+    private static func chapterWithStoredEntries(_ chapter: PrototypeChapter) -> PrototypeChapter {
+        var chapter = chapter
+        chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
+        return chapter
     }
 }
 
@@ -721,83 +811,76 @@ private struct PrototypeChapterRow: View {
     let chapter: PrototypeChapter
     let date: Date
 
-    private var imageNames: [String] {
-        chapter.entries.flatMap(\.imageNames)
+    private var coverImageName: String? {
+        chapter.entries.flatMap(\.imageNames).first ?? chapter.coverImageName
+    }
+
+    private var badgeMonth: String {
+        date.formatted(.dateTime.month(.abbreviated)).uppercased()
+    }
+
+    private var badgeDay: String {
+        date.formatted(.dateTime.day())
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            dateBadge
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            coverArt(width: width, height: width * 1.34)
+                .frame(width: width, height: width * 1.34, alignment: .topLeading)
+        }
+        .aspectRatio(0.74, contentMode: .fit)
+    }
 
-            VStack(alignment: .leading, spacing: 0) {
-                if !imageNames.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 2) {
-                            ForEach(Array(imageNames.enumerated()), id: \.offset) { index, imageName in
-                                Image(imageName)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(
-                                        width: thumbnailWidth(for: imageName),
-                                        height: 80
-                                    )
-                                    .accessibilityLabel("Story image \(index + 1) of \(imageNames.count)")
-                            }
-                        }
-                    }
-                    .frame(height: 80)
-                }
+    private func coverArt(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            if let coverImageName {
+                Image(coverImageName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .overlay(
+                        Rectangle()
+                            .stroke(Color.storyInk.opacity(0.18), lineWidth: 1)
+                    )
+                    .accessibilityLabel("Journal cover image for \(badgeMonth) \(badgeDay)")
+            } else {
+                NotebookCover(
+                    color: Color.homeAccent,
+                    symbol: chapter.symbol,
+                    imageName: nil,
+                    width: width,
+                    height: height
+                )
+                .accessibilityLabel("Notebook cover for \(badgeMonth) \(badgeDay)")
             }
-            .frame(height: 80, alignment: .leading)
-        }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 10)
-        .padding(.trailing, 48)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.44), lineWidth: 1)
-        )
-        .overlay(alignment: .trailing) {
-            HStack(spacing: 8) {
-                Text("\(chapter.entries.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.storyInk.opacity(0.5))
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.storyGray.opacity(0.42))
+            VStack(spacing: 1) {
+                Text(badgeMonth)
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                Text(badgeDay)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
             }
-                .padding(.trailing, 11)
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(
+                LinearGradient(
+                    colors: [Color.homeAccent, Color.homeAccent.opacity(0.84)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                Rectangle()
+                    .stroke(.white.opacity(0.38), lineWidth: 1)
+            )
+            .shadow(color: Color.homeAccent.opacity(0.28), radius: 4, y: 2)
         }
-        .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
+        .frame(width: width, height: height)
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
     }
 
-    private var dateBadge: some View {
-        VStack(spacing: 3) {
-            Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
-                .font(.system(size: 10, weight: .heavy))
-                .foregroundStyle(Color.storyPurple)
-
-            Text(date.formatted(.dateTime.day()))
-                .font(.system(size: 22, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
-        }
-        .frame(width: 60, height: 60)
-        .background(
-            Color.storyLavender.opacity(0.7),
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-    }
-
-    private func thumbnailWidth(for imageName: String) -> CGFloat {
-        guard let image = UIImage(named: imageName), image.size.height > 0 else {
-            return 80
-        }
-
-        return 80 * (image.size.width / image.size.height)
-    }
 }
 
 private struct NotebookCover: View {
@@ -854,6 +937,7 @@ private struct PrototypeChapterDetailView: View {
 
     @State private var chapter: PrototypeChapter
     let onCreateStory: (PrototypeEntry) -> Void
+    let onNewEntryPresentationChange: (Bool) -> Void
     let entryDate: Date
     let presentation: Presentation
 
@@ -861,52 +945,55 @@ private struct PrototypeChapterDetailView: View {
     @State private var isShowingNewStory = false
     @State private var selectedMediaIndex: Int?
 
-    private let sections = ["Media", "Entries"]
+    private let sections = ["Entries", "Media"]
 
     private var mediaImageNames: [String] {
         chapter.entries.flatMap(\.imageNames)
+    }
+
+    private var heroImageName: String? {
+        mediaImageNames.first ?? chapter.coverImageName
     }
 
     init(
         chapter: PrototypeChapter,
         entryDate: Date = Date(),
         presentation: Presentation = .story,
+        onNewEntryPresentationChange: @escaping (Bool) -> Void = { _ in },
         onCreateStory: @escaping (PrototypeEntry) -> Void
     ) {
         _chapter = State(initialValue: chapter)
         _selectedSection = State(initialValue: presentation == .dailyJournal ? "Entries" : "Media")
         self.entryDate = entryDate
         self.presentation = presentation
+        self.onNewEntryPresentationChange = onNewEntryPresentationChange
         self.onCreateStory = onCreateStory
     }
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    chapter.color.opacity(0.28),
-                    Color.storyCream,
-                    Color.storyBlush.opacity(0.62)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color.homePageBackground
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        chapterSummary
-                        sectionPicker
+                    VStack(alignment: .leading, spacing: 0) {
+                        journalHeroHeader
 
-                        if selectedSection == "Entries" {
-                            entriesList
-                        } else {
-                            mediaGrid
+                        VStack(alignment: .leading, spacing: 16) {
+                            mediaComicStrip
+                            sectionPicker
+
+                            if selectedSection == "Entries" {
+                                entriesList
+                            } else {
+                                mediaGrid
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 32)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 32)
                 }
             }
         }
@@ -914,6 +1001,8 @@ private struct PrototypeChapterDetailView: View {
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .tint(Color.homeAccent)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -921,15 +1010,14 @@ private struct PrototypeChapterDetailView: View {
                 } label: {
                     Image(systemName: "plus")
                         .fontWeight(.bold)
-                        .foregroundStyle(chapter.color)
                 }
                 .accessibilityLabel(presentation == .dailyJournal ? "Create a new journal entry" : "Create a new story")
             }
         }
-        .sheet(isPresented: $isShowingNewStory) {
+        .navigationDestination(isPresented: $isShowingNewStory) {
             NewStorySheet(
                 chapterTitle: chapter.title,
-                accentColor: chapter.color,
+                accentColor: Color.homeAccent,
                 initialDate: entryDate,
                 collectionLabel: presentation == .dailyJournal ? "Daily Journal" : "Chapter",
                 locksEntryDate: presentation == .dailyJournal
@@ -938,9 +1026,9 @@ private struct PrototypeChapterDetailView: View {
                 selectedSection = "Entries"
                 onCreateStory(entry)
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.clear)
+        }
+        .onChange(of: isShowingNewStory) { isShowing in
+            onNewEntryPresentationChange(isShowing)
         }
         .fullScreenCover(
             isPresented: Binding(
@@ -956,46 +1044,145 @@ private struct PrototypeChapterDetailView: View {
                 VerticalComicViewer(
                     imageNames: mediaImageNames,
                     initialIndex: selectedMediaIndex,
-                    accentColor: chapter.color
+                    accentColor: Color.homeAccent
                 )
             }
         }
     }
 
-    private var chapterSummary: some View {
-        HStack(spacing: 16) {
-            NotebookCover(
-                color: chapter.color,
-                symbol: chapter.symbol,
-                imageName: chapter.coverImageName,
-                width: 58,
-                height: 72
-            )
-            .scaleEffect(1.14)
-            .frame(width: 68, height: 82)
+    private var journalHeroHeader: some View {
+        heroDetails
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
+    private var heroDetails: some View {
+        HStack(alignment: .bottom, spacing: 18) {
+            NotebookCover(
+                color: Color.homeAccent,
+                symbol: chapter.symbol,
+                imageName: heroImageName,
+                width: 122,
+                height: 158
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.white.opacity(0.28), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 12, y: 7)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label(entryCountText, systemImage: "book.pages.fill")
+                    Label("\(chapter.imageCount) photos", systemImage: "photo.fill")
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+
                 Text(chapter.title)
-                    .font(.system(size: 24, weight: .bold, design: .serif))
+                    .font(.system(size: 30, weight: .heavy, design: .serif))
                     .foregroundStyle(Color.storyInk)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(chapter.subtitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.storyGray)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+                    .lineLimit(2)
 
-                Text("\(entryCountText)  •  \(chapter.imageCount) photos")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.storyInk.opacity(0.64))
+                Text(entryDate.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.78))
             }
-
-            Spacer()
         }
-        .padding(16)
-        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(chapter.color.opacity(0.25), lineWidth: 1)
-        )
+    }
+
+    private var mediaComicStrip: some View {
+        Group {
+            if !mediaImageNames.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .bottom, spacing: 8) {
+                        ForEach(Array(mediaImageNames.enumerated()), id: \.offset) { index, imageName in
+                            Button {
+                                selectedMediaIndex = index
+                            } label: {
+                                comicStripPanel(imageName: imageName, index: index)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open photo \(index + 1) of \(mediaImageNames.count)")
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+                .padding(.horizontal, -16)
+            }
+        }
+    }
+
+    private func comicStripPanel(imageName: String, index: Int) -> some View {
+        let size = comicStripPanelSize(for: imageName)
+
+        return Image(imageName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size.width, height: size.height)
+            .overlay(alignment: .topLeading) {
+                Text("\(index + 1)")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.storyInk)
+                    .frame(width: 24, height: 20)
+                    .background(Color.white.opacity(0.9))
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 6,
+                            bottomLeadingRadius: 0,
+                            bottomTrailingRadius: 5,
+                            topTrailingRadius: 0,
+                            style: .continuous
+                        )
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.white, lineWidth: 3)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.16), lineWidth: 1)
+            )
+            .rotationEffect(.degrees(comicStripRotation(for: index)))
+            .shadow(color: Color.storyInk.opacity(0.12), radius: 7, y: 4)
+            .padding(.vertical, 4)
+    }
+
+    private func comicStripPanelSize(for imageName: String) -> CGSize {
+        let height: CGFloat = 248
+
+        guard let image = UIImage(named: imageName), image.size.height > 0 else {
+            return CGSize(width: 184, height: height)
+        }
+
+        let width = height * (image.size.width / image.size.height)
+        return CGSize(width: min(max(width, 152), 308), height: height)
+    }
+
+    private func comicStripRotation(for index: Int) -> Double {
+        switch index % 5 {
+        case 0:
+            return -1.5
+        case 1:
+            return 1.2
+        case 2:
+            return -0.6
+        case 3:
+            return 1.6
+        default:
+            return 0.4
+        }
     }
 
     private var sectionPicker: some View {
@@ -1009,10 +1196,10 @@ private struct PrototypeChapterDetailView: View {
                     VStack(spacing: 8) {
                         Text(section)
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(selectedSection == section ? Color.storyInk : Color.storyGray.opacity(0.64))
+                            .foregroundStyle(selectedSection == section ? Color.homeAccent : Color.homeMutedText.opacity(0.78))
 
                         Capsule()
-                            .fill(selectedSection == section ? chapter.color : Color.clear)
+                            .fill(selectedSection == section ? Color.homeAccent : Color.clear)
                             .frame(height: 3)
                     }
                     .frame(maxWidth: .infinity)
@@ -1029,7 +1216,7 @@ private struct PrototypeChapterDetailView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "book.pages")
                         .font(.system(size: 32))
-                        .foregroundStyle(chapter.color.opacity(0.72))
+                        .foregroundStyle(Color.homeAccent.opacity(0.72))
 
                     Text(presentation == .dailyJournal ? "No journal entries yet" : "No stories yet")
                         .font(.system(size: 17, weight: .bold, design: .serif))
@@ -1041,7 +1228,7 @@ private struct PrototypeChapterDetailView: View {
                             : "Begin this chapter with its first story."
                     )
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.storyGray)
+                        .foregroundStyle(Color.homeMutedText)
                         .multilineTextAlignment(.center)
 
                     Button {
@@ -1055,7 +1242,7 @@ private struct PrototypeChapterDetailView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
                             .frame(height: 40)
-                            .background(chapter.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1071,7 +1258,7 @@ private struct PrototypeChapterDetailView: View {
                                 title: presentation == .dailyJournal ? "Journal Entry" : "Story"
                             )
                         } label: {
-                            PrototypeEntryRow(entry: entry, accentColor: chapter.color)
+                            PrototypeEntryRow(entry: entry, accentColor: Color.homeAccent)
                         }
                         .buttonStyle(.plain)
 
@@ -1083,11 +1270,12 @@ private struct PrototypeChapterDetailView: View {
                 }
             }
         }
-        .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.38), lineWidth: 1)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
     }
 
     private var entryCountText: String {
@@ -1105,7 +1293,7 @@ private struct PrototypeChapterDetailView: View {
             if mediaImageNames.isEmpty {
                 Text("No photos yet")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.storyGray)
+                    .foregroundStyle(Color.homeMutedText)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 36)
             } else {
@@ -1182,37 +1370,32 @@ private struct NewStorySheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                newStoryBackground
-                    .onTapGesture {
-                        dismissKeyboard()
-                    }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    pageHeader
-
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            editorCard
-                            storyDetailsCard
-                            entryPrivacyCard
-                            saveEntryButton
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 14)
-                        .padding(.bottom, 28)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
+        ZStack {
+            newStoryBackground
+                .onTapGesture {
+                    dismissKeyboard()
                 }
+
+            VStack(alignment: .leading, spacing: 0) {
+                pageHeader
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        editorCard
+                        storyDetailsCard
+                        entryPrivacyCard
+                        saveEntryButton
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
+                }
+                .scrollDismissesKeyboard(.interactively)
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .onAppear {
-                isTitleFocused = true
-            }
-            .navigationDestination(isPresented: $isShowingExpandedEditor) {
-                ExpandedEntryEditor(entryText: $bodyText, storyTitle: $title)
-            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $isShowingExpandedEditor) {
+            ExpandedEntryEditor(entryText: $bodyText, storyTitle: $title)
         }
         .background(newStoryBackground)
         .preferredColorScheme(.light)
@@ -1547,6 +1730,8 @@ private struct PrototypeEntryDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .tint(Color.homeAccent)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 entryOptionsMenu
@@ -1563,26 +1748,14 @@ private struct PrototypeEntryDetailView: View {
             )
         ) {
             if let selectedImageName {
-                PhotoViewer(imageName: selectedImageName, accentColor: chapter.color)
+                PhotoViewer(imageName: selectedImageName, accentColor: Color.homeAccent)
             }
         }
     }
 
     private var storyDetailBackground: some View {
-        ZStack {
-            Color.storyCream
-
-            LinearGradient(
-                colors: [
-                    chapter.color.opacity(0.24),
-                    Color.storyCream,
-                    Color.storyBlush.opacity(0.68)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .ignoresSafeArea()
+        Color.homePageBackground
+            .ignoresSafeArea()
     }
 
     private var entryOptionsMenu: some View {
@@ -1619,23 +1792,23 @@ private struct PrototypeEntryDetailView: View {
                 VStack(spacing: 1) {
                     Text(entry.weekday)
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(chapter.color)
+                        .foregroundStyle(Color.homeAccent)
 
                     Text(entry.day)
                         .font(.system(size: 28, weight: .bold, design: .serif))
                         .foregroundStyle(Color.storyInk)
                 }
                 .frame(width: 48, height: 54)
-                .background(chapter.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.homeAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(chapter.title)
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(chapter.color)
+                        .foregroundStyle(Color.homeAccent)
 
                     Text(entry.time)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.storyGray)
+                        .foregroundStyle(Color.homeMutedText)
                 }
 
                 Spacer()
@@ -1649,7 +1822,7 @@ private struct PrototypeEntryDetailView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(isFavorite ? Color.storyRose : Color.storyInk.opacity(0.58))
                         .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.72), in: Circle())
+                        .background(Color.white, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isFavorite ? "Remove from favorites" : "Add to favorites")
@@ -1667,11 +1840,12 @@ private struct PrototypeEntryDetailView: View {
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(chapter.color.opacity(0.2), lineWidth: 1)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
     }
 
     private var photoStory: some View {
@@ -1727,7 +1901,7 @@ private struct PrototypeEntryDetailView: View {
             HStack {
                 Label("My story", systemImage: "text.quote")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(chapter.color)
+                    .foregroundStyle(Color.homeAccent)
 
                 Spacer()
 
@@ -1743,7 +1917,7 @@ private struct PrototypeEntryDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Rectangle()
-                .fill(chapter.color.opacity(0.18))
+                .fill(Color.homeBorder)
                 .frame(height: 1)
 
             Text(entry.reflection)
@@ -1756,12 +1930,12 @@ private struct PrototypeEntryDetailView: View {
         .padding(18)
         .background {
             ZStack {
-                Color.white.opacity(0.88)
+                Color.white
 
                 VStack(spacing: 27) {
                     ForEach(0..<12, id: \.self) { _ in
                         Rectangle()
-                            .fill(chapter.color.opacity(0.07))
+                            .fill(Color.homeAccent.opacity(0.06))
                             .frame(height: 1)
                     }
                 }
@@ -1771,9 +1945,9 @@ private struct PrototypeEntryDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.46), lineWidth: 1)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.045), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
     }
 
     private var entryDetails: some View {
@@ -1783,10 +1957,10 @@ private struct PrototypeEntryDetailView: View {
                 .foregroundStyle(Color.storyInk)
 
             HStack(spacing: 10) {
-                DetailPill(systemName: "clock", text: entry.time, color: chapter.color)
+                DetailPill(systemName: "clock", text: entry.time, color: Color.homeAccent)
 
                 if let location = entry.location {
-                    DetailPill(systemName: "location", text: location, color: chapter.color)
+                    DetailPill(systemName: "location", text: location, color: Color.homeAccent)
                 }
             }
         }
@@ -1936,6 +2110,7 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
         ])
 
         context.coordinator.stackView = stackView
+        context.coordinator.pageViews = []
         context.coordinator.imageViews = imageNames.enumerated().compactMap { index, imageName in
             guard let image = UIImage(named: imageName) else {
                 return nil
@@ -1952,11 +2127,25 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
             imageView.backgroundColor = .black
             imageView.clipsToBounds = true
             imageView.translatesAutoresizingMaskIntoConstraints = false
-            imageView.heightAnchor.constraint(
-                equalTo: imageView.widthAnchor,
-                multiplier: image.size.height / image.size.width
-            ).isActive = true
-            stackView.addArrangedSubview(imageView)
+
+            let pageView = UIView()
+            pageView.backgroundColor = .black
+            pageView.translatesAutoresizingMaskIntoConstraints = false
+            pageView.addSubview(imageView)
+
+            NSLayoutConstraint.activate([
+                imageView.leadingAnchor.constraint(equalTo: pageView.leadingAnchor),
+                imageView.trailingAnchor.constraint(equalTo: pageView.trailingAnchor),
+                imageView.topAnchor.constraint(equalTo: pageView.topAnchor),
+                imageView.bottomAnchor.constraint(equalTo: pageView.bottomAnchor),
+                pageView.heightAnchor.constraint(
+                    equalTo: pageView.widthAnchor,
+                    multiplier: image.size.height / image.size.width
+                )
+            ])
+
+            stackView.addArrangedSubview(pageView)
+            context.coordinator.pageViews.append(pageView)
             return imageView
         }
 
@@ -1967,11 +2156,40 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
         return scrollView
     }
 
-    private func makeImageBoundary(nextIndex _: Int, totalCount _: Int) -> UIView {
+    private func makeImageBoundary(nextIndex: Int, totalCount: Int) -> UIView {
         let container = UIView()
         container.backgroundColor = UIColor(white: 0.035, alpha: 1)
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.heightAnchor.constraint(equalToConstant: 29).isActive = true
+
+        let line = UIView()
+        line.backgroundColor = UIColor.white.withAlphaComponent(0.86)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(line)
+
+        let numberLabel = UILabel()
+        numberLabel.translatesAutoresizingMaskIntoConstraints = false
+        numberLabel.text = "\(nextIndex + 1) / \(totalCount)"
+        numberLabel.font = .systemFont(ofSize: 12, weight: .heavy)
+        numberLabel.textColor = .white
+        numberLabel.textAlignment = .center
+        numberLabel.backgroundColor = UIColor(white: 0.035, alpha: 1)
+        numberLabel.layer.cornerRadius = 12
+        numberLabel.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor
+        numberLabel.layer.borderWidth = 1
+        numberLabel.layer.masksToBounds = true
+        container.addSubview(numberLabel)
+
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(equalToConstant: 42),
+            line.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 28),
+            line.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -28),
+            line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1),
+            numberLabel.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            numberLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            numberLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 56),
+            numberLabel.heightAnchor.constraint(equalToConstant: 24)
+        ])
 
         return container
     }
@@ -1983,6 +2201,7 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         var parent: ZoomableVerticalComicView
         weak var stackView: UIStackView?
+        var pageViews: [UIView] = []
         var imageViews: [UIImageView] = []
         private var didScrollToInitialImage = false
 
@@ -2005,7 +2224,7 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
         func scrollToInitialImage(in scrollView: UIScrollView) {
             guard
                 !didScrollToInitialImage,
-                imageViews.indices.contains(parent.initialIndex)
+                pageViews.indices.contains(parent.initialIndex)
             else {
                 return
             }
@@ -2013,7 +2232,7 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
             scrollView.layoutIfNeeded()
             stackView?.layoutIfNeeded()
 
-            let imageView = imageViews[parent.initialIndex]
+            let imageView = pageViews[parent.initialIndex]
             let targetY = max(
                 0,
                 imageView.frame.midY - (scrollView.bounds.height / 2)
@@ -2024,15 +2243,15 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
         }
 
         private func updateVisibleIndex(in scrollView: UIScrollView) {
-            guard !imageViews.isEmpty else {
+            guard !pageViews.isEmpty else {
                 return
             }
 
             let viewportCenterY = scrollView.contentOffset.y + (scrollView.bounds.height / 2)
             let zoomScale = scrollView.zoomScale
-            let closestIndex = imageViews.indices.min { left, right in
-                abs((imageViews[left].frame.midY * zoomScale) - viewportCenterY)
-                    < abs((imageViews[right].frame.midY * zoomScale) - viewportCenterY)
+            let closestIndex = pageViews.indices.min { left, right in
+                abs((pageViews[left].frame.midY * zoomScale) - viewportCenterY)
+                    < abs((pageViews[right].frame.midY * zoomScale) - viewportCenterY)
             }
 
             guard

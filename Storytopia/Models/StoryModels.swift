@@ -3,6 +3,7 @@ import UIKit
 
 enum StoryPage {
     case home
+    case today
     case explore
     case create
     case journal

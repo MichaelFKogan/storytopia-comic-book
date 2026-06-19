@@ -80,6 +80,14 @@ struct BottomNavigationBar: View {
             ) {
                 selectedPage = .home
             }
+            NavItem(
+                title: "Today",
+                systemName: "calendar",
+                isSelected: selectedPage == .today,
+                selectedColor: .homeAccent
+            ) {
+                selectedPage = .today
+            }
             CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
                 withAnimation(.snappy(duration: 0.32)) {
                     selectedPage = .create

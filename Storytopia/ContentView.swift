@@ -40,6 +40,10 @@ struct ContentView: View {
             HomeView(selectedPage: $selectedPage)
                 .transition(.identity)
                 .zIndex(0)
+        case .today:
+            TodayJournalView(selectedPage: $selectedPage)
+                .transition(.identity)
+                .zIndex(0)
         case .explore:
             ExploreView(selectedPage: $selectedPage)
                 .transition(.identity)
