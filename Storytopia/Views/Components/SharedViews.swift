@@ -71,7 +71,7 @@ struct BottomNavigationBar: View {
     @Binding var selectedPage: StoryPage
 
     var body: some View {
-        HStack {
+        HStack(spacing: 0) {
             NavItem(
                 title: "Home",
                 systemName: selectedPage == .home ? "house.fill" : "house",
@@ -80,31 +80,19 @@ struct BottomNavigationBar: View {
             ) {
                 selectedPage = .home
             }
-            Spacer()
             CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
                 withAnimation(.snappy(duration: 0.32)) {
                     selectedPage = .create
                 }
             }
-            Spacer()
             NavItem(
-                title: "Stories",
-                systemName: selectedPage == .journal ? "book.fill" : "book",
+                title: "Journals",
+                systemName: selectedPage == .journal ? "book.closed.fill" : "book.closed",
                 isSelected: selectedPage == .journal,
                 selectedColor: .homeAccent
             ) {
                 selectedPage = .journal
             }
-            Spacer()
-            NavItem(
-                title: "Stories List",
-                systemName: selectedPage == .storiesList ? "list.bullet.rectangle.fill" : "list.bullet.rectangle",
-                isSelected: selectedPage == .storiesList,
-                selectedColor: .homeAccent
-            ) {
-                selectedPage = .storiesList
-            }
-            Spacer()
             NavItem(
                 title: "Profile",
                 systemName: selectedPage == .profile ? "person.fill" : "person",
@@ -149,6 +137,7 @@ struct NavItem: View {
             .frame(maxWidth: .infinity)
             .frame(height: 44)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -168,7 +157,9 @@ struct CreateNavItem: View {
                     .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
             }
             .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
-            .frame(width: 50, height: 44)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
         }
+        .frame(maxWidth: .infinity)
     }
 }

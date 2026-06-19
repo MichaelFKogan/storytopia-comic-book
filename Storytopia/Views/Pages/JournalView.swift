@@ -6,18 +6,10 @@ struct JournalView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
-    @State private var selectedFilter = "All"
     @State private var searchText = ""
     @State private var showsPrototypeData = true
     @State private var chapters: [PrototypeChapter]
-    @State private var isShowingNewChapter = false
     @State private var savedDrafts: [CreateEntryDraft]
-    @State private var isEditingItems = false
-    @State private var selectedChapterIDs: Set<UUID> = []
-    @State private var selectedDraftIDs: Set<UUID> = []
-    @State private var isConfirmingSelectedDeletion = false
-
-    private let filters = ["All", "Journal", "Storyboards", "Favorites"]
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -49,9 +41,6 @@ struct JournalView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 15) {
                         header
-                        searchField
-                        filterTabs
-                        savedDraftsSection
 
                         if showsPrototypeData {
                             prototypeNotice
@@ -66,31 +55,8 @@ struct JournalView: View {
 
                 BottomNavigationBar(selectedPage: $selectedPage)
 
-                if isEditingItems {
-                    selectionBar
-                        .padding(.bottom, 72)
-                }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $isShowingNewChapter) {
-                NewChapterSheet { chapter in
-                    chapters.insert(chapter, at: 0)
-                    UserChapterStore.add(chapter)
-                    showsPrototypeData = true
-                    selectedFilter = "All"
-                    searchText = ""
-                }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
-            .alert("Delete Selected Items?", isPresented: $isConfirmingSelectedDeletion) {
-                Button("Delete", role: .destructive) {
-                    deleteSelectedItems()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("\(selectedItemCount) selected \(selectedItemCount == 1 ? "item" : "items") will be permanently deleted.")
-            }
         }
         .onAppear {
             savedDrafts = CreateEntryDraftStore.loadAll()
@@ -100,64 +66,11 @@ struct JournalView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("Stories")
+            Text("Daily Journals")
                 .font(.system(size: 30, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
-
-            Button(isEditingItems ? "Done" : "Edit") {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isEditingItems.toggle()
-                    if !isEditingItems {
-                        selectedChapterIDs.removeAll()
-                        selectedDraftIDs.removeAll()
-                    }
-                }
-            }
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(Color.storyPurple)
-
-            if !isEditingItems {
-                Button {
-                    isShowingNewChapter = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 31, height: 31)
-                        .background(Color.storyPurple, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Create a new chapter")
-            }
-
-            if !isEditingItems {
-                Menu {
-                    Button {
-                        showsPrototypeData = true
-                    } label: {
-                        Label("Show Sample Chapters", systemImage: "books.vertical")
-                    }
-
-                    Button {
-                        showsPrototypeData = false
-                    } label: {
-                        Label("Show Empty State", systemImage: "rectangle.dashed")
-                    }
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Color.storyInk)
-                        .frame(width: 31, height: 31)
-                        .background(Color.white.opacity(0.76), in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.storyInk.opacity(0.7), lineWidth: 1.5)
-                        )
-                }
-                .accessibilityLabel("Chapter display options")
-            }
         }
         .padding(.top, 12)
     }
@@ -189,33 +102,6 @@ struct JournalView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.44), lineWidth: 1)
         )
-    }
-
-    private var filterTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
-                ForEach(filters, id: \.self) { filter in
-                    Button {
-                        selectedFilter = filter
-                    } label: {
-                        Text(filter)
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(selectedFilter == filter ? .white : Color.storyInk.opacity(0.85))
-                            .padding(.horizontal, 13)
-                            .frame(height: 34)
-                            .background(
-                                selectedFilter == filter ? Color.storyPurple : Color.white.opacity(0.7),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .stroke(selectedFilter == filter ? Color.storyPurple : Color.storyBorder.opacity(0.78), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
     }
 
     private var savedDraftsSection: some View {
@@ -259,18 +145,10 @@ struct JournalView: View {
 
     private func savedDraftCard(_ draft: CreateEntryDraft) -> some View {
         Button {
-            if isEditingItems {
-                toggleSelection(draftID: draft.id)
-            } else {
-                activeDraftID = draft.id
-                selectedPage = .create
-            }
+            activeDraftID = draft.id
+            selectedPage = .create
         } label: {
             HStack(spacing: 12) {
-                if isEditingItems {
-                    selectionIndicator(isSelected: selectedDraftIDs.contains(draft.id))
-                }
-
                 draftThumbnail(draft)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -403,7 +281,7 @@ struct JournalView: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.storyPurple)
 
-            Text("Previewing sample chapters")
+            Text("Previewing sample journal entries")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.storyInk.opacity(0.72))
 
@@ -425,152 +303,67 @@ struct JournalView: View {
     private var chapterList: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .lastTextBaseline) {
-                Text("Your Stories")
+                Text("Your Journals")
                     .font(.system(size: 19, weight: .bold, design: .serif))
                     .foregroundStyle(Color.storyInk)
 
                 Spacer()
 
-                Text("\(filteredChapters.count) books")
+                Text("\(chapters.count) days")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.storyGray)
             }
             .padding(.top, 2)
 
-            if filteredChapters.isEmpty {
+            if chapters.isEmpty {
                 noSearchResults
             } else {
-                ForEach(filteredChapters) { chapter in
-                    Group {
-                        if isEditingItems {
-                            Button {
-                                toggleSelection(chapterID: chapter.id)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    selectionIndicator(isSelected: selectedChapterIDs.contains(chapter.id))
-                                    PrototypeChapterRow(chapter: chapter)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            NavigationLink {
-                                PrototypeChapterDetailView(chapter: chapter) { entry in
-                                    guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
-                                        return
-                                    }
+                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                    let journalChapter = dateTitledChapter(from: chapter, dayOffset: index)
 
-                                    chapters[chapterIndex].entries.insert(entry, at: 0)
-                                    StoryEntryStore.add(entry, to: chapter.title)
-                                }
-                            } label: {
-                                PrototypeChapterRow(chapter: chapter)
+                    NavigationLink {
+                        PrototypeChapterDetailView(
+                            chapter: journalChapter,
+                            entryDate: journalDate(dayOffset: index),
+                            presentation: .dailyJournal
+                        ) { entry in
+                            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
+                                return
                             }
-                            .buttonStyle(.plain)
+
+                            chapters[chapterIndex].entries.insert(entry, at: 0)
+                            StoryEntryStore.add(entry, to: chapter.title)
                         }
+                    } label: {
+                        PrototypeChapterRow(
+                            chapter: journalChapter,
+                            date: journalDate(dayOffset: index)
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
-    private var selectedItemCount: Int {
-        selectedChapterIDs.count + selectedDraftIDs.count
+    private func journalDate(dayOffset: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: -dayOffset, to: Date()) ?? Date()
     }
 
-    private var selectionBar: some View {
-        HStack {
-            Text("\(selectedItemCount) selected")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-
-            Spacer()
-
-            Button(role: .destructive) {
-                isConfirmingSelectedDeletion = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-                    .font(.system(size: 13, weight: .bold))
-            }
-            .disabled(selectedItemCount == 0)
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 52)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 16)
-    }
-
-    private func selectionIndicator(isSelected: Bool) -> some View {
-        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-            .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(isSelected ? Color.storyPurple : Color.storyGray.opacity(0.55))
-    }
-
-    private func toggleSelection(chapterID: UUID) {
-        if selectedChapterIDs.contains(chapterID) {
-            selectedChapterIDs.remove(chapterID)
-        } else {
-            selectedChapterIDs.insert(chapterID)
-        }
-    }
-
-    private func toggleSelection(draftID: UUID) {
-        if selectedDraftIDs.contains(draftID) {
-            selectedDraftIDs.remove(draftID)
-        } else {
-            selectedDraftIDs.insert(draftID)
-        }
-    }
-
-    private func deleteSelectedItems() {
-        let chaptersToDelete = chapters.filter { selectedChapterIDs.contains($0.id) }
-        chaptersToDelete.forEach(deleteChapter)
-
-        let draftsToDelete = savedDrafts.filter { selectedDraftIDs.contains($0.id) }
-        draftsToDelete.forEach(deleteDraft)
-
-        selectedChapterIDs.removeAll()
-        selectedDraftIDs.removeAll()
-        isEditingItems = false
-    }
-
-    private func deleteChapter(_ chapter: PrototypeChapter) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            chapters.removeAll { $0.id == chapter.id }
-        }
-
-        UserChapterStore.delete(title: chapter.title)
-        StoryEntryStore.deleteAll(for: chapter.title)
-
-        if PrototypeChapter.samples.contains(where: { $0.title == chapter.title }) {
-            DeletedSampleChapterStore.add(title: chapter.title)
-        }
-
-    }
-
-    private var filteredChapters: [PrototypeChapter] {
-        chapters.filter { chapter in
-            let matchesSearch = searchText.isEmpty
-                || chapter.title.localizedCaseInsensitiveContains(searchText)
-                || chapter.subtitle.localizedCaseInsensitiveContains(searchText)
-                || chapter.entries.contains {
-                    $0.title.localizedCaseInsensitiveContains(searchText)
-                        || $0.body.localizedCaseInsensitiveContains(searchText)
-                }
-
-            let matchesFilter: Bool
-            switch selectedFilter {
-            case "Journal":
-                matchesFilter = chapter.kind == .journal
-            case "Storyboards":
-                matchesFilter = chapter.kind == .storyboard
-            case "Favorites":
-                matchesFilter = chapter.isFavorite
-            default:
-                matchesFilter = true
-            }
-
-            return matchesSearch && matchesFilter
-        }
+    private func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
+        let date = journalDate(dayOffset: dayOffset)
+        return PrototypeChapter(
+            title: Calendar.current.isDateInToday(date)
+                ? "Today"
+                : date.formatted(.dateTime.weekday(.wide)),
+            subtitle: date.formatted(date: .complete, time: .omitted),
+            color: chapter.color,
+            symbol: "calendar",
+            coverImageName: chapter.coverImageName,
+            kind: .journal,
+            isFavorite: chapter.isFavorite,
+            entries: chapter.entries
+        )
     }
 
     private var noSearchResults: some View {
@@ -579,11 +372,11 @@ struct JournalView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(Color.storyPurple.opacity(0.6))
 
-            Text("No matching chapters")
+            Text("No journals yet")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Color.storyInk)
 
-            Text("Try another search or filter.")
+            Text("Your daily journals will appear here.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.storyGray)
         }
@@ -924,267 +717,19 @@ private func draftPreviewText(_ draft: CreateEntryDraft) -> String {
     return "Draft ready to continue"
 }
 
-private struct NewChapterSheet: View {
-    private struct CoverOption: Identifiable {
-        let id: String
-        let symbol: String
-        let color: Color
-    }
-
-    let onCreate: (PrototypeChapter) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var subtitle = ""
-    @State private var kind: PrototypeChapter.Kind = .journal
-    @State private var selectedCoverID = "sparkles"
-    @FocusState private var focusedField: Field?
-
-    private enum Field {
-        case title
-        case subtitle
-    }
-
-    private let coverOptions = [
-        CoverOption(id: "sparkles", symbol: "sparkles", color: Color(red: 0.34, green: 0.55, blue: 0.92)),
-        CoverOption(id: "sun", symbol: "sun.max.fill", color: Color(red: 0.97, green: 0.62, blue: 0.28)),
-        CoverOption(id: "moon", symbol: "moon.stars.fill", color: Color(red: 0.43, green: 0.38, blue: 0.78)),
-        CoverOption(id: "places", symbol: "building.2.fill", color: Color(red: 0.29, green: 0.70, blue: 0.65)),
-        CoverOption(id: "heart", symbol: "heart.fill", color: Color.storyRose),
-        CoverOption(id: "leaf", symbol: "leaf.fill", color: Color(red: 0.35, green: 0.64, blue: 0.43))
-    ]
-
-    private var selectedCover: CoverOption {
-        coverOptions.first { $0.id == selectedCoverID } ?? coverOptions[0]
-    }
-
-    private var trimmedTitle: String {
-        title.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var trimmedSubtitle: String {
-        subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                LinearGradient(
-                    colors: [Color.storyCream, .white, Color.storyBlush],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 22) {
-                        coverPreview
-                        chapterDetails
-                        chapterType
-                        coverPicker
-                    }
-                    .padding(20)
-                    .padding(.bottom, 24)
-                }
-                .scrollDismissesKeyboard(.interactively)
-            }
-            .navigationTitle("New Chapter")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        createChapter()
-                    }
-                    .fontWeight(.bold)
-                    .disabled(trimmedTitle.isEmpty)
-                }
-            }
-            .onAppear {
-                focusedField = .title
-            }
-        }
-    }
-
-    private var coverPreview: some View {
-        HStack(spacing: 18) {
-            NotebookCover(
-                color: selectedCover.color,
-                symbol: selectedCover.symbol,
-                imageName: nil,
-                width: 72,
-                height: 90
-            )
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(trimmedTitle.isEmpty ? "Your new chapter" : trimmedTitle)
-                    .font(.system(size: 22, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Text(trimmedSubtitle.isEmpty ? "A place for the stories that belong together." : trimmedSubtitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.storyGray)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(18)
-        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(selectedCover.color.opacity(0.22), lineWidth: 1)
-        )
-    }
-
-    private var chapterDetails: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Chapter details")
-
-            VStack(spacing: 0) {
-                TextField("Chapter title", text: $title)
-                    .focused($focusedField, equals: .title)
-                    .submitLabel(.next)
-                    .onSubmit {
-                        focusedField = .subtitle
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(height: 50)
-
-                Divider()
-                    .padding(.leading, 14)
-
-                TextField("Short description (optional)", text: $subtitle)
-                    .focused($focusedField, equals: .subtitle)
-                    .submitLabel(.done)
-                    .padding(.horizontal, 14)
-                    .frame(height: 50)
-            }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(Color.storyInk)
-            .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-    }
-
-    private var chapterType: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Chapter type")
-
-            Picker("Chapter type", selection: $kind) {
-                Text("Journal").tag(PrototypeChapter.Kind.journal)
-                Text("Storyboard").tag(PrototypeChapter.Kind.storyboard)
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-
-    private var coverPicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Cover")
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                ForEach(coverOptions) { option in
-                    Button {
-                        withAnimation(.snappy(duration: 0.2)) {
-                            selectedCoverID = option.id
-                        }
-                    } label: {
-                        NotebookCover(
-                            color: option.color,
-                            symbol: option.symbol,
-                            imageName: nil,
-                            width: 54,
-                            height: 68
-                        )
-                        .padding(10)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            selectedCoverID == option.id ? option.color.opacity(0.12) : Color.white.opacity(0.7),
-                            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .stroke(
-                                    selectedCoverID == option.id ? option.color : Color.storyBorder.opacity(0.4),
-                                    lineWidth: selectedCoverID == option.id ? 2 : 1
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Select \(option.id) cover")
-                    .accessibilityAddTraits(selectedCoverID == option.id ? .isSelected : [])
-                }
-            }
-        }
-    }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 16, weight: .bold, design: .serif))
-            .foregroundStyle(Color.storyInk)
-    }
-
-    private func createChapter() {
-        guard !trimmedTitle.isEmpty else {
-            return
-        }
-
-        onCreate(
-            PrototypeChapter(
-                title: trimmedTitle,
-                subtitle: trimmedSubtitle.isEmpty ? "A new collection of stories" : trimmedSubtitle,
-                color: selectedCover.color,
-                symbol: selectedCover.symbol,
-                coverImageName: nil,
-                kind: kind,
-                isFavorite: false,
-                entries: []
-            )
-        )
-        dismiss()
-    }
-}
-
 private struct PrototypeChapterRow: View {
     let chapter: PrototypeChapter
+    let date: Date
 
     private var imageNames: [String] {
         chapter.entries.flatMap(\.imageNames)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            if imageNames.isEmpty {
-                NotebookCover(
-                    color: chapter.color,
-                    symbol: chapter.symbol,
-                    imageName: chapter.coverImageName,
-                    width: 44,
-                    height: 54
-                )
-            }
+        HStack(alignment: .center, spacing: 10) {
+            dateBadge
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(chapter.title)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color.storyInk)
-                        .lineLimit(1)
-
-                    if chapter.isFavorite {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.storyRose)
-                    }
-
-                    Spacer(minLength: 4)
-                }
-
+            VStack(alignment: .leading, spacing: 0) {
                 if !imageNames.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 2) {
@@ -1194,20 +739,16 @@ private struct PrototypeChapterRow: View {
                                     .scaledToFit()
                                     .frame(
                                         width: thumbnailWidth(for: imageName),
-                                        height: 104
+                                        height: 80
                                     )
                                     .accessibilityLabel("Story image \(index + 1) of \(imageNames.count)")
                             }
                         }
                     }
-                    .frame(height: 104)
-                } else {
-                    Text(chapter.subtitle)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.storyInk.opacity(0.58))
-                        .lineLimit(1)
+                    .frame(height: 80)
                 }
             }
+            .frame(height: 80, alignment: .leading)
         }
         .padding(.vertical, 9)
         .padding(.horizontal, 10)
@@ -1233,12 +774,29 @@ private struct PrototypeChapterRow: View {
         .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
     }
 
+    private var dateBadge: some View {
+        VStack(spacing: 3) {
+            Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                .font(.system(size: 10, weight: .heavy))
+                .foregroundStyle(Color.storyPurple)
+
+            Text(date.formatted(.dateTime.day()))
+                .font(.system(size: 22, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
+        .frame(width: 60, height: 60)
+        .background(
+            Color.storyLavender.opacity(0.7),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
     private func thumbnailWidth(for imageName: String) -> CGFloat {
         guard let image = UIImage(named: imageName), image.size.height > 0 else {
-            return 72
+            return 80
         }
 
-        return 104 * (image.size.width / image.size.height)
+        return 80 * (image.size.width / image.size.height)
     }
 }
 
@@ -1289,10 +847,16 @@ private struct NotebookCover: View {
 }
 
 private struct PrototypeChapterDetailView: View {
+    enum Presentation {
+        case story
+        case dailyJournal
+    }
+
     @State private var chapter: PrototypeChapter
     let onCreateStory: (PrototypeEntry) -> Void
+    let entryDate: Date
+    let presentation: Presentation
 
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedSection = "Media"
     @State private var isShowingNewStory = false
     @State private var selectedMediaIndex: Int?
@@ -1303,8 +867,16 @@ private struct PrototypeChapterDetailView: View {
         chapter.entries.flatMap(\.imageNames)
     }
 
-    init(chapter: PrototypeChapter, onCreateStory: @escaping (PrototypeEntry) -> Void) {
+    init(
+        chapter: PrototypeChapter,
+        entryDate: Date = Date(),
+        presentation: Presentation = .story,
+        onCreateStory: @escaping (PrototypeEntry) -> Void
+    ) {
         _chapter = State(initialValue: chapter)
+        _selectedSection = State(initialValue: presentation == .dailyJournal ? "Entries" : "Media")
+        self.entryDate = entryDate
+        self.presentation = presentation
         self.onCreateStory = onCreateStory
     }
 
@@ -1322,8 +894,6 @@ private struct PrototypeChapterDetailView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                detailHeader
-
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
                         chapterSummary
@@ -1341,9 +911,29 @@ private struct PrototypeChapterDetailView: View {
             }
         }
         .preferredColorScheme(.light)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle(chapter.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingNewStory = true
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.bold)
+                        .foregroundStyle(chapter.color)
+                }
+                .accessibilityLabel(presentation == .dailyJournal ? "Create a new journal entry" : "Create a new story")
+            }
+        }
         .sheet(isPresented: $isShowingNewStory) {
-            NewStorySheet(chapterTitle: chapter.title, accentColor: chapter.color) { entry in
+            NewStorySheet(
+                chapterTitle: chapter.title,
+                accentColor: chapter.color,
+                initialDate: entryDate,
+                collectionLabel: presentation == .dailyJournal ? "Daily Journal" : "Chapter",
+                locksEntryDate: presentation == .dailyJournal
+            ) { entry in
                 chapter.entries.insert(entry, at: 0)
                 selectedSection = "Entries"
                 onCreateStory(entry)
@@ -1372,44 +962,6 @@ private struct PrototypeChapterDetailView: View {
         }
     }
 
-    private var detailHeader: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.78), in: Circle())
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Text(chapter.title)
-                .font(.system(size: 18, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
-                .lineLimit(1)
-
-            Spacer()
-
-            Button {
-                isShowingNewStory = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(chapter.color, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Create a new story")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
     private var chapterSummary: some View {
         HStack(spacing: 16) {
             NotebookCover(
@@ -1431,7 +983,7 @@ private struct PrototypeChapterDetailView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.storyGray)
 
-                Text("\(chapter.entryCountText)  •  \(chapter.imageCount) photos")
+                Text("\(entryCountText)  •  \(chapter.imageCount) photos")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.storyInk.opacity(0.64))
             }
@@ -1479,11 +1031,15 @@ private struct PrototypeChapterDetailView: View {
                         .font(.system(size: 32))
                         .foregroundStyle(chapter.color.opacity(0.72))
 
-                    Text("No stories yet")
+                    Text(presentation == .dailyJournal ? "No journal entries yet" : "No stories yet")
                         .font(.system(size: 17, weight: .bold, design: .serif))
                         .foregroundStyle(Color.storyInk)
 
-                    Text("Begin this chapter with its first story.")
+                    Text(
+                        presentation == .dailyJournal
+                            ? "Capture the first moment from this day."
+                            : "Begin this chapter with its first story."
+                    )
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.storyGray)
                         .multilineTextAlignment(.center)
@@ -1491,7 +1047,10 @@ private struct PrototypeChapterDetailView: View {
                     Button {
                         isShowingNewStory = true
                     } label: {
-                        Label("Write the First Story", systemImage: "plus")
+                        Label(
+                            presentation == .dailyJournal ? "Write the First Entry" : "Write the First Story",
+                            systemImage: "plus"
+                        )
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
@@ -1506,7 +1065,11 @@ private struct PrototypeChapterDetailView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(chapter.entries.enumerated()), id: \.element.id) { index, entry in
                         NavigationLink {
-                            PrototypeEntryDetailView(entry: entry, chapter: chapter)
+                            PrototypeEntryDetailView(
+                                entry: entry,
+                                chapter: chapter,
+                                title: presentation == .dailyJournal ? "Journal Entry" : "Story"
+                            )
                         } label: {
                             PrototypeEntryRow(entry: entry, accentColor: chapter.color)
                         }
@@ -1525,6 +1088,16 @@ private struct PrototypeChapterDetailView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.38), lineWidth: 1)
         )
+    }
+
+    private var entryCountText: String {
+        let noun: String
+        if presentation == .dailyJournal {
+            noun = chapter.entries.count == 1 ? "entry" : "entries"
+        } else {
+            noun = chapter.entries.count == 1 ? "story" : "stories"
+        }
+        return "\(chapter.entries.count) \(noun)"
     }
 
     private var mediaGrid: some View {
@@ -1570,13 +1143,15 @@ private struct PrototypeChapterDetailView: View {
 private struct NewStorySheet: View {
     let chapterTitle: String
     let accentColor: Color
+    let collectionLabel: String
+    let locksEntryDate: Bool
     let onCreate: (PrototypeEntry) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var bodyText = ""
     @State private var location = ""
-    @State private var storyDate = Date()
+    @State private var storyDate: Date
     @State private var isPrivateEntry = false
     @State private var isShowingExpandedEditor = false
     @FocusState private var isTitleFocused: Bool
@@ -1588,6 +1163,22 @@ private struct NewStorySheet: View {
 
     private var trimmedBody: String {
         bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    init(
+        chapterTitle: String,
+        accentColor: Color,
+        initialDate: Date = Date(),
+        collectionLabel: String = "Chapter",
+        locksEntryDate: Bool = false,
+        onCreate: @escaping (PrototypeEntry) -> Void
+    ) {
+        self.chapterTitle = chapterTitle
+        self.accentColor = accentColor
+        self.collectionLabel = collectionLabel
+        self.locksEntryDate = locksEntryDate
+        self.onCreate = onCreate
+        _storyDate = State(initialValue: initialDate)
     }
 
     var body: some View {
@@ -1751,10 +1342,10 @@ private struct NewStorySheet: View {
                     .foregroundStyle(accentColor)
                     .frame(width: 20)
 
-                Text("Chapter")
+                Text(collectionLabel)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.storyInk.opacity(0.9))
-                    .frame(width: 72, alignment: .leading)
+                    .frame(width: 90, alignment: .leading)
 
                 Text(chapterTitle)
                     .font(.system(size: 13, weight: .regular))
@@ -1772,7 +1363,10 @@ private struct NewStorySheet: View {
             Divider()
                 .padding(.leading, 44)
 
-            DatePicker(selection: $storyDate, displayedComponents: [.date, .hourAndMinute]) {
+            DatePicker(
+                selection: $storyDate,
+                displayedComponents: locksEntryDate ? [.hourAndMinute] : [.date, .hourAndMinute]
+            ) {
                 HStack(spacing: 12) {
                     Image(systemName: "calendar")
                         .font(.system(size: 14, weight: .medium))
@@ -1921,8 +1515,8 @@ private struct NewStorySheet: View {
 private struct PrototypeEntryDetailView: View {
     let entry: PrototypeEntry
     let chapter: PrototypeChapter
+    let title: String
 
-    @Environment(\.dismiss) private var dismiss
     @State private var isFavorite = false
     @State private var selectedImageName: String?
 
@@ -1931,8 +1525,6 @@ private struct PrototypeEntryDetailView: View {
             storyDetailBackground
 
             VStack(spacing: 0) {
-                entryHeader
-
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
                         entryIntroduction
@@ -1952,7 +1544,14 @@ private struct PrototypeEntryDetailView: View {
         }
         .background(storyDetailBackground)
         .preferredColorScheme(.light)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                entryOptionsMenu
+            }
+        }
         .sheet(
             isPresented: Binding(
                 get: { selectedImageName != nil },
@@ -1986,58 +1585,32 @@ private struct PrototypeEntryDetailView: View {
         .ignoresSafeArea()
     }
 
-    private var entryHeader: some View {
-        HStack {
+    private var entryOptionsMenu: some View {
+        Menu {
             Button {
-                dismiss()
+                isFavorite.toggle()
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.82), in: Circle())
+                Label(
+                    isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: isFavorite ? "heart.slash" : "heart"
+                )
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back to \(chapter.title)")
 
-            Spacer()
+            Button {
+            } label: {
+                Label("Edit Story", systemImage: "pencil")
+            }
 
-            Text("Story")
-                .font(.system(size: 18, weight: .bold, design: .serif))
+            Button {
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .fontWeight(.bold)
                 .foregroundStyle(Color.storyInk)
-
-            Spacer()
-
-            Menu {
-                Button {
-                    isFavorite.toggle()
-                } label: {
-                    Label(
-                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                        systemImage: isFavorite ? "heart.slash" : "heart"
-                    )
-                }
-
-                Button {
-                } label: {
-                    Label("Edit Story", systemImage: "pencil")
-                }
-
-                Button {
-                } label: {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.82), in: Circle())
-            }
-            .accessibilityLabel("Story options")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .accessibilityLabel("Story options")
     }
 
     private var entryIntroduction: some View {
@@ -2870,352 +2443,6 @@ private enum StoryEntryStore {
         }
 
         return records
-    }
-}
-
-struct StoriesListView: View {
-    @Binding var selectedPage: StoryPage
-    @Binding var isDraftSaved: Bool
-    @Binding var activeDraftID: UUID?
-
-    @State private var chapters: [PrototypeChapter] = []
-    @State private var savedDrafts: [CreateEntryDraft] = []
-    @State private var isShowingNewChapter = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Stories List")
-                        .font(.system(size: 30, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
-
-                    Spacer()
-
-                    EditButton()
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-
-                    Button {
-                        isShowingNewChapter = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 31, height: 31)
-                            .background(Color.storyPurple, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Create a new story collection")
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-                List {
-                    draftsSection
-                    storiesSection
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(listBackground)
-                .refreshable {
-                    reloadContent()
-                }
-
-                BottomNavigationBar(selectedPage: $selectedPage)
-            }
-            .background(listBackground)
-            .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $isShowingNewChapter) {
-                NewChapterSheet { chapter in
-                    chapters.insert(chapter, at: 0)
-                    UserChapterStore.add(chapter)
-                    StoriesListOrderStore.saveChapterOrder(chapters.map(\.title))
-                }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
-        }
-        .onAppear {
-            reloadContent()
-        }
-    }
-
-    private var draftsSection: some View {
-        Section {
-            if let mostRecentDraft {
-                Button {
-                    activeDraftID = mostRecentDraft.id
-                    selectedPage = .create
-                } label: {
-                    StoriesListDraftRow(draft: mostRecentDraft)
-                }
-                .buttonStyle(.plain)
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        deleteDraft(mostRecentDraft)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-            } else {
-                Text("No saved drafts")
-                    .foregroundStyle(.secondary)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-            }
-        } header: {
-            HStack {
-                Text("Saved Drafts")
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer()
-
-                if !savedDrafts.isEmpty {
-                    NavigationLink {
-                        SavedDraftsView(
-                            selectedPage: $selectedPage,
-                            activeDraftID: $activeDraftID
-                        )
-                    } label: {
-                        Text("View All")
-                            .font(.caption.weight(.semibold))
-                    }
-                }
-            }
-            .textCase(nil)
-        }
-    }
-
-    @ViewBuilder
-    private var storiesSection: some View {
-        Section {
-            if chapters.isEmpty {
-                StoriesListEmptyRow(isSearching: false)
-            } else {
-                ForEach(chapters) { chapter in
-                    NavigationLink {
-                        PrototypeChapterDetailView(chapter: chapter) { entry in
-                            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
-                                return
-                            }
-
-                            chapters[chapterIndex].entries.insert(entry, at: 0)
-                            StoryEntryStore.add(entry, to: chapter.title)
-                        }
-                    } label: {
-                        StoriesListChapterRow(chapter: chapter)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            deleteChapter(chapter)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                    .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
-                }
-                .onDelete(perform: deleteChapters)
-                .onMove(perform: moveChapters)
-            }
-        } header: {
-            HStack {
-                Text("Your Stories")
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer()
-
-                Text("\(chapters.count)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.storyGray)
-            }
-            .textCase(nil)
-        }
-    }
-
-    private var listBackground: some View {
-        LinearGradient(
-            colors: [Color.storyCream, .white, Color.storyBlush.opacity(0.7)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .ignoresSafeArea()
-    }
-
-    private var mostRecentDraft: CreateEntryDraft? {
-        savedDrafts.first
-    }
-
-    private func reloadContent() {
-        let visibleSamples = PrototypeChapter.samples.filter {
-            !DeletedSampleChapterStore.contains(title: $0.title)
-        }
-
-        let loadedChapters = (UserChapterStore.load() + visibleSamples).map { chapter in
-            var chapter = chapter
-            chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
-            return chapter
-        }
-        chapters = StoriesListOrderStore.sortChapters(loadedChapters)
-        savedDrafts = CreateEntryDraftStore.loadAll()
-        isDraftSaved = !savedDrafts.isEmpty
-    }
-
-    private func deleteDraft(_ draft: CreateEntryDraft) {
-        CreateEntryDraftStore.delete(id: draft.id)
-        savedDrafts.removeAll { $0.id == draft.id }
-        if activeDraftID == draft.id {
-            activeDraftID = nil
-        }
-        isDraftSaved = !savedDrafts.isEmpty
-    }
-
-    private func deleteChapters(at offsets: IndexSet) {
-        let chaptersToDelete = offsets.map { chapters[$0] }
-        chaptersToDelete.forEach(deleteChapter)
-    }
-
-    private func deleteChapter(_ chapter: PrototypeChapter) {
-        withAnimation {
-            chapters.removeAll { $0.id == chapter.id }
-        }
-        StoriesListOrderStore.saveChapterOrder(chapters.map(\.title))
-
-        UserChapterStore.delete(title: chapter.title)
-        StoryEntryStore.deleteAll(for: chapter.title)
-
-        if PrototypeChapter.samples.contains(where: { $0.title == chapter.title }) {
-            DeletedSampleChapterStore.add(title: chapter.title)
-        }
-    }
-
-    private func moveChapters(from source: IndexSet, to destination: Int) {
-        chapters.move(fromOffsets: source, toOffset: destination)
-        StoriesListOrderStore.saveChapterOrder(chapters.map(\.title))
-    }
-}
-
-private enum StoriesListOrderStore {
-    private static let chapterOrderKey = "StorytopiaStoriesListChapterOrder"
-
-    static func sortChapters(_ chapters: [PrototypeChapter]) -> [PrototypeChapter] {
-        let savedOrder = UserDefaults.standard.stringArray(forKey: chapterOrderKey) ?? []
-        return sorted(chapters, savedKeys: savedOrder, key: \.title)
-    }
-
-    static func saveChapterOrder(_ titles: [String]) {
-        UserDefaults.standard.set(titles, forKey: chapterOrderKey)
-    }
-
-    private static func sorted<Value>(
-        _ values: [Value],
-        savedKeys: [String],
-        key: (Value) -> String
-    ) -> [Value] {
-        let positions = Dictionary(uniqueKeysWithValues: savedKeys.enumerated().map { ($0.element, $0.offset) })
-        let savedValues = values
-            .filter { positions[key($0)] != nil }
-            .sorted { positions[key($0), default: .max] < positions[key($1), default: .max] }
-        let newValues = values.filter { positions[key($0)] == nil }
-        return newValues + savedValues
-    }
-}
-
-private struct StoriesListDraftRow: View {
-    let draft: CreateEntryDraft
-
-    var body: some View {
-        HStack(spacing: 10) {
-            thumbnail
-
-            Text(draftDisplayTitle(draft))
-                .font(.body.weight(.medium))
-                .foregroundStyle(Color.storyInk)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Text(draft.updatedAt.formatted(date: .abbreviated, time: .omitted))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.vertical, 1)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var thumbnail: some View {
-        if let image = draft.photos.first {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 30, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.storyLavender)
-                .frame(width: 30, height: 30)
-                .overlay {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.storyPurple)
-                }
-        }
-    }
-}
-
-private struct StoriesListChapterRow: View {
-    let chapter: PrototypeChapter
-
-    var body: some View {
-        HStack(spacing: 10) {
-            NotebookCover(
-                color: chapter.color,
-                symbol: chapter.symbol,
-                imageName: chapter.coverImageName,
-                width: 30,
-                height: 36
-            )
-
-            Text(chapter.title)
-                .font(.body.weight(.medium))
-                .foregroundStyle(Color.storyInk)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Text("\(chapter.entries.count)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct StoriesListEmptyRow: View {
-    let isSearching: Bool
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: isSearching ? "text.magnifyingglass" : "books.vertical")
-                .font(.system(size: 28))
-                .foregroundStyle(Color.storyPurple.opacity(0.7))
-
-            Text(isSearching ? "No matching stories" : "No stories yet")
-                .font(.headline)
-                .foregroundStyle(Color.storyInk)
-
-            Text(isSearching ? "Try another search or filter." : "Tap + to create your first story collection.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .listRowBackground(Color.white.opacity(0.65))
     }
 }
 

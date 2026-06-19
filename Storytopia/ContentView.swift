@@ -64,14 +64,6 @@ struct ContentView: View {
             )
                 .transition(.identity)
                 .zIndex(0)
-        case .storiesList:
-            StoriesListView(
-                selectedPage: $selectedPage,
-                isDraftSaved: $isDraftSaved,
-                activeDraftID: $activeDraftID
-            )
-            .transition(.identity)
-            .zIndex(0)
         case .profile:
             ProfileView(
                 selectedPage: $selectedPage,

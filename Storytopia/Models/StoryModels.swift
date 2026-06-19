@@ -6,7 +6,6 @@ enum StoryPage {
     case explore
     case create
     case journal
-    case storiesList
     case profile
 }
 
