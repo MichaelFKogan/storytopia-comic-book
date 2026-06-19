@@ -41,7 +41,7 @@ struct ContentView: View {
                 .transition(.identity)
                 .zIndex(0)
         case .today:
-            TodayJournalView(selectedPage: $selectedPage)
+            DaybookView(selectedPage: $selectedPage)
                 .transition(.identity)
                 .zIndex(0)
         case .explore:

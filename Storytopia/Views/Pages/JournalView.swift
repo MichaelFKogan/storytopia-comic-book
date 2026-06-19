@@ -20,17 +20,7 @@ struct JournalView: View {
         _isDraftSaved = isDraftSaved
         _activeDraftID = activeDraftID
         _savedDrafts = State(initialValue: CreateEntryDraftStore.loadAll())
-        let visibleSamples = PrototypeChapter.samples.filter {
-            !DeletedSampleChapterStore.contains(title: $0.title)
-        }
-        let chapters = UserChapterStore.load() + visibleSamples
-        _chapters = State(
-            initialValue: chapters.map { chapter in
-                var chapter = chapter
-                chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
-                return chapter
-            }
-        )
+        _chapters = State(initialValue: DailyJournalData.allChapters())
     }
 
     var body: some View {
@@ -45,7 +35,6 @@ struct JournalView: View {
                         if showsPrototypeData {
                             prototypeNotice
                             chapterList
-                            allJournalEntriesSection
                         } else {
                             emptyState
                         }
@@ -67,7 +56,7 @@ struct JournalView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("Daily Journals")
+            Text("Journals")
                 .font(.system(size: 30, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
@@ -352,7 +341,195 @@ struct JournalView: View {
         }
     }
 
-    private var allJournalEntriesSection: some View {
+    private func journalDate(dayOffset: Int) -> Date {
+        DailyJournalData.journalDate(dayOffset: dayOffset)
+    }
+
+    private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
+        DailyJournalData.detailView(for: chapter, dayOffset: dayOffset) { entry in
+            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
+                return
+            }
+
+            chapters[chapterIndex].entries.insert(entry, at: 0)
+            StoryEntryStore.add(entry, to: chapter.title)
+        }
+    }
+
+    private var noSearchResults: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 28))
+                .foregroundStyle(Color.homeAccent.opacity(0.6))
+
+            Text("No journals yet")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+
+            Text("Your journals will appear here.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.homeMutedText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 38)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Spacer(minLength: 58)
+
+            Image("no_entries_journal")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 165)
+                .padding(.bottom, 3)
+
+            VStack(spacing: 8) {
+                Text("No entries yet")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Text("Your journal will appear here\nonce you start writing.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineSpacing(2)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Color.homeMutedText)
+            }
+
+            Button {
+                selectedPage = .create
+            } label: {
+                Label("Write Your First Entry", systemImage: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .frame(height: 39)
+                    .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .padding(.top, 10)
+
+            Button("Preview sample chapters") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsPrototypeData = true
+                }
+            }
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.homeAccent)
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var journalBackground: some View {
+        Color.homePageBackground
+            .ignoresSafeArea()
+    }
+}
+
+struct DaybookView: View {
+    @Binding var selectedPage: StoryPage
+    @State private var chapters = DailyJournalData.allChapters()
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                Color.homePageBackground
+                    .ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 15) {
+                        Text("Daybook")
+                            .font(.system(size: 30, weight: .bold, design: .serif))
+                            .foregroundStyle(Color.storyInk)
+                            .padding(.top, 12)
+
+                        AllJournalEntriesSection(chapters: $chapters)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 92)
+                }
+
+                BottomNavigationBar(selectedPage: $selectedPage)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            chapters = DailyJournalData.allChapters()
+        }
+    }
+}
+
+private enum DailyJournalData {
+    static func allChapters() -> [PrototypeChapter] {
+        let visibleSamples = PrototypeChapter.samples.filter {
+            !DeletedSampleChapterStore.contains(title: $0.title)
+        }
+        let chapters = UserChapterStore.load() + visibleSamples
+        return chapters.map(chapterWithStoredEntries)
+    }
+
+    static func journalDate(dayOffset: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: -dayOffset, to: Date()) ?? Date()
+    }
+
+    static func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
+        let date = journalDate(dayOffset: dayOffset)
+        return PrototypeChapter(
+            title: Calendar.current.isDateInToday(date)
+                ? "Today"
+                : date.formatted(.dateTime.weekday(.wide)),
+            subtitle: date.formatted(date: .complete, time: .omitted),
+            color: chapter.color,
+            symbol: "calendar",
+            coverImageName: chapter.coverImageName,
+            kind: .journal,
+            isFavorite: chapter.isFavorite,
+            entries: chapter.entries
+        )
+    }
+
+    static func detailView(
+        for chapter: PrototypeChapter,
+        dayOffset: Int,
+        onNewEntryPresentationChange: @escaping (Bool) -> Void = { _ in },
+        onAddEntry: @escaping (PrototypeEntry) -> Void
+    ) -> some View {
+        PrototypeChapterDetailView(
+            chapter: dateTitledChapter(from: chapter, dayOffset: dayOffset),
+            entryDate: journalDate(dayOffset: dayOffset),
+            presentation: .dailyJournal,
+            onNewEntryPresentationChange: onNewEntryPresentationChange,
+            onCreateStory: onAddEntry
+        )
+    }
+
+    private static func chapterWithStoredEntries(_ chapter: PrototypeChapter) -> PrototypeChapter {
+        var chapter = chapter
+        chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
+        return chapter
+    }
+}
+
+private struct DailyJournalEntrySummary: Identifiable {
+    let dayOffset: Int
+    let chapter: PrototypeChapter
+    let entry: PrototypeEntry
+    let coverImageName: String?
+
+    var id: UUID {
+        entry.id
+    }
+}
+
+private struct AllJournalEntriesSection: View {
+    @Binding var chapters: [PrototypeChapter]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .lastTextBaseline) {
                 Text("All Entries")
@@ -381,10 +558,16 @@ struct JournalView: View {
 
     private func journalDayGroup(_ day: DailyJournalDaySummary) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                journalDateBadge(day)
-                journalDayHeader(day)
+            NavigationLink {
+                dailyJournalDetail(for: day.sourceChapter, dayOffset: day.dayOffset)
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    journalDateBadge(day)
+                    journalDayHeader(day)
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open journal for \(day.fullDateText)")
 
             ForEach(Array(day.entries.enumerated()), id: \.element.id) { index, item in
                 NavigationLink {
@@ -398,12 +581,15 @@ struct JournalView: View {
                         entry: regularPhotoDisplayEntry(for: item.entry, dayOffset: day.dayOffset, entryIndex: index),
                         accentColor: Color.homeAccent,
                         showsDate: false,
-                        thumbnailSize: 48
+                        thumbnailSize: 48,
+                        leadingCoverImageName: item.coverImageName,
+                        showsReferencePhotos: false
                     )
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.homeBorder, lineWidth: 1)
@@ -475,6 +661,11 @@ struct JournalView: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
+
+            Image(systemName: "chevron.right.circle.fill")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Color.homeAccent.opacity(0.72))
+                .accessibilityHidden(true)
         }
         .frame(height: 27)
         .frame(maxWidth: .infinity)
@@ -510,13 +701,19 @@ struct JournalView: View {
     }
 
     private var allJournalEntryDays: [DailyJournalDaySummary] {
-        chapters.enumerated().compactMap { dayOffset, chapter in
+        var nextStoryboardCoverIndex = 0
+
+        return chapters.enumerated().compactMap { dayOffset, chapter -> DailyJournalDaySummary? in
             let datedChapter = DailyJournalData.dateTitledChapter(from: chapter, dayOffset: dayOffset)
             let entries = datedChapter.entries.map { entry in
-                DailyJournalEntrySummary(
+                let coverImageName = storyboardExampleImageName(for: nextStoryboardCoverIndex)
+                nextStoryboardCoverIndex += 1
+
+                return DailyJournalEntrySummary(
                     dayOffset: dayOffset,
                     chapter: datedChapter,
-                    entry: entry
+                    entry: entry,
+                    coverImageName: coverImageName
                 )
             }
 
@@ -526,6 +723,7 @@ struct JournalView: View {
 
             return DailyJournalDaySummary(
                 dayOffset: dayOffset,
+                sourceChapter: chapter,
                 chapter: datedChapter,
                 entries: entries
             )
@@ -555,8 +753,16 @@ struct JournalView: View {
         ]
     }
 
-    private func journalDate(dayOffset: Int) -> Date {
-        DailyJournalData.journalDate(dayOffset: dayOffset)
+    private var storyboardExampleImageNames: [String] {
+        (1...16).map { "storyboard\($0)" }
+    }
+
+    private func storyboardExampleImageName(for index: Int) -> String? {
+        guard storyboardExampleImageNames.indices.contains(index) else {
+            return nil
+        }
+
+        return storyboardExampleImageNames[index]
     }
 
     private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
@@ -569,184 +775,11 @@ struct JournalView: View {
             StoryEntryStore.add(entry, to: chapter.title)
         }
     }
-
-    private var noSearchResults: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "text.magnifyingglass")
-                .font(.system(size: 28))
-                .foregroundStyle(Color.homeAccent.opacity(0.6))
-
-            Text("No journals yet")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-
-            Text("Your daily journals will appear here.")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.homeMutedText)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 38)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
-        )
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Spacer(minLength: 58)
-
-            Image("no_entries_journal")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 165)
-                .padding(.bottom, 3)
-
-            VStack(spacing: 8) {
-                Text("No entries yet")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-
-                Text("Your journal will appear here\nonce you start writing.")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineSpacing(2)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Color.homeMutedText)
-            }
-
-            Button {
-                selectedPage = .create
-            } label: {
-                Label("Write Your First Entry", systemImage: "plus")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .frame(height: 39)
-                    .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .padding(.top, 10)
-
-            Button("Preview sample chapters") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showsPrototypeData = true
-                }
-            }
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(Color.homeAccent)
-            .padding(.top, 2)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var journalBackground: some View {
-        Color.homePageBackground
-            .ignoresSafeArea()
-    }
-}
-
-struct TodayJournalView: View {
-    @Binding var selectedPage: StoryPage
-    @State private var chapter = DailyJournalData.todayChapter()
-    @State private var isShowingNewEntryPage = false
-
-    var body: some View {
-        NavigationStack {
-            DailyJournalData.detailView(
-                for: chapter,
-                dayOffset: 0,
-                onNewEntryPresentationChange: { isShowingNewEntryPage = $0 }
-            ) { entry in
-                chapter.entries.insert(entry, at: 0)
-                StoryEntryStore.add(entry, to: chapter.title)
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !isShowingNewEntryPage {
-                BottomNavigationBar(selectedPage: $selectedPage)
-            }
-        }
-    }
-}
-
-private enum DailyJournalData {
-    static func todayChapter() -> PrototypeChapter {
-        if let userChapter = UserChapterStore.load().first {
-            return chapterWithStoredEntries(userChapter)
-        }
-
-        if let sampleChapter = PrototypeChapter.samples.first(where: {
-            !DeletedSampleChapterStore.contains(title: $0.title)
-        }) {
-            return chapterWithStoredEntries(sampleChapter)
-        }
-
-        return PrototypeChapter(
-            title: "Today",
-            subtitle: Date().formatted(date: .complete, time: .omitted),
-            color: .storyPurple,
-            symbol: "calendar",
-            coverImageName: nil,
-            kind: .journal,
-            isFavorite: false,
-            entries: []
-        )
-    }
-
-    static func journalDate(dayOffset: Int) -> Date {
-        Calendar.current.date(byAdding: .day, value: -dayOffset, to: Date()) ?? Date()
-    }
-
-    static func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
-        let date = journalDate(dayOffset: dayOffset)
-        return PrototypeChapter(
-            title: Calendar.current.isDateInToday(date)
-                ? "Today"
-                : date.formatted(.dateTime.weekday(.wide)),
-            subtitle: date.formatted(date: .complete, time: .omitted),
-            color: chapter.color,
-            symbol: "calendar",
-            coverImageName: chapter.coverImageName,
-            kind: .journal,
-            isFavorite: chapter.isFavorite,
-            entries: chapter.entries
-        )
-    }
-
-    static func detailView(
-        for chapter: PrototypeChapter,
-        dayOffset: Int,
-        onNewEntryPresentationChange: @escaping (Bool) -> Void = { _ in },
-        onAddEntry: @escaping (PrototypeEntry) -> Void
-    ) -> some View {
-        PrototypeChapterDetailView(
-            chapter: dateTitledChapter(from: chapter, dayOffset: dayOffset),
-            entryDate: journalDate(dayOffset: dayOffset),
-            presentation: .dailyJournal,
-            onNewEntryPresentationChange: onNewEntryPresentationChange,
-            onCreateStory: onAddEntry
-        )
-    }
-
-    private static func chapterWithStoredEntries(_ chapter: PrototypeChapter) -> PrototypeChapter {
-        var chapter = chapter
-        chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
-        return chapter
-    }
-}
-
-private struct DailyJournalEntrySummary: Identifiable {
-    let dayOffset: Int
-    let chapter: PrototypeChapter
-    let entry: PrototypeEntry
-
-    var id: UUID {
-        entry.id
-    }
 }
 
 private struct DailyJournalDaySummary: Identifiable {
     let dayOffset: Int
+    let sourceChapter: PrototypeChapter
     let chapter: PrototypeChapter
     let entries: [DailyJournalEntrySummary]
 
@@ -2568,8 +2601,37 @@ private struct PrototypeEntryRow: View {
     let accentColor: Color
     var showsDate = true
     var thumbnailSize: CGFloat = 58
+    var leadingCoverImageName: String?
+    var showsReferencePhotos = true
+    @State private var rowHeight: CGFloat = 0
+
+    private var leadingCoverWidth: CGFloat {
+        guard let leadingCoverImageName, rowHeight > 0 else {
+            return 0
+        }
+
+        return rowHeight * coverAspectRatio(for: leadingCoverImageName)
+    }
 
     var body: some View {
+        rowContent
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: PrototypeEntryRowHeightPreferenceKey.self, value: proxy.size.height)
+                }
+            }
+            .onPreferenceChange(PrototypeEntryRowHeightPreferenceKey.self) { height in
+                rowHeight = height
+            }
+            .overlay(alignment: .leading) {
+                if let leadingCoverImageName {
+                    entryCoverPanel(imageName: leadingCoverImageName)
+                }
+            }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 12) {
             if showsDate {
                 VStack(spacing: 2) {
@@ -2589,13 +2651,13 @@ private struct PrototypeEntryRow: View {
                 Text(entry.title)
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Color.storyInk)
-                    .lineLimit(2)
+                    .lineLimit(1)
 
                 Text(entry.body)
                     .font(.system(size: 13, weight: .medium))
                     .lineSpacing(2)
                     .foregroundStyle(Color.storyInk.opacity(0.74))
-                    .lineLimit(3)
+                    .lineLimit(2)
 
                 HStack(spacing: 4) {
                     Text(entry.time)
@@ -2608,7 +2670,7 @@ private struct PrototypeEntryRow: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(accentColor)
 
-                if !entry.imageNames.isEmpty {
+                if showsReferencePhotos, !entry.imageNames.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 7) {
                             ForEach(Array(entry.imageNames.enumerated()), id: \.offset) { index, imageName in
@@ -2636,8 +2698,37 @@ private struct PrototypeEntryRow: View {
                 .foregroundStyle(Color.storyGray.opacity(0.4))
                 .padding(.top, 4)
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, leadingCoverImageName == nil ? 12 : leadingCoverWidth + 12)
+        .padding(.trailing, 12)
         .padding(.vertical, 14)
+    }
+
+    private func entryCoverPanel(imageName: String) -> some View {
+        Image(imageName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: leadingCoverWidth, height: rowHeight)
+            .background(Color.homeCardGray)
+            .accessibilityHidden(true)
+    }
+
+    private func coverAspectRatio(for imageName: String) -> CGFloat {
+        guard
+            let image = UIImage(named: imageName),
+            image.size.height > 0
+        else {
+            return 0.74
+        }
+
+        return image.size.width / image.size.height
+    }
+}
+
+private struct PrototypeEntryRowHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
