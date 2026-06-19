@@ -45,6 +45,7 @@ struct JournalView: View {
                         if showsPrototypeData {
                             prototypeNotice
                             chapterList
+                            allJournalEntriesSection
                         } else {
                             emptyState
                         }
@@ -351,6 +352,209 @@ struct JournalView: View {
         }
     }
 
+    private var allJournalEntriesSection: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("All Entries")
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Text(allJournalEntriesCountText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+            }
+            .padding(.top, 6)
+
+            if allJournalEntries.isEmpty {
+                noJournalEntries
+            } else {
+                LazyVStack(spacing: 18) {
+                    ForEach(allJournalEntryDays) { day in
+                        journalDayGroup(day)
+                    }
+                }
+            }
+        }
+    }
+
+    private func journalDayGroup(_ day: DailyJournalDaySummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                journalDateBadge(day)
+                journalDayHeader(day)
+            }
+
+            ForEach(Array(day.entries.enumerated()), id: \.element.id) { index, item in
+                NavigationLink {
+                    PrototypeEntryDetailView(
+                        entry: item.entry,
+                        chapter: item.chapter,
+                        title: "Journal Entry"
+                    )
+                } label: {
+                    PrototypeEntryRow(
+                        entry: regularPhotoDisplayEntry(for: item.entry, dayOffset: day.dayOffset, entryIndex: index),
+                        accentColor: Color.homeAccent,
+                        showsDate: false,
+                        thumbnailSize: 48
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.homeBorder, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func regularPhotoDisplayEntry(
+        for entry: PrototypeEntry,
+        dayOffset: Int,
+        entryIndex: Int
+    ) -> PrototypeEntry {
+        guard !entry.imageNames.isEmpty else {
+            return entry
+        }
+
+        return entry.copy(
+            imageNames: regularPhotoNames(
+                startIndex: (dayOffset * 3) + (entryIndex * 2),
+                count: entry.imageNames.count
+            )
+        )
+    }
+
+    private func regularPhotoNames(startIndex: Int, count: Int) -> [String] {
+        (0..<count).map { offset in
+            regularSetImageNames[(startIndex + offset) % regularSetImageNames.count]
+        }
+    }
+
+    private func journalDateBadge(_ day: DailyJournalDaySummary) -> some View {
+        VStack(spacing: 0) {
+            Text(day.monthText)
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+
+            Text(day.dayText)
+                .font(.system(size: 21, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 43, height: 52)
+        .background(
+            LinearGradient(
+                colors: [Color.homeAccent, Color.homeAccent.opacity(0.82)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .shadow(color: Color.homeAccent.opacity(0.22), radius: 5, y: 3)
+    }
+
+    private func journalDayHeader(_ day: DailyJournalDaySummary) -> some View {
+        HStack(spacing: 10) {
+            Text(day.fullDateText)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            Rectangle()
+                .fill(Color.homeBorder)
+                .frame(height: 1)
+
+            Text(day.entryCountText)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+        }
+        .frame(height: 27)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var noJournalEntries: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "book.pages")
+                .font(.system(size: 28))
+                .foregroundStyle(Color.homeAccent.opacity(0.68))
+
+            Text("No journal entries yet")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+
+            Text("Entries from every day will appear here.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.homeMutedText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+    }
+
+    private var allJournalEntries: [DailyJournalEntrySummary] {
+        allJournalEntryDays.flatMap(\.entries)
+    }
+
+    private var allJournalEntryDays: [DailyJournalDaySummary] {
+        chapters.enumerated().compactMap { dayOffset, chapter in
+            let datedChapter = DailyJournalData.dateTitledChapter(from: chapter, dayOffset: dayOffset)
+            let entries = datedChapter.entries.map { entry in
+                DailyJournalEntrySummary(
+                    dayOffset: dayOffset,
+                    chapter: datedChapter,
+                    entry: entry
+                )
+            }
+
+            guard !entries.isEmpty else {
+                return nil
+            }
+
+            return DailyJournalDaySummary(
+                dayOffset: dayOffset,
+                chapter: datedChapter,
+                entries: entries
+            )
+        }
+    }
+
+    private var allJournalEntriesCountText: String {
+        let count = allJournalEntries.count
+        return "\(count) \(count == 1 ? "entry" : "entries")"
+    }
+
+    private var regularSetImageNames: [String] {
+        [
+            "IMG_9080",
+            "IMG_9144",
+            "IMG_2390",
+            "IMG_2382 2",
+            "IMG_9131",
+            "IMG_9113",
+            "IMG_9127",
+            "IMG_9126",
+            "IMG_9114",
+            "IMG_9102",
+            "IMG_2385 2",
+            "IMG_9140",
+            "IMG_2214"
+        ]
+    }
+
     private func journalDate(dayOffset: Int) -> Date {
         DailyJournalData.journalDate(dayOffset: dayOffset)
     }
@@ -528,6 +732,46 @@ private enum DailyJournalData {
         var chapter = chapter
         chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
         return chapter
+    }
+}
+
+private struct DailyJournalEntrySummary: Identifiable {
+    let dayOffset: Int
+    let chapter: PrototypeChapter
+    let entry: PrototypeEntry
+
+    var id: UUID {
+        entry.id
+    }
+}
+
+private struct DailyJournalDaySummary: Identifiable {
+    let dayOffset: Int
+    let chapter: PrototypeChapter
+    let entries: [DailyJournalEntrySummary]
+
+    var id: Int {
+        dayOffset
+    }
+
+    var monthText: String {
+        date.formatted(.dateTime.month(.abbreviated)).uppercased()
+    }
+
+    var dayText: String {
+        date.formatted(.dateTime.day())
+    }
+
+    var fullDateText: String {
+        date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+    }
+
+    var entryCountText: String {
+        "\(entries.count) \(entries.count == 1 ? "entry" : "entries")"
+    }
+
+    private var date: Date {
+        DailyJournalData.journalDate(dayOffset: dayOffset)
     }
 }
 
@@ -1710,14 +1954,14 @@ private struct PrototypeEntryDetailView: View {
             VStack(spacing: 0) {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
-                        entryIntroduction
-
                         if !entry.imageNames.isEmpty {
                             photoStory
                         }
 
+                        entryIntroduction
                         journalPage
                         entryDetails
+                        referencePhotosSection
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 36)
@@ -1849,11 +2093,7 @@ private struct PrototypeEntryDetailView: View {
     }
 
     private var photoStory: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("The moment")
-                .font(.system(size: 19, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
-
+        Group {
             if let firstImageName = entry.imageNames.first {
                 Button {
                     selectedImageName = firstImageName
@@ -1953,6 +2193,74 @@ private struct PrototypeEntryDetailView: View {
                 }
             }
         }
+    }
+
+    private var referencePhotosSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 23, weight: .light))
+                    .foregroundStyle(Color.storyInk.opacity(0.86))
+                    .rotationEffect(.degrees(-18))
+                    .frame(width: 24, height: 24)
+
+                Text("Reference photos")
+                    .font(.system(size: 17, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 7) {
+                    ForEach(Array(visibleReferencePhotoNames.enumerated()), id: \.element) { index, imageName in
+                        Button {
+                            selectedImageName = imageName
+                        } label: {
+                            referencePhotoThumbnail(imageName: imageName)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open reference photo \(index + 1) of \(visibleReferencePhotoNames.count)")
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+        }
+    }
+
+    private func referencePhotoThumbnail(imageName: String) -> some View {
+        Image(imageName)
+            .resizable()
+            .scaledToFill()
+            .frame(width: 58, height: 58)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 1)
+            }
+    }
+
+    private var visibleReferencePhotoNames: [String] {
+        let count = min(max(entry.imageNames.count, 1), 5)
+        return Array(referencePhotoNames.prefix(count))
+    }
+
+    private var referencePhotoNames: [String] {
+        [
+            "IMG_2214",
+            "IMG_2382 2",
+            "IMG_2385 2",
+            "IMG_2390",
+            "IMG_9080",
+            "IMG_9102",
+            "IMG_9113",
+            "IMG_9114",
+            "IMG_9126",
+            "IMG_9127",
+            "IMG_9131",
+            "IMG_9140",
+            "IMG_9144"
+        ]
     }
 }
 
@@ -2258,20 +2566,24 @@ private struct ZoomableVerticalComicView: UIViewRepresentable {
 private struct PrototypeEntryRow: View {
     let entry: PrototypeEntry
     let accentColor: Color
+    var showsDate = true
+    var thumbnailSize: CGFloat = 58
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 2) {
-                Text(entry.weekday)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color.storyGray)
+            if showsDate {
+                VStack(spacing: 2) {
+                    Text(entry.weekday)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.storyGray)
 
-                Text(entry.day)
-                    .font(.system(size: 20, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
+                    Text(entry.day)
+                        .font(.system(size: 20, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
+                .frame(width: 38)
+                .padding(.top, 2)
             }
-            .frame(width: 38)
-            .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(entry.title)
@@ -2303,7 +2615,7 @@ private struct PrototypeEntryRow: View {
                                 Image(imageName)
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: 58, height: 58)
+                                    .frame(width: thumbnailSize, height: thumbnailSize)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -2663,6 +2975,18 @@ private struct PrototypeEntry: Identifiable {
     let time: String
     let location: String?
     let imageNames: [String]
+
+    func copy(imageNames: [String]) -> PrototypeEntry {
+        PrototypeEntry(
+            weekday: weekday,
+            day: day,
+            title: title,
+            body: body,
+            time: time,
+            location: location,
+            imageNames: imageNames
+        )
+    }
 
     var reflection: String {
         switch title {
