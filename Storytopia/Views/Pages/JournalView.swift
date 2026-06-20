@@ -467,25 +467,25 @@ struct DaybookView: View {
 
                 BottomNavigationBar(selectedPage: $selectedPage)
             }
+            .navigationDestination(
+                isPresented: Binding(
+                    get: { comicStartPage != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            comicStartPage = nil
+                        }
+                    }
+                )
+            ) {
+                DaybookComicReader(
+                    comicBook: comicBook,
+                    initialPageIndex: comicStartPage ?? 0
+                )
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             chapters = DailyJournalData.allChapters()
-        }
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { comicStartPage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        comicStartPage = nil
-                    }
-                }
-            )
-        ) {
-            DaybookComicReader(
-                comicBook: comicBook,
-                initialPageIndex: comicStartPage ?? 0
-            )
         }
     }
 
@@ -784,7 +784,6 @@ private struct DaybookComicReader: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var visiblePageIndex: Int
-    @State private var savedPageIDs: Set<String> = []
 
     init(comicBook: DaybookComicBook, initialPageIndex: Int) {
         self.comicBook = comicBook
@@ -836,6 +835,7 @@ private struct DaybookComicReader: View {
             }
         }
         .preferredColorScheme(.dark)
+        .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden()
         .onAppear {
             visiblePageIndex = min(max(0, initialPageIndex), max(0, comicBook.totalPageCount - 1))
@@ -857,47 +857,11 @@ private struct DaybookComicReader: View {
             .accessibilityLabel("Close Comic Reader")
 
             Spacer()
-
-            Button {
-                toggleSavedPage()
-            } label: {
-                Image(systemName: isCurrentPageSaved ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 16, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(.black.opacity(0.58), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isCurrentPageSaved ? "Remove bookmark" : "Save page")
         }
     }
 
     private var pageCounter: String {
         "\(visiblePageIndex + 1) / \(comicBook.totalPageCount)"
-    }
-
-    private var currentPageID: String {
-        if visiblePageIndex == 0 {
-            return "cover"
-        }
-
-        if visiblePageIndex == comicBook.totalPageCount - 1 {
-            return "back-cover"
-        }
-
-        return comicBook.storyPages[visiblePageIndex - 1].id
-    }
-
-    private var isCurrentPageSaved: Bool {
-        savedPageIDs.contains(currentPageID)
-    }
-
-    private func toggleSavedPage() {
-        if savedPageIDs.contains(currentPageID) {
-            savedPageIDs.remove(currentPageID)
-        } else {
-            savedPageIDs.insert(currentPageID)
-        }
     }
 }
 
@@ -906,43 +870,53 @@ private struct DaybookComicCoverPage: View {
     let pageIndex: Int
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Image(comicBook.coverImageName)
-                .resizable()
-                .scaledToFill()
-                .ignoresSafeArea()
-                .overlay(
-                    LinearGradient(
-                        colors: [.black.opacity(0.1), .black.opacity(0.88)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                    .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 13) {
-                Text("Issue #\(comicBook.issueNumber)")
-                    .font(.system(size: 16, weight: .black, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.82))
+                ZStack(alignment: .bottomLeading) {
+                    Image(comicBook.coverImageName)
+                        .resizable()
+                        .scaledToFit()
+                        .overlay(
+                            LinearGradient(
+                                colors: [.black.opacity(0.04), .black.opacity(0.84)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
 
-                Text(comicBook.monthTitle)
-                    .font(.system(size: 46, weight: .black, design: .serif))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 13) {
+                        Text("Issue #\(comicBook.issueNumber)")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.82))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(comicBook.entryCountText)
-                    Text(comicBook.storyboardCountText)
+                        Text(comicBook.monthTitle)
+                            .font(.system(size: 42, weight: .black, design: .serif))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(comicBook.entryCountText)
+                            Text(comicBook.storyboardCountText)
+                        }
+                        .font(.system(size: 17, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.9))
+
+                        Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 28)
                 }
-                .font(.system(size: 17, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.9))
-
-                Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .padding(.top, 4)
+                .frame(maxWidth: proxy.size.width - 32, maxHeight: proxy.size.height - 112)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
             }
-            .padding(.horizontal, 26)
-            .padding(.bottom, 82)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 }
@@ -963,10 +937,6 @@ private struct DaybookComicStoryPage: View {
                     .frame(maxWidth: proxy.size.width - 26)
                     .frame(maxHeight: proxy.size.height * 0.66)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .stroke(.white.opacity(0.86), lineWidth: 2)
-                    )
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -1008,43 +978,53 @@ private struct DaybookComicBackCoverPage: View {
     let pageIndex: Int
 
     var body: some View {
-        ZStack {
-            Image(comicBook.backCoverImageName)
-                .resizable()
-                .scaledToFill()
-                .ignoresSafeArea()
-                .overlay(Color.black.opacity(0.72))
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                    .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 20) {
-                Spacer()
+                ZStack {
+                    Image(comicBook.backCoverImageName)
+                        .resizable()
+                        .scaledToFit()
+                        .overlay(Color.black.opacity(0.72))
 
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Issue #\(comicBook.issueNumber)")
-                        .font(.system(size: 15, weight: .black, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.7))
+                    VStack(alignment: .leading, spacing: 20) {
+                        Spacer()
 
-                    Text(comicBook.monthTitle)
-                        .font(.system(size: 40, weight: .black, design: .serif))
-                        .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Issue #\(comicBook.issueNumber)")
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            Text(comicBook.monthTitle)
+                                .font(.system(size: 40, weight: .black, design: .serif))
+                                .foregroundStyle(.white)
+                        }
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            backCoverLine("Entries", comicBook.entryCountValue)
+                            backCoverLine("Storyboards", comicBook.storyboardCountValue)
+                            backCoverLine("Most Visited Location", comicBook.mostVisitedLocation)
+                            backCoverLine("Most Common Theme", comicBook.mostCommonTheme)
+                            backCoverLine("Top Characters", comicBook.topCharactersText)
+                        }
+                        .padding(.vertical, 4)
+
+                        Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.62))
+
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
                 }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    backCoverLine("Entries", comicBook.entryCountValue)
-                    backCoverLine("Storyboards", comicBook.storyboardCountValue)
-                    backCoverLine("Most Visited Location", comicBook.mostVisitedLocation)
-                    backCoverLine("Most Common Theme", comicBook.mostCommonTheme)
-                    backCoverLine("Top Characters", comicBook.topCharactersText)
-                }
-                .padding(.vertical, 4)
-
-                Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.62))
-
-                Spacer()
+                .frame(maxWidth: proxy.size.width - 32, maxHeight: proxy.size.height - 112)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 
