@@ -81,7 +81,7 @@ struct BottomNavigationBar: View {
                 selectedPage = .home
             }
             NavItem(
-                title: "Daybook",
+                title: "Daily",
                 systemName: "calendar",
                 isSelected: selectedPage == .today,
                 selectedColor: .homeAccent
