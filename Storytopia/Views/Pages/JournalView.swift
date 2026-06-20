@@ -434,6 +434,7 @@ struct JournalView: View {
 struct DaybookView: View {
     @Binding var selectedPage: StoryPage
     @State private var chapters = DailyJournalData.allChapters()
+    @State private var selectedTab: DaybookTab = .entries
 
     var body: some View {
         NavigationStack {
@@ -441,17 +442,21 @@ struct DaybookView: View {
                 Color.homePageBackground
                     .ignoresSafeArea()
 
-                ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 15) {
-                        Text("Daybook")
-                            .font(.system(size: 30, weight: .bold, design: .serif))
-                            .foregroundStyle(Color.storyInk)
-                            .padding(.top, 12)
-
-                        AllJournalEntriesSection(chapters: $chapters)
+                        header
+                        tabSwitcher
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 92)
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 15) {
+                            selectedTabContent
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 92)
+                    }
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
@@ -460,6 +465,110 @@ struct DaybookView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             chapters = DailyJournalData.allChapters()
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("June 2026")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Color.homeMutedText)
+
+            Text("Daybook")
+                .font(.system(size: 30, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
+        .padding(.top, 12)
+    }
+
+    private var tabSwitcher: some View {
+        HStack(spacing: 0) {
+            ForEach(DaybookTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    VStack(spacing: 8) {
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(selectedTab == tab ? Color.homeAccent : Color.homeMutedText.opacity(0.78))
+
+                        Capsule()
+                            .fill(selectedTab == tab ? Color.homeAccent : Color.clear)
+                            .frame(height: 3)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private var selectedTabContent: some View {
+        switch selectedTab {
+        case .entries:
+            AllJournalEntriesSection(chapters: $chapters)
+        case .gallery:
+            DaybookGalleryGrid()
+        case .comic:
+            Color.clear
+                .frame(height: 1)
+        }
+    }
+}
+
+private enum DaybookTab: String, CaseIterable, Identifiable {
+    case entries
+    case gallery
+    case comic
+
+    var id: Self {
+        self
+    }
+
+    var title: String {
+        switch self {
+        case .entries:
+            return "Entries"
+        case .gallery:
+            return "Gallery"
+        case .comic:
+            return "Comic"
+        }
+    }
+}
+
+private struct DaybookGalleryGrid: View {
+    private let columns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
+
+    private let imageNames = (1...16).map { "storyboard\($0)" }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(imageNames.enumerated()), id: \.offset) { index, imageName in
+                Button {
+                } label: {
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open June storyboard image \(index + 1) of \(imageNames.count)")
+            }
         }
     }
 }
@@ -590,10 +699,6 @@ private struct AllJournalEntriesSection: View {
                 .frame(maxWidth: .infinity)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.homeBorder, lineWidth: 1)
-                )
                 .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
             }
         }
@@ -648,23 +753,21 @@ private struct AllJournalEntriesSection: View {
     private func journalDayHeader(_ day: DailyJournalDaySummary) -> some View {
         HStack(spacing: 10) {
             Text(day.fullDateText)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 15, weight: .heavy))
                 .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
 
-            Rectangle()
-                .fill(Color.homeBorder)
-                .frame(height: 1)
+            Spacer(minLength: 8)
 
             Text(day.entryCountText)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
 
-            Image(systemName: "chevron.right.circle.fill")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Color.homeAccent.opacity(0.72))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(Color.storyGray.opacity(0.55))
                 .accessibilityHidden(true)
         }
         .frame(height: 27)
