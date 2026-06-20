@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -435,6 +436,11 @@ struct DaybookView: View {
     @Binding var selectedPage: StoryPage
     @State private var chapters = DailyJournalData.allChapters()
     @State private var selectedTab: DaybookTab = .entries
+    @State private var comicStartPage: Int?
+
+    private var comicBook: DaybookComicBook {
+        DaybookComicBook(chapters: chapters)
+    }
 
     var body: some View {
         NavigationStack {
@@ -466,17 +472,52 @@ struct DaybookView: View {
         .onAppear {
             chapters = DailyJournalData.allChapters()
         }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { comicStartPage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        comicStartPage = nil
+                    }
+                }
+            )
+        ) {
+            DaybookComicReader(
+                comicBook: comicBook,
+                initialPageIndex: comicStartPage ?? 0
+            )
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("June 2026")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Color.homeMutedText)
+        HStack(alignment: .bottom, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(comicBook.monthTitle)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText)
 
-            Text("Daybook")
-                .font(.system(size: 30, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
+                Text("Daybook")
+                    .font(.system(size: 30, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+            }
+
+            Spacer()
+
+            Button {
+                comicStartPage = 0
+            } label: {
+                Label("Open Comic", systemImage: "book.pages.fill")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(Color.storyInk, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Comic Reader")
+            .disabled(comicBook.storyPages.isEmpty)
+            .opacity(comicBook.storyPages.isEmpty ? 0.5 : 1)
         }
         .padding(.top, 12)
     }
@@ -513,10 +554,13 @@ struct DaybookView: View {
         case .entries:
             AllJournalEntriesSection(chapters: $chapters)
         case .gallery:
-            DaybookGalleryGrid()
+            DaybookGalleryGrid(comicBook: comicBook) { pageIndex in
+                comicStartPage = pageIndex
+            }
         case .comic:
-            Color.clear
-                .frame(height: 1)
+            DaybookComicTab(comicBook: comicBook) {
+                comicStartPage = 0
+            }
         }
     }
 }
@@ -543,33 +587,633 @@ private enum DaybookTab: String, CaseIterable, Identifiable {
 }
 
 private struct DaybookGalleryGrid: View {
-    private let columns = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8)
-    ]
-
-    private let imageNames = (1...16).map { "storyboard\($0)" }
+    let comicBook: DaybookComicBook
+    let onOpenPage: (Int) -> Void
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(Array(imageNames.enumerated()), id: \.offset) { index, imageName in
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("Storyboards")
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Text(comicBook.storyboardCountText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+            }
+            .padding(.top, 6)
+
+            if comicBook.storyPages.isEmpty {
+                DaybookEmptyComicState(title: "No storyboards yet", message: "Storyboards from this month will appear here.")
+            } else {
+                GeometryReader { proxy in
+                    let spacing: CGFloat = 8
+                    let columnWidth = (proxy.size.width - spacing) / 2
+
+                    HStack(alignment: .top, spacing: spacing) {
+                        storyboardColumn(
+                            pages: comicBook.storyPages.enumerated().filter { $0.offset.isMultiple(of: 2) },
+                            width: columnWidth
+                        )
+
+                        storyboardColumn(
+                            pages: comicBook.storyPages.enumerated().filter { !$0.offset.isMultiple(of: 2) },
+                            width: columnWidth
+                        )
+                    }
+                }
+                .frame(height: masonryHeight(for: comicBook.storyPages))
+            }
+        }
+    }
+
+    private func storyboardColumn(
+        pages: [(offset: Int, element: DaybookStoryPage)],
+        width: CGFloat
+    ) -> some View {
+        VStack(spacing: 8) {
+            ForEach(pages, id: \.element.id) { item in
+                let page = item.element
                 Button {
+                    onOpenPage(item.offset + 1)
                 } label: {
-                    Image(imageName)
+                    Image(page.imageName)
                         .resizable()
                         .scaledToFill()
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .frame(width: width, height: galleryHeight(for: page, width: width))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(alignment: .bottomLeading) {
+                            Text("\(item.offset + 2)")
+                                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .frame(height: 24)
+                                .background(.black.opacity(0.62), in: Capsule())
+                                .padding(8)
+                        }
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .stroke(Color.white.opacity(0.9), lineWidth: 2)
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Open June storyboard image \(index + 1) of \(imageNames.count)")
+                .accessibilityLabel("Open \(page.title), page \(item.offset + 2) of \(comicBook.totalPageCount)")
             }
         }
+    }
+
+    private func galleryHeight(for page: DaybookStoryPage, width: CGFloat) -> CGFloat {
+        guard let image = UIImage(named: page.imageName), image.size.width > 0 else {
+            return width * 1.28
+        }
+
+        return min(width * 1.72, max(width * 0.88, width * (image.size.height / image.size.width)))
+    }
+
+    private func masonryHeight(for pages: [DaybookStoryPage]) -> CGFloat {
+        let rows = max(1, Int(ceil(Double(pages.count) / 2.0)))
+        return CGFloat(rows) * 312 + CGFloat(max(0, rows - 1)) * 8
+    }
+}
+
+private struct DaybookComicTab: View {
+    let comicBook: DaybookComicBook
+    let onOpenComic: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("Collected Issue")
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Text(comicBook.pageCountText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+            }
+            .padding(.top, 6)
+
+            if comicBook.storyPages.isEmpty {
+                DaybookEmptyComicState(title: "No comic pages yet", message: "Entries with storyboards will become this month's issue.")
+            } else {
+                Button(action: onOpenComic) {
+                    ZStack(alignment: .bottomLeading) {
+                        Image(comicBook.coverImageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(0.72, contentMode: .fit)
+                            .clipped()
+                            .overlay(
+                                LinearGradient(
+                                    colors: [.black.opacity(0.05), .black.opacity(0.78)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Issue #\(comicBook.issueNumber)")
+                                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.86))
+
+                            Text(comicBook.monthTitle)
+                                .font(.system(size: 38, weight: .black, design: .serif))
+                                .foregroundStyle(.white)
+
+                            HStack(spacing: 10) {
+                                Text(comicBook.entryCountText)
+                                Text(comicBook.storyboardCountText)
+                            }
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.86))
+                        }
+                        .padding(18)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.white.opacity(0.9), lineWidth: 3)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(comicBook.monthTitle) comic, \(comicBook.pageCountText)")
+            }
+        }
+    }
+}
+
+private struct DaybookEmptyComicState: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "book.pages")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Color.homeAccent.opacity(0.68))
+
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+
+            Text(message)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.homeMutedText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+    }
+}
+
+private struct DaybookComicReader: View {
+    let comicBook: DaybookComicBook
+    let initialPageIndex: Int
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var visiblePageIndex: Int
+    @State private var savedPageIDs: Set<String> = []
+
+    init(comicBook: DaybookComicBook, initialPageIndex: Int) {
+        self.comicBook = comicBook
+        self.initialPageIndex = initialPageIndex
+        _visiblePageIndex = State(initialValue: min(max(0, initialPageIndex), max(0, comicBook.totalPageCount - 1)))
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+
+            TabView(selection: $visiblePageIndex) {
+                DaybookComicCoverPage(comicBook: comicBook, pageIndex: 0)
+                    .tag(0)
+
+                ForEach(Array(comicBook.storyPages.enumerated()), id: \.element.id) { index, page in
+                    DaybookComicStoryPage(
+                        page: page,
+                        pageNumber: index + 2,
+                        totalPageCount: comicBook.totalPageCount
+                    )
+                    .tag(index + 1)
+                }
+
+                DaybookComicBackCoverPage(
+                    comicBook: comicBook,
+                    pageIndex: comicBook.totalPageCount - 1
+                )
+                .tag(comicBook.totalPageCount - 1)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
+
+            VStack {
+                readerControls
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                Spacer()
+
+                Text(pageCounter)
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 34)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .padding(.bottom, 18)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
+        .onAppear {
+            visiblePageIndex = min(max(0, initialPageIndex), max(0, comicBook.totalPageCount - 1))
+        }
+    }
+
+    private var readerControls: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.58), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close Comic Reader")
+
+            Spacer()
+
+            Button {
+                toggleSavedPage()
+            } label: {
+                Image(systemName: isCurrentPageSaved ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.58), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isCurrentPageSaved ? "Remove bookmark" : "Save page")
+        }
+    }
+
+    private var pageCounter: String {
+        "\(visiblePageIndex + 1) / \(comicBook.totalPageCount)"
+    }
+
+    private var currentPageID: String {
+        if visiblePageIndex == 0 {
+            return "cover"
+        }
+
+        if visiblePageIndex == comicBook.totalPageCount - 1 {
+            return "back-cover"
+        }
+
+        return comicBook.storyPages[visiblePageIndex - 1].id
+    }
+
+    private var isCurrentPageSaved: Bool {
+        savedPageIDs.contains(currentPageID)
+    }
+
+    private func toggleSavedPage() {
+        if savedPageIDs.contains(currentPageID) {
+            savedPageIDs.remove(currentPageID)
+        } else {
+            savedPageIDs.insert(currentPageID)
+        }
+    }
+}
+
+private struct DaybookComicCoverPage: View {
+    let comicBook: DaybookComicBook
+    let pageIndex: Int
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(comicBook.coverImageName)
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+                .overlay(
+                    LinearGradient(
+                        colors: [.black.opacity(0.1), .black.opacity(0.88)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 13) {
+                Text("Issue #\(comicBook.issueNumber)")
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.82))
+
+                Text(comicBook.monthTitle)
+                    .font(.system(size: 46, weight: .black, design: .serif))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(comicBook.entryCountText)
+                    Text(comicBook.storyboardCountText)
+                }
+                .font(.system(size: 17, weight: .heavy))
+                .foregroundStyle(.white.opacity(0.9))
+
+                Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 26)
+            .padding(.bottom, 82)
+        }
+    }
+}
+
+private struct DaybookComicStoryPage: View {
+    let page: DaybookStoryPage
+    let pageNumber: Int
+    let totalPageCount: Int
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 16) {
+                Spacer(minLength: 58)
+
+                Image(page.imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: proxy.size.width - 26)
+                    .frame(maxHeight: proxy.size.height * 0.66)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(.white.opacity(0.86), lineWidth: 2)
+                    )
+                    .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(page.dateText)
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    Text(page.title)
+                        .font(.system(size: 25, weight: .black, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(page.excerpt)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineSpacing(4)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("\(pageNumber) / \(totalPageCount)")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+
+                Spacer(minLength: 58)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .background(Color.black)
+        }
+    }
+}
+
+private struct DaybookComicBackCoverPage: View {
+    let comicBook: DaybookComicBook
+    let pageIndex: Int
+
+    var body: some View {
+        ZStack {
+            Image(comicBook.backCoverImageName)
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+                .overlay(Color.black.opacity(0.72))
+
+            VStack(alignment: .leading, spacing: 20) {
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Issue #\(comicBook.issueNumber)")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    Text(comicBook.monthTitle)
+                        .font(.system(size: 40, weight: .black, design: .serif))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    backCoverLine("Entries", comicBook.entryCountValue)
+                    backCoverLine("Storyboards", comicBook.storyboardCountValue)
+                    backCoverLine("Most Visited Location", comicBook.mostVisitedLocation)
+                    backCoverLine("Most Common Theme", comicBook.mostCommonTheme)
+                    backCoverLine("Top Characters", comicBook.topCharactersText)
+                }
+                .padding(.vertical, 4)
+
+                Text("\(pageIndex + 1) / \(comicBook.totalPageCount)")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.62))
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private func backCoverLine(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.48))
+
+            Text(value)
+                .font(.system(size: 19, weight: .heavy, design: .serif))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct DaybookComicBook {
+    let chapters: [PrototypeChapter]
+
+    private let storyboardImageNames = (1...16).map { "storyboard\($0)" }
+    let issueNumber = 23
+    let monthTitle = "June 2026"
+
+    var storyPages: [DaybookStoryPage] {
+        Array(monthEntries.prefix(storyboardImageNames.count).enumerated()).map { index, item in
+            DaybookStoryPage(
+                entry: item.entry,
+                date: item.date,
+                chapterTitle: item.chapter.title,
+                imageName: storyboardImageNames[index]
+            )
+        }
+    }
+
+    var totalPageCount: Int {
+        storyPages.count + 2
+    }
+
+    var coverImageName: String {
+        storyPages.first?.imageName ?? "storyboard1"
+    }
+
+    var backCoverImageName: String {
+        storyPages.last?.imageName ?? coverImageName
+    }
+
+    var entryCountValue: String {
+        "\(monthEntries.count)"
+    }
+
+    var storyboardCountValue: String {
+        "\(storyPages.count)"
+    }
+
+    var entryCountText: String {
+        "\(entryCountValue) \(monthEntries.count == 1 ? "Entry" : "Entries")"
+    }
+
+    var storyboardCountText: String {
+        "\(storyboardCountValue) \(storyPages.count == 1 ? "Storyboard" : "Storyboards")"
+    }
+
+    var pageCountText: String {
+        "\(totalPageCount) \(totalPageCount == 1 ? "page" : "pages")"
+    }
+
+    var mostVisitedLocation: String {
+        mostCommonValue(storyPages.compactMap(\.location)) ?? "Uncharted"
+    }
+
+    var mostCommonTheme: String {
+        mostCommonValue(storyPages.map(\.chapterTitle)) ?? "Everyday Stories"
+    }
+
+    var topCharactersText: String {
+        let names = storyPages
+            .flatMap { page in
+                characterWords(in: page.title + " " + page.excerpt)
+            }
+            .filter { word in
+                guard let firstScalar = word.unicodeScalars.first else { return false }
+                return CharacterSet.uppercaseLetters.contains(firstScalar)
+                    && word.count > 2
+                    && !excludedCharacterWords.contains(word)
+            }
+
+        let topNames = Array(countsByValue(names).sorted { $0.value > $1.value }.prefix(2).map(\.key))
+        return topNames.isEmpty ? "Mike\nCooper" : topNames.joined(separator: "\n")
+    }
+
+    private var monthEntries: [DaybookMonthEntry] {
+        chapters.enumerated()
+            .flatMap { dayOffset, chapter in
+                let date = DailyJournalData.journalDate(dayOffset: dayOffset)
+                return chapter.entries.enumerated().map { entryIndex, entry in
+                    DaybookMonthEntry(
+                        date: date,
+                        entryIndex: entryIndex,
+                        chapter: chapter,
+                        entry: entry
+                    )
+                }
+            }
+            .sorted { left, right in
+                if left.date == right.date {
+                    return left.entryIndex < right.entryIndex
+                }
+
+                return left.date < right.date
+            }
+    }
+
+    private var excludedCharacterWords: Set<String> {
+        ["The", "Every", "June", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    }
+
+    private func mostCommonValue(_ values: [String]) -> String? {
+        countsByValue(values).max { $0.value < $1.value }?.key
+    }
+
+    private func countsByValue(_ values: [String]) -> [String: Int] {
+        values.reduce(into: [:]) { counts, value in
+            let cleanedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanedValue.isEmpty else {
+                return
+            }
+
+            counts[cleanedValue, default: 0] += 1
+        }
+    }
+
+    private func characterWords(in text: String) -> [String] {
+        text.components(separatedBy: CharacterSet.letters.inverted)
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct DaybookMonthEntry {
+    let date: Date
+    let entryIndex: Int
+    let chapter: PrototypeChapter
+    let entry: PrototypeEntry
+}
+
+private struct DaybookStoryPage: Identifiable {
+    let entry: PrototypeEntry
+    let date: Date
+    let chapterTitle: String
+    let imageName: String
+
+    var id: String {
+        imageName
+    }
+
+    var title: String {
+        entry.title
+    }
+
+    var excerpt: String {
+        entry.body
+    }
+
+    var location: String? {
+        entry.location
+    }
+
+    var dateText: String {
+        date.formatted(.dateTime.month(.wide).day())
     }
 }
 
