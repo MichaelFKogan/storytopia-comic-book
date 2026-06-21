@@ -1663,6 +1663,22 @@ private struct DailyJournalEntrySummary: Identifiable {
     }
 }
 
+private let regularSetImageNames: [String] = [
+    "IMG_9080",
+    "IMG_9144",
+    "IMG_2390",
+    "IMG_2382 2",
+    "IMG_9131",
+    "IMG_9113",
+    "IMG_9127",
+    "IMG_9126",
+    "IMG_9114",
+    "IMG_9102",
+    "IMG_2385 2",
+    "IMG_9140",
+    "IMG_2214"
+]
+
 private struct AllJournalEntriesSection: View {
     @Binding var chapters: [PrototypeChapter]
 
@@ -1864,24 +1880,6 @@ private struct AllJournalEntriesSection: View {
     private var allJournalEntriesCountText: String {
         let count = allJournalEntries.count
         return "\(count) \(count == 1 ? "entry" : "entries")"
-    }
-
-    private var regularSetImageNames: [String] {
-        [
-            "IMG_9080",
-            "IMG_9144",
-            "IMG_2390",
-            "IMG_2382 2",
-            "IMG_9131",
-            "IMG_9113",
-            "IMG_9127",
-            "IMG_9126",
-            "IMG_9114",
-            "IMG_9102",
-            "IMG_2385 2",
-            "IMG_9140",
-            "IMG_2214"
-        ]
     }
 
     private var storyboardExampleImageNames: [String] {
@@ -2657,7 +2655,7 @@ private struct PrototypeChapterDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 34)
             } else {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 14) {
                     ForEach(Array(chapter.entries.enumerated()), id: \.element.id) { index, entry in
                         NavigationLink {
                             PrototypeEntryDetailView(
@@ -2666,24 +2664,61 @@ private struct PrototypeChapterDetailView: View {
                                 title: presentation == .dailyJournal ? "Journal Entry" : "Story"
                             )
                         } label: {
-                            PrototypeEntryRow(entry: entry, accentColor: Color.homeAccent)
+                            PrototypeEntryRow(
+                                entry: detailDisplayEntry(for: entry, entryIndex: index),
+                                accentColor: Color.homeAccent,
+                                thumbnailSize: detailEntryThumbnailSize
+                            )
                         }
                         .buttonStyle(.plain)
-
-                        if index < chapter.entries.count - 1 {
-                            Divider()
-                                .padding(.leading, 54)
-                        }
+                        .frame(maxWidth: .infinity)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.homeBorder, lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
                     }
                 }
             }
         }
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
+        .background {
+            if chapter.entries.isEmpty {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white)
+            }
+        }
+        .overlay {
+            if chapter.entries.isEmpty {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.homeBorder, lineWidth: 1)
+            }
+        }
+        .shadow(color: .black.opacity(chapter.entries.isEmpty ? 0.06 : 0), radius: 12, y: 4)
+    }
+
+    private var detailEntryThumbnailSize: CGFloat {
+        presentation == .dailyJournal ? 50 : 58
+    }
+
+    private func detailDisplayEntry(for entry: PrototypeEntry, entryIndex: Int) -> PrototypeEntry {
+        guard presentation == .dailyJournal, !entry.imageNames.isEmpty else {
+            return entry
+        }
+
+        return entry.copy(
+            imageNames: regularPhotoNames(
+                startIndex: entryIndex * 2,
+                count: entry.imageNames.count
+            )
         )
-        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+    }
+
+    private func regularPhotoNames(startIndex: Int, count: Int) -> [String] {
+        (0..<count).map { offset in
+            regularSetImageNames[(startIndex + offset) % regularSetImageNames.count]
+        }
     }
 
     private var entryCountText: String {
