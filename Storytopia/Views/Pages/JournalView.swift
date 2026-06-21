@@ -1736,7 +1736,7 @@ private struct AllJournalEntriesSection: View {
                         showsDate: false,
                         thumbnailSize: 48,
                         leadingCoverImageName: item.coverImageName,
-                        showsReferencePhotos: false
+                        showsReferencePhotos: true
                     )
                 }
                 .buttonStyle(.plain)
