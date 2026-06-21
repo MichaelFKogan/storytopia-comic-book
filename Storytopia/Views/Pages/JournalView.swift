@@ -1601,7 +1601,7 @@ private struct DaybookStoryPage: Identifiable {
     }
 }
 
-private enum DailyJournalData {
+enum DailyJournalData {
     static func allChapters() -> [PrototypeChapter] {
         let visibleSamples = PrototypeChapter.samples.filter {
             !DeletedSampleChapterStore.contains(title: $0.title)
@@ -1700,7 +1700,7 @@ private struct AllJournalEntriesSection: View {
             if allJournalEntries.isEmpty {
                 noJournalEntries
             } else {
-                LazyVStack(spacing: 18) {
+                LazyVStack(spacing: 24) {
                     ForEach(allJournalEntryDays) { day in
                         journalDayGroup(day)
                     }
@@ -1710,14 +1710,11 @@ private struct AllJournalEntriesSection: View {
     }
 
     private func journalDayGroup(_ day: DailyJournalDaySummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             NavigationLink {
                 dailyJournalDetail(for: day.sourceChapter, dayOffset: day.dayOffset)
             } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    journalDateBadge(day)
-                    journalDayHeader(day)
-                }
+                journalDayHeader(day)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open journal for \(day.fullDateText)")
@@ -1795,27 +1792,22 @@ private struct AllJournalEntriesSection: View {
     }
 
     private func journalDayHeader(_ day: DailyJournalDaySummary) -> some View {
-        HStack(spacing: 10) {
-            Text(day.fullDateText)
-                .font(.system(size: 15, weight: .heavy))
-                .foregroundStyle(Color.homeMutedText)
+        HStack(alignment: .lastTextBaseline, spacing: 12) {
+            Text(day.sectionDateText)
+                .font(.system(size: 18, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
+                .minimumScaleFactor(0.86)
 
             Spacer(minLength: 8)
 
             Text(day.entryCountText)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .heavy))
-                .foregroundStyle(Color.storyGray.opacity(0.55))
-                .accessibilityHidden(true)
         }
-        .frame(height: 27)
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 2)
     }
 
     private var noJournalEntries: some View {
@@ -1926,6 +1918,10 @@ private struct DailyJournalDaySummary: Identifiable {
 
     var fullDateText: String {
         date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+    }
+
+    var sectionDateText: String {
+        date.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
     var entryCountText: String {
@@ -3942,7 +3938,7 @@ private struct PrototypeEntryRowContentHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct PrototypeChapter: Identifiable {
+struct PrototypeChapter: Identifiable {
     enum Kind {
         case journal
         case storyboard
@@ -4086,7 +4082,7 @@ private struct PrototypeChapter: Identifiable {
     ]
 }
 
-private enum UserChapterStore {
+enum UserChapterStore {
     private struct Record: Codable {
         let title: String
         let subtitle: String
@@ -4199,7 +4195,7 @@ private enum DeletedSampleChapterStore {
     }
 }
 
-private enum StoryEntryStore {
+enum StoryEntryStore {
     private struct Record: Codable {
         let chapterTitle: String
         let weekday: String
@@ -4267,7 +4263,7 @@ private enum StoryEntryStore {
     }
 }
 
-private struct PrototypeEntry: Identifiable {
+struct PrototypeEntry: Identifiable {
     let id = UUID()
     let weekday: String
     let day: String

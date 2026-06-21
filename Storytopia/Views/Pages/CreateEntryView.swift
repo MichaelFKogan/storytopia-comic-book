@@ -3,6 +3,11 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+private enum CreateEntryDestination {
+    case daily
+    case custom
+}
+
 struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
 
@@ -26,6 +31,10 @@ struct CreateEntryView: View {
     @State private var generationErrorMessage: String?
     @State private var isShowingExpandedEditor = false
     @State private var isShowingArtStyleGrid = false
+    @State private var isShowingJournalDestinationSheet = false
+    @State private var entryDestination: CreateEntryDestination = .daily
+    @State private var selectedCustomJournalTitle: String?
+    @State private var addedJournalTitle: String?
     @State private var storyLocation = ""
     @State private var storyDate = Date()
     @State private var savesDraft = true
@@ -67,6 +76,15 @@ struct CreateEntryView: View {
                 artStyles: artStyles,
                 selectedArtStyle: $selectedArtStyle
             )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingJournalDestinationSheet) {
+            AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
+                selectedCustomJournalTitle = journalTitle
+                entryDestination = .custom
+                isShowingJournalDestinationSheet = false
+            }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -127,6 +145,28 @@ struct CreateEntryView: View {
         } message: {
             Text(generationErrorMessage ?? "")
         }
+        .alert(
+            "Entry Added!",
+            isPresented: Binding(
+                get: { addedJournalTitle != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        addedJournalTitle = nil
+                    }
+                }
+            )
+        ) {
+            Button("Continue Writing", role: .cancel) {
+                addedJournalTitle = nil
+            }
+
+            Button("View Journal") {
+                addedJournalTitle = nil
+                selectedPage = .journal
+            }
+        } message: {
+            Text("This entry is now part of \(addedJournalTitle ?? "your journal").")
+        }
         .onChange(of: selectedPhotoPickerItems) { items in
             guard !items.isEmpty else {
                 return
@@ -143,6 +183,11 @@ struct CreateEntryView: View {
 
     private func startStoryboardGeneration() {
         guard !isGeneratingStoryboard else {
+            return
+        }
+
+        guard let journalTitle = selectedEntryJournalTitle else {
+            isShowingJournalDestinationSheet = true
             return
         }
 
@@ -174,6 +219,7 @@ struct CreateEntryView: View {
                 )
 
                 await MainActor.run {
+                    addCurrentEntry(to: journalTitle)
                     generatedStoryboards.insert(storyboard, at: 0)
                     GeneratedStoryboardStore.save(generatedStoryboards)
                     clearEditor()
@@ -183,7 +229,7 @@ struct CreateEntryView: View {
                     self.activeDraftID = nil
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
                     isGeneratingStoryboard = false
-                    selectedPage = .profile
+                    addedJournalTitle = entryDestination == .daily ? "Daily Journal" : journalTitle
                 }
             } catch {
                 await MainActor.run {
@@ -359,12 +405,147 @@ struct CreateEntryView: View {
         VStack(alignment: .leading, spacing: 14) {
             editorCard
             photoStripSection
+            journalDestinationCard
             // artStylePickerSection
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var selectedEntryJournalTitle: String? {
+        switch entryDestination {
+        case .daily:
+            return DailyJournalData.allChapters().first?.title
+        case .custom:
+            return selectedCustomJournalTitle
+        }
+    }
+
+    private func addCurrentEntry(to journalTitle: String) {
+        let trimmedTitle = storyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBody = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty || !trimmedBody.isEmpty else {
+            return
+        }
+
+        let weekdayFormatter = DateFormatter()
+        weekdayFormatter.dateFormat = "EEE"
+
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "d"
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+
+        let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let entry = PrototypeEntry(
+            weekday: weekdayFormatter.string(from: storyDate).uppercased(),
+            day: dayFormatter.string(from: storyDate),
+            title: trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle,
+            body: trimmedBody,
+            time: timeFormatter.string(from: storyDate),
+            location: trimmedLocation.isEmpty ? nil : trimmedLocation,
+            imageNames: []
+        )
+
+        StoryEntryStore.add(entry, to: journalTitle)
+    }
+
+    private var journalDestinationCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "books.vertical")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Journal")
+                        .font(.system(size: 15, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text("Choose where to add this entry")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+
+                Spacer()
+            }
+
+            VStack(spacing: 8) {
+                journalDestinationButton(
+                    title: "Daily Journal",
+                    subtitle: "Add to today's daily journal",
+                    icon: "calendar",
+                    isSelected: entryDestination == .daily
+                ) {
+                    entryDestination = .daily
+                    dismissKeyboard()
+                }
+
+                journalDestinationButton(
+                    title: "Custom Journal",
+                    subtitle: selectedCustomJournalTitle.map { "Adding to \($0)" } ?? "Add to an existing or new journal",
+                    icon: "book",
+                    isSelected: entryDestination == .custom
+                ) {
+                    entryDestination = .custom
+                    isShowingJournalDestinationSheet = true
+                    dismissKeyboard()
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.68), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
+    }
+
+    private func journalDestinationButton(
+        title: String,
+        subtitle: String,
+        icon: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.74)
+                }
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyBorder)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 58)
+            .background(Color.white.opacity(isSelected ? 0.96 : 0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.storyPurple.opacity(0.34) : Color.storyBorder.opacity(0.62), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var photoStripSection: some View {
@@ -988,6 +1169,339 @@ struct CreateEntryView: View {
         .padding(.top, 2)
         .disabled(isGeneratingStoryboard)
         .opacity(isGeneratingStoryboard ? 0.76 : 1)
+    }
+}
+
+private struct AddToJournalSheet: View {
+    @Binding var selectedJournalTitle: String?
+
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedTab: AddToJournalTab = .existing
+    @State private var searchText = ""
+    @State private var newJournalName = ""
+    @State private var selectedSymbol = "book.closed.fill"
+
+    private let coverSymbols = [
+        "book.closed.fill",
+        "sun.max.fill",
+        "moon.stars.fill",
+        "heart.fill",
+        "leaf.fill",
+        "building.2.fill"
+    ]
+
+    private var journals: [PrototypeChapter] {
+        DailyJournalData.allChapters()
+    }
+
+    private var filteredJournals: [PrototypeChapter] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return journals
+        }
+
+        return journals.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.subtitle.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var trimmedNewJournalName: String {
+        newJournalName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            tabBar
+
+            Group {
+                switch selectedTab {
+                case .existing:
+                    existingJournalList
+                case .new:
+                    newJournalForm
+                }
+            }
+        }
+        .padding(.top, 18)
+        .background(Color.homePageBackground)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center) {
+            Button("Cancel") {
+                dismiss()
+            }
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(Color.storyPurple)
+
+            Spacer()
+
+            Text("Add to Journal")
+                .font(.system(size: 18, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            Color.clear
+                .frame(width: 52, height: 20)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(AddToJournalTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    VStack(spacing: 9) {
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(selectedTab == tab ? Color.storyPurple : Color.storyInk.opacity(0.72))
+
+                        Capsule()
+                            .fill(selectedTab == tab ? Color.storyPurple : Color.clear)
+                            .frame(height: 3)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var existingJournalList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+
+                TextField("Search journals...", text: $searchText)
+                    .font(.system(size: 13, weight: .medium))
+                    .textInputAutocapitalization(.words)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredJournals) { journal in
+                        Button {
+                            onSelect(journal.title)
+                        } label: {
+                            existingJournalRow(journal)
+                        }
+                        .buttonStyle(.plain)
+
+                        if journal.id != filteredJournals.last?.id {
+                            Divider()
+                                .padding(.leading, 62)
+                        }
+                    }
+                }
+            }
+
+            Button {
+                if let selectedJournalTitle {
+                    onSelect(selectedJournalTitle)
+                }
+            } label: {
+                Text("Continue")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.storyPurple.opacity(0.94), Color.storyPurple],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedJournalTitle == nil)
+            .opacity(selectedJournalTitle == nil ? 0.48 : 1)
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func existingJournalRow(_ journal: PrototypeChapter) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(journal.color.opacity(0.16))
+
+                Image(systemName: journal.symbol)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(journal.color)
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(journal.title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Text("\(journal.entries.count) \(journal.entries.count == 1 ? "entry" : "entries")")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.homeMutedText)
+            }
+
+            Spacer()
+
+            Image(systemName: selectedJournalTitle == journal.title ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(selectedJournalTitle == journal.title ? Color.storyPurple : Color.storyBorder)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private var newJournalForm: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(spacing: 9) {
+                Image(systemName: "book.closed.badge.plus")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 72, height: 72)
+                    .background(Color.storyPurple.opacity(0.11), in: Circle())
+
+                Text("Create New Journal")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Text("Give your journal a name and cover to get started.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.homeMutedText)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 18)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Journal Name")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                TextField("e.g., My Thoughts, Adventures...", text: $newJournalName)
+                    .font(.system(size: 14, weight: .medium))
+                    .textInputAutocapitalization(.words)
+                    .padding(.horizontal, 12)
+                    .frame(height: 46)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.storyPurple.opacity(0.52), lineWidth: 1.2)
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Cover")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                HStack(spacing: 10) {
+                    ForEach(coverSymbols, id: \.self) { symbol in
+                        Button {
+                            selectedSymbol = symbol
+                        } label: {
+                            Image(systemName: symbol)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(selectedSymbol == symbol ? .white : Color.storyPurple)
+                                .frame(width: 48, height: 48)
+                                .background(
+                                    selectedSymbol == symbol
+                                        ? Color.storyPurple
+                                        : Color.white.opacity(0.72),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(Color.storyPurple.opacity(selectedSymbol == symbol ? 0.0 : 0.28), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                createJournal()
+            } label: {
+                Text("Create Journal")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.storyPurple.opacity(0.94), Color.storyPurple],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(trimmedNewJournalName.isEmpty)
+            .opacity(trimmedNewJournalName.isEmpty ? 0.48 : 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 20)
+    }
+
+    private func createJournal() {
+        guard !trimmedNewJournalName.isEmpty else {
+            return
+        }
+
+        let journal = PrototypeChapter(
+            title: trimmedNewJournalName,
+            subtitle: "Personal journal",
+            color: Color.storyPurple,
+            symbol: selectedSymbol,
+            coverImageName: nil,
+            kind: .journal,
+            isFavorite: false,
+            entries: []
+        )
+
+        UserChapterStore.add(journal)
+        onSelect(journal.title)
+    }
+}
+
+private enum AddToJournalTab: CaseIterable, Identifiable {
+    case existing
+    case new
+
+    var id: Self {
+        self
+    }
+
+    var title: String {
+        switch self {
+        case .existing:
+            return "Existing"
+        case .new:
+            return "New Journal"
+        }
     }
 }
 
