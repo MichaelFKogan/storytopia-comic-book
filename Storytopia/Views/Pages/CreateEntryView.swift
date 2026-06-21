@@ -1341,15 +1341,11 @@ private struct AddToJournalSheet: View {
 
     private func existingJournalRow(_ journal: PrototypeChapter) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(journal.color.opacity(0.16))
-
-                Image(systemName: journal.symbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(journal.color)
-            }
-            .frame(width: 48, height: 48)
+            AddToJournalCoverIcon(
+                symbol: journal.symbol,
+                color: journal.color,
+                isSelected: selectedJournalTitle == journal.title
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(journal.title)
@@ -1419,20 +1415,11 @@ private struct AddToJournalSheet: View {
                         Button {
                             selectedSymbol = symbol
                         } label: {
-                            Image(systemName: symbol)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(selectedSymbol == symbol ? .white : Color.storyPurple)
-                                .frame(width: 48, height: 48)
-                                .background(
-                                    selectedSymbol == symbol
-                                        ? Color.storyPurple
-                                        : Color.white.opacity(0.72),
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.storyPurple.opacity(selectedSymbol == symbol ? 0.0 : 0.28), lineWidth: 1)
-                                )
+                            AddToJournalCoverIcon(
+                                symbol: symbol,
+                                color: Color.storyPurple,
+                                isSelected: selectedSymbol == symbol
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -1484,6 +1471,54 @@ private struct AddToJournalSheet: View {
 
         UserChapterStore.add(journal)
         onSelect(journal.title)
+    }
+}
+
+private struct AddToJournalCoverIcon: View {
+    let symbol: String
+    let color: Color
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            color.opacity(isSelected ? 0.94 : 0.28),
+                            color.opacity(isSelected ? 0.76 : 0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 42, height: 54)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(isSelected ? color.opacity(0.65) : color.opacity(0.22), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+
+            Rectangle()
+                .fill(Color.white.opacity(isSelected ? 0.34 : 0.56))
+                .frame(width: 4, height: 48)
+                .padding(.leading, 5)
+
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(isSelected ? .white : color)
+                .frame(width: 42, height: 54)
+        }
+        .frame(width: 48, height: 58)
+        .overlay(alignment: .bottomTrailing) {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white, color)
+                    .background(Color.white, in: Circle())
+                    .offset(x: -1, y: -1)
+            }
+        }
     }
 }
 

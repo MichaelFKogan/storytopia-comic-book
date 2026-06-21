@@ -11,6 +11,9 @@ struct JournalView: View {
     @State private var showsPrototypeData = true
     @State private var chapters: [PrototypeChapter]
     @State private var savedDrafts: [CreateEntryDraft]
+    @State private var editMode: EditMode = .inactive
+    @State private var journalBeingRenamed: PrototypeChapter?
+    @State private var renamedJournalTitle = ""
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -29,39 +32,65 @@ struct JournalView: View {
             ZStack(alignment: .bottom) {
                 journalBackground
 
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 15) {
-                        header
+                VStack(alignment: .leading, spacing: 10) {
+                    header
+                        .padding(.horizontal, 16)
 
-                        if showsPrototypeData {
-                            prototypeNotice
-                            chapterList
-                        } else {
-                            emptyState
-                        }
+                    if showsPrototypeData {
+                        prototypeNotice
+                            .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 92)
+
+                    chapterList
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
 
             }
             .toolbar(.hidden, for: .navigationBar)
+            .environment(\.editMode, $editMode)
         }
         .onAppear {
             savedDrafts = CreateEntryDraftStore.loadAll()
+            chapters = DailyJournalData.allChapters()
             isDraftSaved = !savedDrafts.isEmpty
+        }
+        .alert("Rename Journal", isPresented: isRenameAlertPresented) {
+            TextField("Journal name", text: $renamedJournalTitle)
+
+            Button("Cancel", role: .cancel) {
+                journalBeingRenamed = nil
+                renamedJournalTitle = ""
+            }
+
+            Button("Save") {
+                renameSelectedJournal()
+            }
         }
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 14) {
             Text("Journals")
                 .font(.system(size: 30, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
+
+            EditButton()
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+
+            Button {
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.storyInk, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Create a new journal")
         }
         .padding(.top, 12)
     }
@@ -304,42 +333,123 @@ struct JournalView: View {
     }
 
     private var chapterList: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .lastTextBaseline) {
-                Text("Your Journals")
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer()
-
-                Text("\(chapters.count) days")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.homeMutedText)
-            }
-            .padding(.top, 2)
-
-            if chapters.isEmpty {
-                noSearchResults
-            } else {
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
-                    alignment: .leading,
-                    spacing: 12
-                ) {
-                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
-                        NavigationLink {
-                            dailyJournalDetail(for: chapter, dayOffset: index)
-                        } label: {
-                            PrototypeChapterRow(
-                                chapter: DailyJournalData.dateTitledChapter(from: chapter, dayOffset: index),
-                                date: journalDate(dayOffset: index)
-                            )
-                        }
-                        .buttonStyle(.plain)
+        List {
+            if showsPrototypeData {
+                Section {
+                    if chapters.isEmpty {
+                        noSearchResults
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    } else {
+                        journalRows
                     }
+                } header: {
+                    HStack(alignment: .lastTextBaseline) {
+                        Text("Your Journals")
+                            .font(.system(size: 19, weight: .bold, design: .serif))
+                            .foregroundStyle(Color.storyInk)
+                            .textCase(nil)
+
+                        Spacer()
+
+                        Text("\(chapters.count) \(chapters.count == 1 ? "journal" : "journals")")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.homeMutedText)
+                            .textCase(nil)
+                    }
+                }
+            } else {
+                Section {
+                    emptyState
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(Color.clear)
                 }
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 76)
+        }
+    }
+
+    private var journalRows: some View {
+        ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+            NavigationLink {
+                dailyJournalDetail(for: chapter, dayOffset: index)
+            } label: {
+                JournalChapterListRow(chapter: chapter)
+            }
+            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 12))
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button {
+                    beginRenaming(chapter)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(Color.homeAccent)
+            }
+        }
+        .onDelete(perform: deleteChapters)
+        .onMove(perform: moveChapters)
+    }
+
+    private var isRenameAlertPresented: Binding<Bool> {
+        Binding(
+            get: { journalBeingRenamed != nil },
+            set: { isPresented in
+                if !isPresented {
+                    journalBeingRenamed = nil
+                    renamedJournalTitle = ""
+                }
+            }
+        )
+    }
+
+    private func beginRenaming(_ chapter: PrototypeChapter) {
+        journalBeingRenamed = chapter
+        renamedJournalTitle = chapter.title
+    }
+
+    private func renameSelectedJournal() {
+        guard
+            let selectedJournal = journalBeingRenamed,
+            let index = chapters.firstIndex(where: { $0.id == selectedJournal.id })
+        else {
+            return
+        }
+
+        let trimmedTitle = renamedJournalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return
+        }
+
+        let oldTitle = chapters[index].title
+        chapters[index] = chapters[index].copy(title: trimmedTitle)
+        UserChapterStore.rename(title: oldTitle, to: trimmedTitle)
+        StoryEntryStore.renameChapter(from: oldTitle, to: trimmedTitle)
+        journalBeingRenamed = nil
+        renamedJournalTitle = ""
+    }
+
+    private func deleteChapters(at offsets: IndexSet) {
+        offsets
+            .map { chapters[$0] }
+            .forEach { chapter in
+                let isUserJournal = UserChapterStore.contains(title: chapter.title)
+                UserChapterStore.delete(title: chapter.title)
+                if !isUserJournal {
+                    DeletedSampleChapterStore.add(title: chapter.title)
+                }
+                StoryEntryStore.deleteAll(for: chapter.title)
+            }
+
+        chapters.remove(atOffsets: offsets)
+    }
+
+    private func moveChapters(from source: IndexSet, to destination: Int) {
+        chapters.move(fromOffsets: source, toOffset: destination)
+        UserChapterStore.replace(with: chapters.filter { UserChapterStore.contains(title: $0.title) })
     }
 
     private func journalDate(dayOffset: Int) -> Date {
@@ -2209,85 +2319,112 @@ private func draftPreviewText(_ draft: CreateEntryDraft) -> String {
     return "Draft ready to continue"
 }
 
-private struct PrototypeChapterRow: View {
+private struct JournalChapterListRow: View {
     let chapter: PrototypeChapter
-    let date: Date
-
-    private var coverImageName: String? {
-        chapter.entries.flatMap(\.imageNames).first ?? chapter.coverImageName
-    }
-
-    private var badgeMonth: String {
-        date.formatted(.dateTime.month(.abbreviated)).uppercased()
-    }
-
-    private var badgeDay: String {
-        date.formatted(.dateTime.day())
-    }
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            coverArt(width: width, height: width * 1.34)
-                .frame(width: width, height: width * 1.34, alignment: .topLeading)
-        }
-        .aspectRatio(0.74, contentMode: .fit)
-    }
+        HStack(spacing: 10) {
+            JournalListCover(
+                color: chapter.color,
+                imageName: nil,
+                width: 34,
+                height: 44
+            )
+            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
-    private func coverArt(width: CGFloat, height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            if let coverImageName {
-                Image(coverImageName)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(chapter.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.storyInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color.homeMutedText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+        }
+        .frame(minHeight: 54)
+        .accessibilityLabel(chapter.title)
+    }
+}
+
+private struct JournalListCover: View {
+    let color: Color
+    let imageName: String?
+    var width: CGFloat
+    var height: CGFloat
+
+    var body: some View {
+        ZStack {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 3,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 5,
+                topTrailingRadius: 5,
+                style: .continuous
+            )
+            .fill(color)
+
+            if let imageName {
+                Image(imageName)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: width, height: height)
+                    .overlay(Color.black.opacity(0.12))
                     .clipped()
-                    .overlay(
-                        Rectangle()
-                            .stroke(Color.storyInk.opacity(0.18), lineWidth: 1)
-                    )
-                    .accessibilityLabel("Journal cover image for \(badgeMonth) \(badgeDay)")
-            } else {
-                NotebookCover(
-                    color: Color.homeAccent,
-                    symbol: chapter.symbol,
-                    imageName: nil,
-                    width: width,
-                    height: height
-                )
-                .accessibilityLabel("Notebook cover for \(badgeMonth) \(badgeDay)")
             }
 
-            VStack(spacing: 1) {
-                Text(badgeMonth)
-                    .font(.system(size: 8, weight: .heavy, design: .rounded))
-                Text(badgeDay)
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
-            }
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(
-                LinearGradient(
-                    colors: [Color.homeAccent, Color.homeAccent.opacity(0.84)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
+            HStack {
                 Rectangle()
-                    .stroke(.white.opacity(0.38), lineWidth: 1)
-            )
-            .shadow(color: Color.homeAccent.opacity(0.28), radius: 4, y: 2)
+                    .fill(Color.black.opacity(0.22))
+                    .frame(width: 6)
+
+                Spacer()
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.20))
+                    .frame(width: 2)
+            }
+
+            HStack {
+                Rectangle()
+                    .fill(Color.white.opacity(0.34))
+                    .frame(width: 1)
+                    .padding(.leading, 4)
+
+                Spacer()
+            }
         }
         .frame(width: width, height: height)
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 3,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 5,
+                topTrailingRadius: 5,
+                style: .continuous
+            )
+        )
+        .overlay(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 3,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 5,
+                topTrailingRadius: 5,
+                style: .continuous
+            )
+            .stroke(Color.black.opacity(0.16), lineWidth: 0.8)
+        )
+        .shadow(color: color.opacity(0.20), radius: 4, y: 2)
     }
-
 }
 
 private struct NotebookCover: View {
     let color: Color
-    let symbol: String
+    let symbol: String?
     let imageName: String?
     var width: CGFloat = 48
     var height: CGFloat = 58
@@ -2305,9 +2442,11 @@ private struct NotebookCover: View {
                     .clipped()
             }
 
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
 
             HStack {
                 Rectangle()
@@ -2317,7 +2456,7 @@ private struct NotebookCover: View {
                 Rectangle()
                     .fill(Color.white.opacity(0.22))
                     .frame(width: 1)
-
+                
                 Spacer()
             }
         }
@@ -2462,9 +2601,9 @@ private struct PrototypeChapterDetailView: View {
     private var heroDetails: some View {
         HStack(alignment: .bottom, spacing: 18) {
             NotebookCover(
-                color: Color.homeAccent,
-                symbol: chapter.symbol,
-                imageName: heroImageName,
+                color: chapter.color,
+                symbol: nil,
+                imageName: nil,
                 width: 122,
                 height: 158
             )
@@ -3962,11 +4101,24 @@ struct PrototypeChapter: Identifiable {
         "\(entries.count) \(entries.count == 1 ? "story" : "stories")"
     }
 
+    func copy(title: String) -> PrototypeChapter {
+        PrototypeChapter(
+            title: title,
+            subtitle: subtitle,
+            color: color,
+            symbol: symbol,
+            coverImageName: coverImageName,
+            kind: kind,
+            isFavorite: isFavorite,
+            entries: entries
+        )
+    }
+
     static let samples: [PrototypeChapter] = [
         PrototypeChapter(
             title: "Everyday Stories",
             subtitle: "Small moments worth remembering",
-            color: Color(red: 0.34, green: 0.55, blue: 0.92),
+            color: Color(red: 0.20, green: 0.12, blue: 0.42),
             symbol: "sparkles",
             coverImageName: nil,
             kind: .journal,
@@ -4004,7 +4156,7 @@ struct PrototypeChapter: Identifiable {
         PrototypeChapter(
             title: "Summer Adventures",
             subtitle: "Trips, detours, and sunlit days",
-            color: Color(red: 0.97, green: 0.62, blue: 0.28),
+            color: Color(red: 0.05, green: 0.09, blue: 0.20),
             symbol: "sun.max.fill",
             coverImageName: "storyboard6",
             kind: .storyboard,
@@ -4033,7 +4185,7 @@ struct PrototypeChapter: Identifiable {
         PrototypeChapter(
             title: "Dream Log",
             subtitle: "Scenes from the edge of sleep",
-            color: Color(red: 0.43, green: 0.38, blue: 0.78),
+            color: Color(red: 0.31, green: 0.14, blue: 0.56),
             symbol: "moon.stars.fill",
             coverImageName: nil,
             kind: .journal,
@@ -4053,7 +4205,7 @@ struct PrototypeChapter: Identifiable {
         PrototypeChapter(
             title: "People & Places",
             subtitle: "Portraits of a changing city",
-            color: Color(red: 0.29, green: 0.70, blue: 0.65),
+            color: Color(red: 0.08, green: 0.18, blue: 0.36),
             symbol: "building.2.fill",
             coverImageName: nil,
             kind: .storyboard,
@@ -4139,6 +4291,48 @@ enum UserChapterStore {
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 
+    static func contains(title: String) -> Bool {
+        records.contains { $0.title == title }
+    }
+
+    static func rename(title oldTitle: String, to newTitle: String) {
+        let updatedRecords = records.map { record in
+            guard record.title == oldTitle else {
+                return record
+            }
+
+            return Record(
+                title: newTitle,
+                subtitle: record.subtitle,
+                symbol: record.symbol,
+                kind: record.kind
+            )
+        }
+
+        guard let data = try? JSONEncoder().encode(updatedRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func replace(with chapters: [PrototypeChapter]) {
+        let updatedRecords = chapters.map { chapter in
+            Record(
+                title: chapter.title,
+                subtitle: chapter.subtitle,
+                symbol: chapter.symbol,
+                kind: chapter.kind == .storyboard ? "storyboard" : "journal"
+            )
+        }
+
+        guard let data = try? JSONEncoder().encode(updatedRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
     static func delete(title: String) {
         let remainingRecords = records.filter { $0.title != title }
         guard let data = try? JSONEncoder().encode(remainingRecords) else {
@@ -4162,17 +4356,17 @@ enum UserChapterStore {
     private static func color(for symbol: String) -> Color {
         switch symbol {
         case "sun.max.fill":
-            return Color(red: 0.97, green: 0.62, blue: 0.28)
+            return Color(red: 0.05, green: 0.09, blue: 0.20)
         case "moon.stars.fill":
-            return Color(red: 0.43, green: 0.38, blue: 0.78)
+            return Color(red: 0.31, green: 0.14, blue: 0.56)
         case "building.2.fill":
-            return Color(red: 0.29, green: 0.70, blue: 0.65)
+            return Color(red: 0.08, green: 0.18, blue: 0.36)
         case "heart.fill":
-            return Color.storyRose
+            return Color(red: 0.36, green: 0.05, blue: 0.18)
         case "leaf.fill":
-            return Color(red: 0.35, green: 0.64, blue: 0.43)
+            return Color(red: 0.06, green: 0.22, blue: 0.17)
         default:
-            return Color(red: 0.34, green: 0.55, blue: 0.92)
+            return Color(red: 0.20, green: 0.12, blue: 0.42)
         }
     }
 }
@@ -4245,6 +4439,30 @@ enum StoryEntryStore {
     static func deleteAll(for chapterTitle: String) {
         let remainingRecords = records.filter { $0.chapterTitle != chapterTitle }
         guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func renameChapter(from oldTitle: String, to newTitle: String) {
+        let updatedRecords = records.map { record in
+            guard record.chapterTitle == oldTitle else {
+                return record
+            }
+
+            return Record(
+                chapterTitle: newTitle,
+                weekday: record.weekday,
+                day: record.day,
+                title: record.title,
+                body: record.body,
+                time: record.time,
+                location: record.location
+            )
+        }
+
+        guard let data = try? JSONEncoder().encode(updatedRecords) else {
             return
         }
 
