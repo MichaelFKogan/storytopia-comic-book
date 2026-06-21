@@ -1735,7 +1735,7 @@ private struct AllJournalEntriesSection: View {
                         accentColor: Color.homeAccent,
                         showsDate: false,
                         thumbnailSize: 48,
-                        trailingCoverImageName: item.coverImageName,
+                        inlineLeadingCoverImageName: item.coverImageName,
                         showsReferencePhotos: true
                     )
                 }
@@ -3768,6 +3768,7 @@ private struct PrototypeEntryRow: View {
     var showsDate = true
     var thumbnailSize: CGFloat = 58
     var leadingCoverImageName: String?
+    var inlineLeadingCoverImageName: String?
     var trailingCoverImageName: String?
     var showsReferencePhotos = true
     @State private var rowHeight: CGFloat = 0
@@ -3813,6 +3814,10 @@ private struct PrototypeEntryRow: View {
                 }
                 .frame(width: 38)
                 .padding(.top, 2)
+            }
+
+            if let inlineLeadingCoverImageName {
+                inlineCoverPanel(imageName: inlineLeadingCoverImageName)
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -3871,7 +3876,7 @@ private struct PrototypeEntryRow: View {
             Spacer(minLength: 0)
 
             if let trailingCoverImageName {
-                trailingCoverPanel(imageName: trailingCoverImageName)
+                inlineCoverPanel(imageName: trailingCoverImageName)
             }
 
             Image(systemName: "chevron.right")
@@ -3893,7 +3898,7 @@ private struct PrototypeEntryRow: View {
             .accessibilityHidden(true)
     }
 
-    private func trailingCoverPanel(imageName: String) -> some View {
+    private func inlineCoverPanel(imageName: String) -> some View {
         let height = max(rowContentHeight, 72)
         let width = height * coverAspectRatio(for: imageName)
 
