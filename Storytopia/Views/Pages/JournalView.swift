@@ -1735,7 +1735,7 @@ private struct AllJournalEntriesSection: View {
                         accentColor: Color.homeAccent,
                         showsDate: false,
                         thumbnailSize: 48,
-                        leadingCoverImageName: item.coverImageName,
+                        trailingCoverImageName: item.coverImageName,
                         showsReferencePhotos: true
                     )
                 }
@@ -3768,8 +3768,10 @@ private struct PrototypeEntryRow: View {
     var showsDate = true
     var thumbnailSize: CGFloat = 58
     var leadingCoverImageName: String?
+    var trailingCoverImageName: String?
     var showsReferencePhotos = true
     @State private var rowHeight: CGFloat = 0
+    @State private var rowContentHeight: CGFloat = 0
 
     private var leadingCoverWidth: CGFloat {
         guard let leadingCoverImageName, rowHeight > 0 else {
@@ -3856,8 +3858,21 @@ private struct PrototypeEntryRow: View {
                     .padding(.top, 4)
                 }
             }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: PrototypeEntryRowContentHeightPreferenceKey.self, value: proxy.size.height)
+                }
+            }
+            .onPreferenceChange(PrototypeEntryRowContentHeightPreferenceKey.self) { height in
+                rowContentHeight = height
+            }
 
             Spacer(minLength: 0)
+
+            if let trailingCoverImageName {
+                trailingCoverPanel(imageName: trailingCoverImageName)
+            }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .bold))
@@ -3878,6 +3893,22 @@ private struct PrototypeEntryRow: View {
             .accessibilityHidden(true)
     }
 
+    private func trailingCoverPanel(imageName: String) -> some View {
+        let height = max(rowContentHeight, 72)
+        let width = height * coverAspectRatio(for: imageName)
+
+        return Image(imageName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 1)
+            }
+            .accessibilityHidden(true)
+    }
+
     private func coverAspectRatio(for imageName: String) -> CGFloat {
         guard
             let image = UIImage(named: imageName),
@@ -3891,6 +3922,14 @@ private struct PrototypeEntryRow: View {
 }
 
 private struct PrototypeEntryRowHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct PrototypeEntryRowContentHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
