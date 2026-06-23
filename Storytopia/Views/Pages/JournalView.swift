@@ -55,6 +55,7 @@ struct JournalView: View {
             chapters = DailyJournalData.allChapters()
             isDraftSaved = !savedDrafts.isEmpty
         }
+        .preferredColorScheme(.light)
         .alert("Rename Journal", isPresented: isRenameAlertPresented) {
             TextField("Journal name", text: $renamedJournalTitle)
 
@@ -368,6 +369,7 @@ struct JournalView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 76)
         }
@@ -381,6 +383,7 @@ struct JournalView: View {
                 JournalChapterListRow(chapter: chapter)
             }
             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 12))
+            .listRowBackground(Color.homePageBackground)
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 Button {
                     beginRenaming(chapter)
@@ -1746,8 +1749,10 @@ enum DailyJournalData {
         onNewEntryPresentationChange: @escaping (Bool) -> Void = { _ in },
         onAddEntry: @escaping (PrototypeEntry) -> Void
     ) -> some View {
-        PrototypeChapterDetailView(
-            chapter: dateTitledChapter(from: chapter, dayOffset: dayOffset),
+        let datedChapter = dateTitledChapter(from: chapter, dayOffset: dayOffset)
+
+        return PrototypeChapterDetailView(
+            chapter: datedChapter.copy(title: chapter.title),
             entryDate: journalDate(dayOffset: dayOffset),
             presentation: .dailyJournal,
             onNewEntryPresentationChange: onNewEntryPresentationChange,
@@ -2628,14 +2633,16 @@ private struct PrototypeChapterDetailView: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(chapter.subtitle)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.homeMutedText)
-                    .lineLimit(2)
+                if presentation != .dailyJournal {
+                    Text(chapter.subtitle)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .lineLimit(2)
 
-                Text(entryDate.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.homeMutedText.opacity(0.78))
+                    Text(entryDate.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.homeMutedText.opacity(0.78))
+                }
             }
         }
     }
