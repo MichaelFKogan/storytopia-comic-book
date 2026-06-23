@@ -18,6 +18,7 @@ struct CreateEntryView: View {
     @Binding var activeDraftID: UUID?
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
+    let dismissCreate: () -> Void
 
     @State private var selectedArtStyle = "Anime"
     private let previewLayout = StoryboardLayoutOption.fiveClassic
@@ -41,6 +42,7 @@ struct CreateEntryView: View {
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
+    @GestureState private var exitDragOffset: CGFloat = 0
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
 
@@ -65,6 +67,9 @@ struct CreateEntryView: View {
                 ExpandedEntryEditor(entryText: $entryText, storyTitle: $storyTitle)
             }
         }
+        .offset(x: exitDragOffset)
+        .simultaneousGesture(exitSwipeGesture)
+        .animation(.snappy(duration: 0.22), value: exitDragOffset)
         .sheet(isPresented: $isShowingCamera) {
             CameraPhotoPicker { image in
                 setStoryboardPhoto(image)
@@ -307,19 +312,45 @@ struct CreateEntryView: View {
         !storyTitle.isEmpty || !entryText.isEmpty || storyboardPhotos.contains { $0 != nil }
     }
 
+    private var exitSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 18, coordinateSpace: .local)
+            .updating($exitDragOffset) { value, state, _ in
+                guard isExitSwipe(value) else {
+                    return
+                }
+
+                state = value.translation.width
+            }
+            .onEnded { value in
+                let shouldExit = value.translation.width > 96
+                    || value.predictedEndTranslation.width > 180
+
+                if shouldExit && isExitSwipe(value) {
+                    requestExit()
+                }
+            }
+    }
+
+    private func isExitSwipe(_ value: DragGesture.Value) -> Bool {
+        value.translation.width > 0
+            && abs(value.translation.height) < max(24, value.translation.width * 0.65)
+    }
+
     private func requestExit() {
         dismissKeyboard()
 
         if hasDraftContent {
             isShowingExitConfirmation = true
         } else {
-            exitToHome()
+            dismissToPreviousPage()
         }
     }
 
-    private func exitToHome() {
+    private func dismissToPreviousPage() {
         dismissKeyboard()
-        selectedPage = .home
+        withAnimation(.snappy(duration: 0.32)) {
+            dismissCreate()
+        }
     }
 
     private func saveDraftAndExit() {
@@ -342,7 +373,9 @@ struct CreateEntryView: View {
 
         clearEditor()
         activeDraftID = nil
-        selectedPage = .journal
+        withAnimation(.snappy(duration: 0.32)) {
+            dismissCreate()
+        }
     }
 
     private func discardDraftAndExit() {
@@ -352,7 +385,9 @@ struct CreateEntryView: View {
         }
         activeDraftID = nil
         isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
-        selectedPage = .home
+        withAnimation(.snappy(duration: 0.32)) {
+            dismissCreate()
+        }
     }
 
     private func clearEditor() {

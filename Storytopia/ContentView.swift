@@ -10,6 +10,7 @@ import UIKit
 
 struct ContentView: View {
     @State private var selectedPage: StoryPage = .home
+    @State private var pageBehindCreate: StoryPage = .home
     @State private var entryText: String
     @State private var draftStoryTitle: String
     @State private var draftStoryboardPhotos: [UIImage?]
@@ -29,40 +30,52 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            currentPage
+            basePage
+
+            if selectedPage == .create {
+                createPage
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+            }
         }
+        .animation(.snappy(duration: 0.32), value: selectedPage)
+    }
+
+    private var pageSelection: Binding<StoryPage> {
+        Binding(
+            get: { selectedPage },
+            set: { newPage in
+                if newPage == .create {
+                    if selectedPage != .create {
+                        pageBehindCreate = selectedPage
+                    }
+                } else {
+                    pageBehindCreate = newPage
+                }
+
+                selectedPage = newPage
+            }
+        )
     }
 
     @ViewBuilder
-    private var currentPage: some View {
-        switch selectedPage {
+    private var basePage: some View {
+        switch pageBehindCreate {
         case .home:
-            HomeView(selectedPage: $selectedPage)
+            HomeView(selectedPage: pageSelection)
                 .transition(.identity)
                 .zIndex(0)
         case .today:
-            DaybookView(selectedPage: $selectedPage)
+            DaybookView(selectedPage: pageSelection)
                 .transition(.identity)
                 .zIndex(0)
         case .explore:
-            ExploreView(selectedPage: $selectedPage)
+            ExploreView(selectedPage: pageSelection)
                 .transition(.identity)
                 .zIndex(0)
-        case .create:
-            CreateEntryView(
-                entryText: $entryText,
-                storyTitle: $draftStoryTitle,
-                storyboardPhotos: $draftStoryboardPhotos,
-                isDraftSaved: $isDraftSaved,
-                activeDraftID: $activeDraftID,
-                selectedPage: $selectedPage,
-                generatedStoryboards: $generatedStoryboards
-            )
-            .transition(.identity)
-            .zIndex(0)
         case .journal:
             JournalView(
-                selectedPage: $selectedPage,
+                selectedPage: pageSelection,
                 isDraftSaved: $isDraftSaved,
                 activeDraftID: $activeDraftID
             )
@@ -70,12 +83,29 @@ struct ContentView: View {
                 .zIndex(0)
         case .profile:
             ProfileView(
-                selectedPage: $selectedPage,
+                selectedPage: pageSelection,
                 generatedStoryboards: $generatedStoryboards
             )
             .transition(.identity)
             .zIndex(0)
+        case .create:
+            EmptyView()
         }
+    }
+
+    private var createPage: some View {
+        CreateEntryView(
+            entryText: $entryText,
+            storyTitle: $draftStoryTitle,
+            storyboardPhotos: $draftStoryboardPhotos,
+            isDraftSaved: $isDraftSaved,
+            activeDraftID: $activeDraftID,
+            selectedPage: pageSelection,
+            generatedStoryboards: $generatedStoryboards,
+            dismissCreate: {
+                selectedPage = pageBehindCreate
+            }
+        )
     }
 }
 
