@@ -771,7 +771,7 @@ private enum DaybookTab: String, CaseIterable, Identifiable {
         case .entries:
             return "Entries"
         case .comic:
-            return "My Story"
+            return "Story"
         case .gallery:
             return "Gallery"
         }
@@ -3440,7 +3440,7 @@ private struct PrototypeEntryDetailView: View {
     private var journalPage: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("My story", systemImage: "text.quote")
+                Label("Story", systemImage: "text.quote")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Color.homeAccent)
 
