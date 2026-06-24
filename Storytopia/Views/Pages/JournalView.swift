@@ -917,6 +917,7 @@ private struct DaybookComicBookView: View {
     var onOpenComic: (() -> Void)?
     @State private var programmaticTurnOffset = 0
     @State private var programmaticTurnProgress: CGFloat = 0
+    @State private var isBackwardTurnActive = false
     private let binderWidth: CGFloat = 12
 
     init(
@@ -955,11 +956,24 @@ private struct DaybookComicBookView: View {
                         currentPageIndex: $currentPageIndex,
                         programmaticTurnOffset: programmaticTurnOffset,
                         programmaticTurnProgress: programmaticTurnProgress,
-                        showsCoverOverlay: showsCoverOverlay
+                        showsCoverOverlay: showsCoverOverlay,
+                        isBackwardTurnActive: $isBackwardTurnActive
                     )
                     .frame(width: pageWidth, height: pageHeight)
                 }
                 .frame(width: bookWidth, height: pageHeight)
+                .background(alignment: .leading) {
+                    if let flapPageIndex = leftFlapPageIndex {
+                        DaybookComicPageContent(
+                            comicBook: comicBook,
+                            pageIndex: flapPageIndex,
+                            showsCoverOverlay: showsCoverOverlay
+                        )
+                        .frame(width: pageWidth, height: pageHeight)
+                        .offset(x: -pageWidth)
+                        .allowsHitTesting(false)
+                    }
+                }
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color(red: 0.03, green: 0.03, blue: 0.04))
@@ -1074,6 +1088,24 @@ private struct DaybookComicBookView: View {
     private var isTurningProgrammatically: Bool {
         programmaticTurnOffset != 0
     }
+
+    private var leftFlapPageIndex: Int? {
+        let isBackward = isBackwardTurnActive || programmaticTurnOffset < 0
+
+        if isBackward {
+            guard currentPageIndex > 1 else {
+                return nil
+            }
+
+            return currentPageIndex - 2
+        }
+
+        guard currentPageIndex > 0 else {
+            return nil
+        }
+
+        return currentPageIndex - 1
+    }
 }
 
 private struct DaybookComicBinder: View {
@@ -1108,6 +1140,7 @@ private struct DaybookPageTurnView: View {
     let programmaticTurnOffset: Int
     let programmaticTurnProgress: CGFloat
     let showsCoverOverlay: Bool
+    @Binding var isBackwardTurnActive: Bool
     @GestureState private var dragTranslation: CGFloat = 0
 
     var body: some View {
@@ -1160,23 +1193,22 @@ private struct DaybookPageTurnView: View {
             )
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Comic book page \(currentPageIndex + 1) of \(comicBook.totalPageCount)")
+            .onChange(of: pageTurn.isTurningBackward) { isTurningBackward in
+                isBackwardTurnActive = isTurningBackward
+            }
+            .onAppear {
+                isBackwardTurnActive = pageTurn.isTurningBackward
+            }
         }
     }
 
     @ViewBuilder
     private func pageView(at pageIndex: Int) -> some View {
-        if pageIndex == 0 {
-            DaybookComicCoverPage(
-                comicBook: comicBook,
-                showsCoverOverlay: showsCoverOverlay
-            )
-        } else if pageIndex == comicBook.totalPageCount - 1 {
-            DaybookComicBackCoverPage(comicBook: comicBook)
-        } else {
-            let storyPage = comicBook.storyPages[pageIndex - 1]
-
-            DaybookComicStoryPage(page: storyPage)
-        }
+        DaybookComicPageContent(
+            comicBook: comicBook,
+            pageIndex: pageIndex,
+            showsCoverOverlay: showsCoverOverlay
+        )
     }
 
     private func pageTurnState(width: CGFloat) -> (progress: CGFloat, isTurningForward: Bool, isTurningBackward: Bool) {
@@ -1378,6 +1410,27 @@ private struct DaybookEmptyComicState: View {
                 .stroke(Color.homeBorder, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+    }
+}
+
+private struct DaybookComicPageContent: View {
+    let comicBook: DaybookComicBook
+    let pageIndex: Int
+    var showsCoverOverlay = false
+
+    var body: some View {
+        if pageIndex == 0 {
+            DaybookComicCoverPage(
+                comicBook: comicBook,
+                showsCoverOverlay: showsCoverOverlay
+            )
+        } else if pageIndex == comicBook.totalPageCount - 1 {
+            DaybookComicBackCoverPage(comicBook: comicBook)
+        } else {
+            let storyPage = comicBook.storyPages[pageIndex - 1]
+
+            DaybookComicStoryPage(page: storyPage)
+        }
     }
 }
 
