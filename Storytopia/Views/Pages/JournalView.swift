@@ -553,6 +553,8 @@ struct DaybookView: View {
     @State private var isComicReaderPresented = false
     @State private var isShowingNewEntry = false
     @State private var selectedGalleryImageIndex: Int?
+    @State private var previewHorizontalPosition: Double = 0.5
+    @State private var previewZoom: Double = 1.0
 
     private var comicBook: DaybookComicBook {
         DaybookComicBook(chapters: chapters)
@@ -572,10 +574,25 @@ struct DaybookView: View {
                         selectedTabContent
                     }
                     .padding(.top, 12)
-                    .padding(.bottom, 92)
+                    .padding(.bottom, scrollBottomPadding)
                 }
+                .modifier(DaybookScrollClipDisabledModifier())
 
-                BottomNavigationBar(selectedPage: $selectedPage)
+                VStack(spacing: 0) {
+                    if showsComicPreviewControls {
+                        DaybookComicPreviewControlSliders(
+                            horizontalPosition: $previewHorizontalPosition,
+                            zoom: $previewZoom,
+                            zoomRange: comicPreviewZoomRange,
+                            zoomCenterValue: comicPreviewZoomCenter
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    BottomNavigationBar(selectedPage: $selectedPage)
+                }
             }
             .navigationDestination(isPresented: $isShowingNewEntry) {
                 NewStorySheet(
@@ -594,7 +611,15 @@ struct DaybookView: View {
         .onAppear {
             chapters = DailyJournalData.allChapters()
             comicPageIndex = clampedComicPageIndex(comicPageIndex)
+            clampPreviewZoom()
         }
+        .onChange(of: selectedTab) { newTab in
+            clampPreviewZoom()
+            if newTab == .comic {
+                previewHorizontalPosition = 0.5
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showsComicPreviewControls)
         .fullScreenCover(isPresented: $isComicReaderPresented) {
             DaybookComicReaderView(
                 comicBook: comicBook,
@@ -691,6 +716,8 @@ struct DaybookView: View {
             DaybookComicTab(
                 comicBook: comicBook,
                 currentPageIndex: $comicPageIndex,
+                previewHorizontalPosition: $previewHorizontalPosition,
+                previewZoom: $previewZoom,
                 onOpenReader: { isComicReaderPresented = true },
                 onOpenGalleryImage: { imageIndex in
                     selectedGalleryImageIndex = imageIndex
@@ -698,6 +725,26 @@ struct DaybookView: View {
             )
             .padding(.horizontal, 16)
         }
+    }
+
+    private var showsComicPreviewControls: Bool {
+        selectedTab == .comic && !comicBook.storyPages.isEmpty
+    }
+
+    private var scrollBottomPadding: CGFloat {
+        showsComicPreviewControls ? 188 : 92
+    }
+
+    private var comicPreviewZoomRange: ClosedRange<Double> {
+        DaybookComicPreviewMetrics.sliderZoomRange
+    }
+
+    private var comicPreviewZoomCenter: Double {
+        DaybookComicPreviewMetrics.sliderZoomCenter
+    }
+
+    private func clampPreviewZoom() {
+        previewZoom = min(max(previewZoom, comicPreviewZoomRange.lowerBound), comicPreviewZoomRange.upperBound)
     }
 
     private func clampedComicPageIndex(_ pageIndex: Int) -> Int {
@@ -734,26 +781,55 @@ private struct DaybookComicReaderView: View {
     @State private var panOffset: CGSize = .zero
     @State private var lastPanOffset: CGSize = .zero
     @State private var isShowingGestureHint = false
+    @State private var areReaderControlsVisible = false
     @State private var programmaticTurnOffset = 0
     @State private var programmaticTurnProgress: CGFloat = 0
     @State private var isBackwardTurnActive = false
+    @GestureState private var isMagnifying = false
 
     private let minimumScale: CGFloat = 1
     private let maximumScale: CGFloat = 5
-    private let contentPadding: CGFloat = 12
     private let thumbnailHeight: CGFloat = 56
+    private let panEdgePaddingRatio: CGFloat = 0.28
+    private let zoomSteps: [CGFloat] = [1.75, 2.5, 3.5, 5]
 
     var body: some View {
         ZStack {
             Color.black
                 .ignoresSafeArea()
 
+            readerPageContent
+                .ignoresSafeArea()
+
             VStack(spacing: 0) {
                 readerTopBar
-                readerPageThumbnailStrip
-                readerPageContent
-                readerBottomBar
+                    .background {
+                        LinearGradient(
+                            colors: [.black.opacity(0.72), .black.opacity(0.28), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea(edges: .top)
+                    }
+
+                Spacer(minLength: 0)
+
+                VStack(spacing: 0) {
+                    readerBottomBar
+                    readerPageThumbnailStrip
+                }
+                .background {
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.28), .black.opacity(0.72)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+                }
             }
+            .opacity(areReaderControlsVisible ? 1 : 0)
+            .allowsHitTesting(areReaderControlsVisible)
+            .animation(.easeInOut(duration: 0.2), value: areReaderControlsVisible)
 
             if isShowingGestureHint {
                 gestureHintOverlay
@@ -845,6 +921,7 @@ private struct DaybookComicReaderView: View {
             }
         }
         .frame(height: thumbnailHeight + 12)
+        .padding(.bottom, 10)
     }
 
     private func readerThumbnail(for pageIndex: Int) -> some View {
@@ -876,16 +953,18 @@ private struct DaybookComicReaderView: View {
             let pageSize = fittedPageSize(in: viewport)
 
             Group {
-                if isAtFitZoom {
+                if showsPageTurnView {
                     DaybookPageTurnView(
                         comicBook: comicBook,
                         currentPageIndex: $currentPageIndex,
                         programmaticTurnOffset: programmaticTurnOffset,
                         programmaticTurnProgress: programmaticTurnProgress,
                         showsCoverOverlay: false,
-                        isBackwardTurnActive: $isBackwardTurnActive
+                        isBackwardTurnActive: $isBackwardTurnActive,
+                        onTap: toggleReaderControls
                     )
                     .frame(width: pageSize.width, height: pageSize.height)
+                    .scaleEffect(isMagnifying ? zoomScale : 1)
                     .simultaneousGesture(fitZoomMagnificationGesture(pageSize: pageSize, viewport: viewport))
                 } else {
                     DaybookComicPageContent(
@@ -900,6 +979,11 @@ private struct DaybookComicReaderView: View {
                     .onTapGesture(count: 2) {
                         resetZoom(animated: true)
                     }
+                    .simultaneousGesture(
+                        TapGesture(count: 1).onEnded {
+                            toggleReaderControls()
+                        }
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -909,10 +993,23 @@ private struct DaybookComicReaderView: View {
     private var readerBottomBar: some View {
         HStack(spacing: 14) {
             readerControlButton(
-                systemName: "chevron.left",
+                isEnabled: !isAtFitZoom,
+                accessibilityLabel: "Fit page",
+                usesSquareShape: true
+            ) {
+                fitPageIcon(isEnabled: !isAtFitZoom)
+            } action: {
+                resetZoom(animated: true)
+            }
+
+            Spacer(minLength: 0)
+
+            readerControlButton(
                 isEnabled: currentPageIndex > 0 && !isTurningProgrammatically,
                 accessibilityLabel: "Previous page"
             ) {
+                Image(systemName: "chevron.left")
+            } action: {
                 if isAtFitZoom {
                     turnPage(by: -1)
                 } else {
@@ -921,10 +1018,11 @@ private struct DaybookComicReaderView: View {
             }
 
             readerControlButton(
-                systemName: "chevron.right",
                 isEnabled: currentPageIndex < comicBook.totalPageCount - 1 && !isTurningProgrammatically,
                 accessibilityLabel: "Next page"
             ) {
+                Image(systemName: "chevron.right")
+            } action: {
                 if isAtFitZoom {
                     turnPage(by: 1)
                 } else {
@@ -932,31 +1030,58 @@ private struct DaybookComicReaderView: View {
                 }
             }
 
+            Spacer(minLength: 0)
+
             readerControlButton(
-                systemName: "arrow.up.left.and.arrow.down.right",
-                isEnabled: !isAtFitZoom,
-                accessibilityLabel: "Fit page"
+                isEnabled: canZoomInFurther,
+                accessibilityLabel: "Zoom in",
+                usesSquareShape: true
             ) {
-                resetZoom(animated: true)
+                Image(systemName: "plus.magnifyingglass")
+            } action: {
+                zoomInOneStep()
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 10)
-        .padding(.bottom, 18)
+        .padding(.bottom, 8)
     }
 
-    private func readerControlButton(
-        systemName: String,
+    private func fitPageIcon(isEnabled: Bool) -> some View {
+        let tint = isEnabled ? Color.white : Color.white.opacity(0.28)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(tint, lineWidth: 2)
+                .frame(width: 17, height: 17)
+
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 8, weight: .black))
+                .foregroundStyle(tint)
+        }
+    }
+
+    private func readerControlButton<Label: View>(
         isEnabled: Bool,
         accessibilityLabel: String,
+        usesSquareShape: Bool = false,
+        @ViewBuilder label: () -> Label,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
+            label()
                 .font(.system(size: 15, weight: .heavy))
                 .foregroundStyle(isEnabled ? .white : .white.opacity(0.28))
                 .frame(width: 44, height: 40)
-                .background(Color.white.opacity(isEnabled ? 0.14 : 0.06), in: Capsule())
+                .background {
+                    if usesSquareShape {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.white.opacity(isEnabled ? 0.14 : 0.06))
+                    } else {
+                        Capsule()
+                            .fill(Color.white.opacity(isEnabled ? 0.14 : 0.06))
+                    }
+                }
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -978,12 +1103,52 @@ private struct DaybookComicReaderView: View {
         zoomScale <= minimumScale + 0.02
     }
 
+    private var showsPageTurnView: Bool {
+        if isMagnifying {
+            return lastZoomScale <= minimumScale + 0.02
+        }
+
+        return isAtFitZoom
+    }
+
     private var isTurningProgrammatically: Bool {
         programmaticTurnOffset != 0
     }
 
+    private var canZoomInFurther: Bool {
+        zoomSteps.contains { $0 > zoomScale + 0.05 }
+    }
+
+    private func zoomInOneStep() {
+        guard let nextScale = zoomSteps.first(where: { $0 > zoomScale + 0.05 }) else {
+            return
+        }
+
+        applyZoom(to: nextScale, animated: true)
+    }
+
+    private func applyZoom(to scale: CGFloat, animated: Bool) {
+        let updates = {
+            zoomScale = clampedScale(scale)
+            lastZoomScale = zoomScale
+            panOffset = .zero
+            lastPanOffset = .zero
+        }
+
+        if animated {
+            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.86)) {
+                updates()
+            }
+        } else {
+            updates()
+        }
+    }
+
     private func fitZoomMagnificationGesture(pageSize: CGSize, viewport: CGSize) -> some Gesture {
         MagnificationGesture()
+            .updating($isMagnifying) { _, state, _ in
+                state = true
+            }
             .onChanged { value in
                 zoomScale = rubberBandScale(lastZoomScale * value)
             }
@@ -1167,19 +1332,16 @@ private struct DaybookComicReaderView: View {
     }
 
     private func fittedPageSize(in viewport: CGSize) -> CGSize {
-        let availableSize = CGSize(
-            width: max(viewport.width - (contentPadding * 2), 1),
-            height: max(viewport.height - (contentPadding * 2), 1)
-        )
         let aspectRatio = comicBook.imageAspectRatio(for: currentPageIndex)
+        let width = max(viewport.width, 1)
+        let height = width / aspectRatio
+        return CGSize(width: width, height: height)
+    }
 
-        if aspectRatio > (availableSize.width / availableSize.height) {
-            let height = availableSize.width / aspectRatio
-            return CGSize(width: availableSize.width, height: height)
+    private func toggleReaderControls() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            areReaderControlsVisible.toggle()
         }
-
-        let width = availableSize.height * aspectRatio
-        return CGSize(width: width, height: availableSize.height)
     }
 
     private func boundedOffset(
@@ -1198,13 +1360,14 @@ private struct DaybookComicReaderView: View {
 
     private func offsetBounds(pageSize: CGSize, viewport: CGSize) -> CGSize {
         let visibleSize = CGSize(
-            width: max(viewport.width - (contentPadding * 2), 1),
-            height: max(viewport.height - (contentPadding * 2), 1)
+            width: max(viewport.width, 1),
+            height: max(viewport.height, 1)
         )
+        let edgePadding = min(visibleSize.width, visibleSize.height) * panEdgePaddingRatio
 
         return CGSize(
-            width: max(((pageSize.width * zoomScale) - visibleSize.width) / 2, 0),
-            height: max(((pageSize.height * zoomScale) - visibleSize.height) / 2, 0)
+            width: max(((pageSize.width * zoomScale) - visibleSize.width) / 2, 0) + edgePadding,
+            height: max(((pageSize.height * zoomScale) - visibleSize.height) / 2, 0) + edgePadding
         )
     }
 
@@ -1340,6 +1503,8 @@ private struct DaybookGalleryGrid: View {
 private struct DaybookComicTab: View {
     let comicBook: DaybookComicBook
     @Binding var currentPageIndex: Int
+    @Binding var previewHorizontalPosition: Double
+    @Binding var previewZoom: Double
     var bookHorizontalInset: CGFloat = 0
     var headerHorizontalInset: CGFloat = 0
     var availableBookWidth: CGFloat?
@@ -1369,6 +1534,8 @@ private struct DaybookComicTab: View {
                 DaybookComicBookView(
                     comicBook: comicBook,
                     currentPageIndex: $currentPageIndex,
+                    previewHorizontalPosition: $previewHorizontalPosition,
+                    previewZoom: $previewZoom,
                     availableWidth: availableBookWidth,
                     onOpenReader: onOpenReader
                 )
@@ -1383,9 +1550,24 @@ private struct DaybookComicTab: View {
     }
 }
 
+private enum DaybookComicPreviewMetrics {
+    static let sliderMinimumZoom: Double = 0.5
+    static let maximumZoom: Double = 2.5
+
+    static var sliderZoomRange: ClosedRange<Double> {
+        sliderMinimumZoom...maximumZoom
+    }
+
+    static var sliderZoomCenter: Double {
+        (sliderMinimumZoom + maximumZoom) / 2
+    }
+}
+
 private struct DaybookComicBookView: View {
     let comicBook: DaybookComicBook
     @Binding var currentPageIndex: Int
+    @Binding var previewHorizontalPosition: Double
+    @Binding var previewZoom: Double
     var showsCaption = true
     var availableWidth: CGFloat?
     var showsCoverOverlay = false
@@ -1395,10 +1577,14 @@ private struct DaybookComicBookView: View {
     @State private var isBackwardTurnActive = false
     private let binderWidth: CGFloat = 12
     private let previewScale: CGFloat = 0.8
+    private let comicTabHorizontalInset: CGFloat = 16
+    private let horizontalOverscrollPadding: CGFloat = 64
 
     init(
         comicBook: DaybookComicBook,
         currentPageIndex: Binding<Int>,
+        previewHorizontalPosition: Binding<Double>,
+        previewZoom: Binding<Double>,
         showsCaption: Bool = true,
         availableWidth: CGFloat? = nil,
         showsCoverOverlay: Bool = false,
@@ -1406,6 +1592,8 @@ private struct DaybookComicBookView: View {
     ) {
         self.comicBook = comicBook
         self._currentPageIndex = currentPageIndex
+        self._previewHorizontalPosition = previewHorizontalPosition
+        self._previewZoom = previewZoom
         self.showsCaption = showsCaption
         self.availableWidth = availableWidth
         self.showsCoverOverlay = showsCoverOverlay
@@ -1414,55 +1602,7 @@ private struct DaybookComicBookView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            GeometryReader { proxy in
-                let layoutWidth = max(1, (availableWidth ?? proxy.size.width) * previewScale)
-                let maxPageWidth = max(1, layoutWidth - binderWidth)
-                let imageAspectRatio = comicBook.imageAspectRatio(for: currentPageIndex)
-                let maxBookHeight = proxy.size.height
-                let pageHeight = min(maxPageWidth / imageAspectRatio, maxBookHeight)
-                let pageWidth = pageHeight * imageAspectRatio
-                let bookWidth = pageWidth + binderWidth
-
-                HStack(spacing: 0) {
-                    DaybookComicBinder()
-                        .frame(width: binderWidth, height: pageHeight)
-
-                    DaybookPageTurnView(
-                        comicBook: comicBook,
-                        currentPageIndex: $currentPageIndex,
-                        programmaticTurnOffset: programmaticTurnOffset,
-                        programmaticTurnProgress: programmaticTurnProgress,
-                        showsCoverOverlay: showsCoverOverlay,
-                        isBackwardTurnActive: $isBackwardTurnActive,
-                        onTap: onOpenReader
-                    )
-                    .frame(width: pageWidth, height: pageHeight)
-                }
-                .frame(width: bookWidth, height: pageHeight)
-                .background(alignment: .leading) {
-                    if let flapPageIndex = leftFlapPageIndex {
-                        DaybookComicPageContent(
-                            comicBook: comicBook,
-                            pageIndex: flapPageIndex,
-                            showsCoverOverlay: showsCoverOverlay
-                        )
-                        .frame(width: pageWidth, height: pageHeight)
-                        .offset(x: -pageWidth)
-                        .allowsHitTesting(false)
-                    }
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(red: 0.03, green: 0.03, blue: 0.04))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.24), radius: 18, y: 10)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
-            }
-            .frame(height: bookHeight)
+            comicPreviewRow
 
             if onOpenReader != nil {
                 Button {
@@ -1536,6 +1676,128 @@ private struct DaybookComicBookView: View {
         }
     }
 
+    private var comicPreviewRow: some View {
+        Color.clear
+            .frame(height: scaledPageHeight)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .topLeading) {
+                comicPreview
+                    .offset(x: horizontalContentOffset)
+            }
+            .padding(.horizontal, -comicTabHorizontalInset)
+            .animation(.easeInOut(duration: 0.15), value: previewHorizontalPosition)
+            .animation(.easeInOut(duration: 0.15), value: previewZoom)
+            .animation(.easeInOut(duration: 0.15), value: currentPageIndex)
+    }
+
+    private var comicPreview: some View {
+        HStack(spacing: 0) {
+            if let leftPageIndex = spreadLeftPageIndex {
+                DaybookComicPageContent(
+                    comicBook: comicBook,
+                    pageIndex: leftPageIndex,
+                    showsCoverOverlay: showsCoverOverlay
+                )
+                .frame(width: scaledPageWidth(for: leftPageIndex), height: scaledPageHeight)
+            }
+
+            DaybookComicBinder()
+                .frame(width: scaledBinderWidth, height: scaledPageHeight)
+
+            DaybookPageTurnView(
+                comicBook: comicBook,
+                currentPageIndex: $currentPageIndex,
+                programmaticTurnOffset: programmaticTurnOffset,
+                programmaticTurnProgress: programmaticTurnProgress,
+                showsCoverOverlay: showsCoverOverlay,
+                isBackwardTurnActive: $isBackwardTurnActive,
+                onTap: onOpenReader
+            )
+            .frame(width: scaledPageWidth, height: scaledPageHeight)
+        }
+        .frame(width: spreadContentWidth, height: scaledPageHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(red: 0.03, green: 0.03, blue: 0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.24), radius: 18, y: 10)
+    }
+
+    private var spreadLeftPageIndex: Int? {
+        guard currentPageIndex > 0 else {
+            return nil
+        }
+
+        return currentPageIndex - 1
+    }
+
+    private var previewZoomScale: CGFloat {
+        CGFloat(previewZoom)
+    }
+
+    private var layoutWidth: CGFloat {
+        max(1, (availableWidth ?? UIScreen.main.bounds.width - (comicTabHorizontalInset * 2)) * previewScale)
+    }
+
+    private var spreadAspectRatio: CGFloat {
+        var ratio = comicBook.imageAspectRatio(for: currentPageIndex)
+
+        if let leftPageIndex = spreadLeftPageIndex {
+            ratio = max(ratio, comicBook.imageAspectRatio(for: leftPageIndex))
+        }
+
+        return ratio
+    }
+
+    private var scaledPageHeight: CGFloat {
+        let maxPageWidth = max(1, layoutWidth - binderWidth) * previewZoomScale
+        return maxPageWidth / spreadAspectRatio
+    }
+
+    private func scaledPageWidth(for pageIndex: Int) -> CGFloat {
+        scaledPageHeight * comicBook.imageAspectRatio(for: pageIndex)
+    }
+
+    private var scaledPageWidth: CGFloat {
+        scaledPageWidth(for: currentPageIndex)
+    }
+
+    private var scaledBinderWidth: CGFloat {
+        binderWidth * previewZoomScale
+    }
+
+    private var spreadContentWidth: CGFloat {
+        var width = scaledBinderWidth + scaledPageWidth(for: currentPageIndex)
+
+        if let leftPageIndex = spreadLeftPageIndex {
+            width += scaledPageWidth(for: leftPageIndex)
+        }
+
+        return width
+    }
+
+    private var comicRowWidth: CGFloat {
+        UIScreen.main.bounds.width
+    }
+
+    private var horizontalContentOffset: CGFloat {
+        let overflow = spreadContentWidth - comicRowWidth
+        let overscroll = horizontalOverscrollPadding
+
+        if overflow <= 0 {
+            let centeredOffset = (comicRowWidth - spreadContentWidth) / 2
+            let fitTravel = overscroll * 2
+            return centeredOffset + overscroll - (CGFloat(previewHorizontalPosition) * fitTravel)
+        }
+
+        let totalTravel = overflow + (overscroll * 2)
+        return overscroll - (CGFloat(previewHorizontalPosition) * totalTravel)
+    }
+
     private func turnPage(by offset: Int) {
         guard !isTurningProgrammatically else {
             return
@@ -1569,32 +1831,18 @@ private struct DaybookComicBookView: View {
         min(max(0, pageIndex), max(0, comicBook.totalPageCount - 1))
     }
 
-    private var bookHeight: CGFloat {
-        let layoutWidth = max(1, (availableWidth ?? UIScreen.main.bounds.width - 32) * previewScale)
-        let maxPageWidth = max(1, layoutWidth - binderWidth)
-        return maxPageWidth / comicBook.imageAspectRatio(for: currentPageIndex)
-    }
-
     private var isTurningProgrammatically: Bool {
         programmaticTurnOffset != 0
     }
+}
 
-    private var leftFlapPageIndex: Int? {
-        let isBackward = isBackwardTurnActive || programmaticTurnOffset < 0
-
-        if isBackward {
-            guard currentPageIndex > 1 else {
-                return nil
-            }
-
-            return currentPageIndex - 2
+private struct DaybookScrollClipDisabledModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.scrollClipDisabled()
+        } else {
+            content
         }
-
-        guard currentPageIndex > 0 else {
-            return nil
-        }
-
-        return currentPageIndex - 1
     }
 }
 
@@ -1624,6 +1872,113 @@ private struct DaybookComicBinder: View {
     }
 }
 
+private struct CenterSnappingSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let centerValue: Double
+
+    private let trackHorizontalInset: CGFloat = 16
+    private let snapThresholdRatio: Double = 0.035
+
+    private var normalizedCenter: CGFloat {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0.5 }
+        return CGFloat((centerValue - range.lowerBound) / span)
+    }
+
+    private var snapThreshold: Double {
+        (range.upperBound - range.lowerBound) * snapThresholdRatio
+    }
+
+    var body: some View {
+        Slider(value: snappingBinding, in: range)
+            .tint(Color.homeAccent)
+            .overlay {
+                GeometryReader { proxy in
+                    let tickX = trackHorizontalInset + normalizedCenter * max(0, proxy.size.width - (trackHorizontalInset * 2))
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            value = centerValue
+                        }
+                    } label: {
+                        Capsule()
+                            .fill(Color.homeMutedText.opacity(0.5))
+                            .frame(width: 2, height: 13)
+                    }
+                    .buttonStyle(.plain)
+                    .position(x: tickX, y: proxy.size.height / 2)
+                    .accessibilityLabel("Snap to center")
+                }
+            }
+    }
+
+    private var snappingBinding: Binding<Double> {
+        Binding(
+            get: { value },
+            set: { newValue in
+                if abs(newValue - centerValue) <= snapThreshold {
+                    value = centerValue
+                } else {
+                    value = newValue
+                }
+            }
+        )
+    }
+}
+
+private struct DaybookComicPreviewControlSliders: View {
+    @Binding var horizontalPosition: Double
+    @Binding var zoom: Double
+    let zoomRange: ClosedRange<Double>
+    let zoomCenterValue: Double
+
+    private let horizontalRange: ClosedRange<Double> = 0...1
+    private let horizontalCenterValue: Double = 0.5
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.left.and.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+                    .frame(width: 18)
+
+                CenterSnappingSlider(
+                    value: $horizontalPosition,
+                    range: horizontalRange,
+                    centerValue: horizontalCenterValue
+                )
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Slide comic left or right")
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+                    .frame(width: 18)
+
+                CenterSnappingSlider(
+                    value: $zoom,
+                    range: zoomRange,
+                    centerValue: zoomCenterValue
+                )
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Zoom comic in or out")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.homeBorder.opacity(0.65), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.1), radius: 14, y: 4)
+    }
+}
+
 private struct DaybookPageTurnView: View {
     let comicBook: DaybookComicBook
     @Binding var currentPageIndex: Int
@@ -1633,6 +1988,8 @@ private struct DaybookPageTurnView: View {
     @Binding var isBackwardTurnActive: Bool
     var onTap: (() -> Void)?
     @GestureState private var dragTranslation: CGFloat = 0
+    @State private var pendingTurnOffset = 0
+    @State private var pendingTurnProgress: CGFloat = 0
 
     var body: some View {
         GeometryReader { proxy in
@@ -1680,7 +2037,8 @@ private struct DaybookPageTurnView: View {
                     }
                     .onEnded { value in
                         finishPageTurn(value, width: width)
-                    }
+                    },
+                including: pendingTurnOffset == 0 ? .all : .subviews
             )
             .simultaneousGesture(
                 TapGesture().onEnded {
@@ -1716,6 +2074,14 @@ private struct DaybookPageTurnView: View {
             )
         }
 
+        if pendingTurnOffset != 0 {
+            return (
+                min(1, max(0.02, pendingTurnProgress)),
+                pendingTurnOffset > 0,
+                pendingTurnOffset < 0
+            )
+        }
+
         let progress = min(1, abs(dragTranslation) / (width * 0.62))
         return (
             max(0.02, progress),
@@ -1725,19 +2091,50 @@ private struct DaybookPageTurnView: View {
     }
 
     private func finishPageTurn(_ value: DragGesture.Value, width: CGFloat) {
+        guard pendingTurnOffset == 0 else {
+            return
+        }
+
         let predicted = value.predictedEndTranslation.width
         let threshold = max(64, width * 0.22)
+        let releaseProgress = min(1, abs(value.translation.width) / (width * 0.62))
 
-        var transaction = Transaction()
-        transaction.animation = nil
+        if predicted < -threshold, currentPageIndex < comicBook.totalPageCount - 1 {
+            completeDragTurn(offset: 1, from: releaseProgress)
+        } else if predicted > threshold, currentPageIndex > 0 {
+            completeDragTurn(offset: -1, from: releaseProgress)
+        }
+    }
 
-        withTransaction(transaction) {
-            if predicted < -threshold, currentPageIndex < comicBook.totalPageCount - 1 {
-                currentPageIndex += 1
-            } else if predicted > threshold, currentPageIndex > 0 {
-                currentPageIndex -= 1
+    private func completeDragTurn(offset: Int, from releaseProgress: CGFloat) {
+        pendingTurnOffset = offset
+        pendingTurnProgress = max(0.02, releaseProgress)
+
+        let remaining = max(0, 1 - releaseProgress)
+        let duration = max(0.12, 0.28 * remaining)
+
+        withAnimation(.easeInOut(duration: duration)) {
+            pendingTurnProgress = 1
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            guard pendingTurnOffset == offset else {
+                return
+            }
+
+            var transaction = Transaction()
+            transaction.animation = nil
+
+            withTransaction(transaction) {
+                currentPageIndex = clampedPageIndex(currentPageIndex + offset)
+                pendingTurnOffset = 0
+                pendingTurnProgress = 0
             }
         }
+    }
+
+    private func clampedPageIndex(_ pageIndex: Int) -> Int {
+        min(max(0, pageIndex), max(0, comicBook.totalPageCount - 1))
     }
 }
 
