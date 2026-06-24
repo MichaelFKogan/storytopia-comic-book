@@ -691,13 +691,11 @@ struct DaybookView: View {
             DaybookComicTab(
                 comicBook: comicBook,
                 currentPageIndex: $comicPageIndex,
-                onOpenReader: { isComicReaderPresented = true }
+                onOpenReader: { isComicReaderPresented = true },
+                onOpenGalleryImage: { imageIndex in
+                    selectedGalleryImageIndex = imageIndex
+                }
             )
-            .padding(.horizontal, 16)
-        case .gallery:
-            DaybookGalleryGrid(comicBook: comicBook) { imageIndex in
-                selectedGalleryImageIndex = imageIndex
-            }
             .padding(.horizontal, 16)
         }
     }
@@ -1232,7 +1230,6 @@ private struct DaybookComicReaderView: View {
 private enum DaybookTab: String, CaseIterable, Identifiable {
     case entries
     case comic
-    case gallery
 
     var id: Self {
         self
@@ -1243,9 +1240,7 @@ private enum DaybookTab: String, CaseIterable, Identifiable {
         case .entries:
             return "Entries"
         case .comic:
-            return "Story"
-        case .gallery:
-            return "Gallery"
+            return "Comic"
         }
     }
 }
@@ -1349,6 +1344,7 @@ private struct DaybookComicTab: View {
     var headerHorizontalInset: CGFloat = 0
     var availableBookWidth: CGFloat?
     var onOpenReader: (() -> Void)?
+    var onOpenGalleryImage: ((Int) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1377,6 +1373,11 @@ private struct DaybookComicTab: View {
                     onOpenReader: onOpenReader
                 )
                 .padding(.horizontal, bookHorizontalInset)
+
+                if let onOpenGalleryImage {
+                    DaybookGalleryGrid(comicBook: comicBook, onOpenImage: onOpenGalleryImage)
+                        .padding(.top, 8)
+                }
             }
         }
     }
@@ -1506,6 +1507,21 @@ private struct DaybookComicBookView: View {
                 .buttonStyle(.plain)
                 .disabled(currentPageIndex >= comicBook.totalPageCount - 1 || isTurningProgrammatically)
                 .accessibilityLabel("Next comic page")
+            }
+
+            if onOpenReader != nil {
+                Button {
+                    onOpenReader?()
+                } label: {
+                    Label("Open Comic", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .frame(height: 40)
+                        .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open comic in reader mode")
             }
 
             if showsCaption {
