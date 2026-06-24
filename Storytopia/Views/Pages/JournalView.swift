@@ -687,14 +687,14 @@ struct DaybookView: View {
         switch selectedTab {
         case .entries:
             AllJournalEntriesSection(chapters: $chapters)
+        case .comic:
+            DaybookComicTab(comicBook: comicBook, currentPageIndex: $comicPageIndex)
+            .padding(.horizontal, 16)
         case .gallery:
             DaybookGalleryGrid(comicBook: comicBook) { imageIndex in
                 selectedGalleryImageIndex = imageIndex
             }
             .padding(.horizontal, 16)
-        case .comic:
-            DaybookComicTab(comicBook: comicBook, currentPageIndex: $comicPageIndex)
-                .padding(.horizontal, 16)
         }
     }
 
@@ -759,8 +759,8 @@ private struct DaybookComicStandalonePage: View {
 
 private enum DaybookTab: String, CaseIterable, Identifiable {
     case entries
-    case gallery
     case comic
+    case gallery
 
     var id: Self {
         self
@@ -770,10 +770,10 @@ private enum DaybookTab: String, CaseIterable, Identifiable {
         switch self {
         case .entries:
             return "Entries"
+        case .comic:
+            return "My Story"
         case .gallery:
             return "Gallery"
-        case .comic:
-            return "Comic"
         }
     }
 }
