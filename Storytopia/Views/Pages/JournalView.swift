@@ -1275,6 +1275,7 @@ private struct DaybookComicBookView: View {
     @State private var programmaticTurnProgress: CGFloat = 0
     @State private var isBackwardTurnActive = false
     private let binderWidth: CGFloat = 12
+    private let previewScale: CGFloat = 0.9
 
     init(
         comicBook: DaybookComicBook,
@@ -1295,7 +1296,7 @@ private struct DaybookComicBookView: View {
     var body: some View {
         VStack(spacing: 10) {
             GeometryReader { proxy in
-                let layoutWidth = max(1, availableWidth ?? proxy.size.width)
+                let layoutWidth = max(1, (availableWidth ?? proxy.size.width) * previewScale)
                 let maxPageWidth = max(1, layoutWidth - binderWidth)
                 let imageAspectRatio = comicBook.imageAspectRatio(for: currentPageIndex)
                 let maxBookHeight = proxy.size.height
@@ -1340,7 +1341,7 @@ private struct DaybookComicBookView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.24), radius: 18, y: 10)
-                .frame(width: proxy.size.width, height: proxy.size.height)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             }
             .frame(height: bookHeight)
 
@@ -1435,7 +1436,7 @@ private struct DaybookComicBookView: View {
     }
 
     private var bookHeight: CGFloat {
-        let layoutWidth = max(1, availableWidth ?? UIScreen.main.bounds.width - 32)
+        let layoutWidth = max(1, (availableWidth ?? UIScreen.main.bounds.width - 32) * previewScale)
         let maxPageWidth = max(1, layoutWidth - binderWidth)
         return maxPageWidth / comicBook.imageAspectRatio(for: currentPageIndex)
     }
