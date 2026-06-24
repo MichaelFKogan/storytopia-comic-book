@@ -549,10 +549,12 @@ struct DaybookView: View {
     @Binding var selectedPage: StoryPage
     @State private var chapters = DailyJournalData.allChapters()
     @State private var selectedTab: DaybookTab = .entries
+    @State private var selectedMonth = "June"
     @State private var comicPageIndex = 0
     @State private var isComicPagePresented = false
     @State private var isShowingNewEntry = false
     @State private var selectedGalleryImageIndex: Int?
+    private let monthTabs = ["Apr", "May", "June", "Jul", "Aug"]
 
     private var comicBook: DaybookComicBook {
         DaybookComicBook(chapters: chapters)
@@ -561,17 +563,17 @@ struct DaybookView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                Color.homePageBackground
+                Color.white
                     .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
                         pageHeader
+                        monthSwitcher
                         dailyComicBookPreview
                         tabSwitcher
 
                         selectedTabContent
-                        .padding(.horizontal, 16)
                     }
                     .padding(.top, 12)
                     .padding(.bottom, 92)
@@ -626,7 +628,7 @@ struct DaybookView: View {
     private var pageHeader: some View {
         HStack(alignment: .center, spacing: 14) {
             Text("Daily")
-                .font(.system(size: 30, weight: .bold, design: .serif))
+                .font(.system(size: 28, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
@@ -635,49 +637,117 @@ struct DaybookView: View {
                 isShowingNewEntry = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 30, height: 30)
                     .background(Color.storyInk, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Create a new journal entry")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 22)
         .padding(.top, 2)
+    }
+
+    private var monthSwitcher: some View {
+        HStack(spacing: 10) {
+            ForEach(monthTabs, id: \.self) { month in
+                Button {
+                    selectedMonth = month
+                } label: {
+                    Text(month)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(selectedMonth == month ? .white : Color.storyInk.opacity(0.78))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(
+                            selectedMonth == month ? Color.storyInk : Color.white,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(selectedMonth == month ? Color.storyInk : Color.homeBorder, lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedMonth == month ? .isSelected : [])
+            }
+
+            Button {
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+                    .frame(width: 22, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Next month")
+        }
+        .padding(.horizontal, 22)
     }
 
     private var dailyComicBookPreview: some View {
         Group {
             if !comicBook.storyPages.isEmpty {
                 GeometryReader { proxy in
-                    let previewWidth = max(1, proxy.size.width * 0.75)
+                    let coverImageWidth = min(120, max(96, proxy.size.width * 0.29))
+                    let coverBorderWidth: CGFloat = 5
+                    let coverBinderWidth: CGFloat = 12
 
-                    DaybookComicBookView(
-                        comicBook: comicBook,
-                        currentPageIndex: $comicPageIndex,
-                        showsCaption: false,
-                        availableWidth: previewWidth,
-                        showsCoverOverlay: true,
-                        onOpenComic: {
-                            openComic(at: comicPageIndex)
+                    HStack(alignment: .center, spacing: 24) {
+                        DaybookIssueCoverThumbnail(comicBook: comicBook)
+                            .frame(
+                                width: coverImageWidth + coverBinderWidth + coverBorderWidth,
+                                height: (coverImageWidth / comicBook.imageAspectRatio(for: 0)) + (coverBorderWidth * 2)
+                            )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(comicBook.monthTitle)
+                                .font(.system(size: 28, weight: .bold, design: .serif))
+                                .foregroundStyle(Color.storyInk)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.76)
+
+                            VStack(alignment: .leading, spacing: 7) {
+                                DaybookIssueStatRow(
+                                    systemName: "book.closed",
+                                    text: comicBook.entryCountText.lowercased()
+                                )
+
+                                DaybookIssueStatRow(
+                                    systemName: "photo.on.rectangle.angled",
+                                    text: comicBook.storyboardCountText.lowercased()
+                                )
+                            }
+
+                            Button {
+                                openComic(at: comicPageIndex)
+                            } label: {
+                                Label("Open Comic", systemImage: "book.pages.fill")
+                                    .font(.system(size: 13, weight: .heavy))
+                                    .foregroundStyle(Color.storyInk)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 36)
+                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .stroke(Color.homeBorder, lineWidth: 1)
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open Comic Reader")
                         }
-                    )
-                    .frame(width: previewWidth)
-                    .frame(width: proxy.size.width, alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
-                .frame(height: dailyComicBookPreviewHeight)
-                .padding(.top, 12)
+                .frame(height: 184)
+                .padding(.horizontal, 28)
+                .padding(.top, 10)
                 .padding(.bottom, 4)
             }
         }
-    }
-
-    private var dailyComicBookPreviewHeight: CGFloat {
-        let previewWidth = max(1, UIScreen.main.bounds.width * 0.75)
-        let maxPageWidth = max(1, previewWidth * 0.98 - 12)
-        let bookHeight = maxPageWidth / comicBook.imageAspectRatio(for: comicPageIndex)
-        return bookHeight + 96
     }
 
     private var tabSwitcher: some View {
@@ -716,8 +786,10 @@ struct DaybookView: View {
             DaybookGalleryGrid(comicBook: comicBook) { imageIndex in
                 selectedGalleryImageIndex = imageIndex
             }
+            .padding(.horizontal, 16)
         case .comic:
             DaybookComicTab(comicBook: comicBook, currentPageIndex: $comicPageIndex)
+                .padding(.horizontal, 16)
         }
     }
 
@@ -745,6 +817,75 @@ struct DaybookView: View {
 
         chapters[0].entries.insert(entry, at: 0)
         StoryEntryStore.add(entry, to: chapter.title)
+    }
+}
+
+private struct DaybookIssueCoverThumbnail: View {
+    let comicBook: DaybookComicBook
+    private let borderWidth: CGFloat = 5
+    private let binderWidth: CGFloat = 12
+
+    var body: some View {
+        GeometryReader { proxy in
+            let contentHeight = max(1, proxy.size.height - (borderWidth * 2))
+            let imageWidth = max(1, proxy.size.width - binderWidth - borderWidth)
+
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.black)
+                    .frame(width: binderWidth, height: proxy.size.height)
+
+                Image(comicBook.coverImageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: imageWidth, height: contentHeight)
+                    .background(Color.black)
+            }
+            .padding(.vertical, borderWidth)
+            .padding(.trailing, borderWidth)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            .background(Color.black)
+            .overlay(alignment: .leading) {
+                LinearGradient(
+                    colors: [.black.opacity(0.32), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: binderWidth + 18)
+            }
+            .overlay {
+                Rectangle()
+                    .stroke(Color.black, lineWidth: 1)
+            }
+            .overlay {
+                Rectangle()
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    .padding(borderWidth)
+            }
+            .clipped()
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
+            .accessibilityLabel("\(comicBook.monthTitle) comic cover")
+        }
+    }
+}
+
+private struct DaybookIssueStatRow: View {
+    let systemName: String
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.72))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        } icon: {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .frame(width: 15)
+        }
     }
 }
 
@@ -1811,11 +1952,13 @@ private struct AllJournalEntriesSection: View {
                     .foregroundStyle(Color.homeMutedText)
             }
             .padding(.top, 6)
+            .padding(.horizontal, 16)
 
             if allJournalEntries.isEmpty {
                 noJournalEntries
+                    .padding(.horizontal, 16)
             } else {
-                LazyVStack(spacing: 24) {
+                LazyVStack(spacing: 0) {
                     ForEach(allJournalEntryDays) { day in
                         journalDayGroup(day)
                     }
@@ -1825,7 +1968,7 @@ private struct AllJournalEntriesSection: View {
     }
 
     private func journalDayGroup(_ day: DailyJournalDaySummary) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             NavigationLink {
                 dailyJournalDetail(for: day.sourceChapter, dayOffset: day.dayOffset)
             } label: {
@@ -1846,16 +1989,21 @@ private struct AllJournalEntriesSection: View {
                         entry: regularPhotoDisplayEntry(for: item.entry, dayOffset: day.dayOffset, entryIndex: index),
                         accentColor: Color.homeAccent,
                         showsDate: false,
-                        thumbnailSize: 48,
+                        thumbnailSize: 58,
                         inlineLeadingCoverImageName: item.coverImageName,
-                        showsReferencePhotos: true
+                        showsReferencePhotos: false,
+                        isCompact: true,
+                        showsBodyPreview: true
                     )
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+                .background(Color.white)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.homeBorder.opacity(0.7))
+                        .frame(height: 0.5)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1907,22 +2055,24 @@ private struct AllJournalEntriesSection: View {
     }
 
     private func journalDayHeader(_ day: DailyJournalDaySummary) -> some View {
-        HStack(alignment: .lastTextBaseline, spacing: 12) {
-            Text(day.sectionDateText)
-                .font(.system(size: 18, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
+        HStack(alignment: .center, spacing: 8) {
+            Text(day.compactSectionDateText)
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.86)
 
             Spacer(minLength: 8)
 
-            Text(day.entryCountText)
-                .font(.system(size: 12, weight: .semibold))
+            Text("\(day.entries.count)")
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(Color.homeMutedText)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 2)
+        .frame(height: 34)
+        .padding(.horizontal, 16)
+        .background(Color.homePageBackground)
     }
 
     private var noJournalEntries: some View {
@@ -2037,6 +2187,10 @@ private struct DailyJournalDaySummary: Identifiable {
 
     var sectionDateText: String {
         date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    var compactSectionDateText: String {
+        date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()).uppercased()
     }
 
     var entryCountText: String {
@@ -3913,6 +4067,8 @@ private struct PrototypeEntryRow: View {
     var inlineLeadingCoverImageName: String?
     var trailingCoverImageName: String?
     var showsReferencePhotos = true
+    var isCompact = false
+    var showsBodyPreview = true
     @State private var rowHeight: CGFloat = 0
     @State private var rowContentHeight: CGFloat = 0
 
@@ -3943,18 +4099,18 @@ private struct PrototypeEntryRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             if showsDate {
                 VStack(spacing: 2) {
                     Text(entry.weekday)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: isCompact ? 8 : 9, weight: .bold))
                         .foregroundStyle(Color.storyGray)
 
                     Text(entry.day)
-                        .font(.system(size: 20, weight: .bold, design: .serif))
+                        .font(.system(size: isCompact ? 17 : 20, weight: .bold, design: .serif))
                         .foregroundStyle(Color.storyInk)
                 }
-                .frame(width: 38)
+                .frame(width: isCompact ? 30 : 38)
                 .padding(.top, 2)
             }
 
@@ -3962,17 +4118,20 @@ private struct PrototypeEntryRow: View {
                 inlineCoverPanel(imageName: inlineLeadingCoverImageName)
             }
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: isCompact ? 3 : 5) {
                 Text(entry.title)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: isCompact ? 15 : 16, weight: .bold))
                     .foregroundStyle(Color.storyInk)
-                    .lineLimit(1)
+                    .lineLimit(isCompact ? 2 : 1)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Text(entry.body)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineSpacing(2)
-                    .foregroundStyle(Color.storyInk.opacity(0.74))
-                    .lineLimit(2)
+                if showsBodyPreview {
+                    Text(entry.body)
+                        .font(.system(size: isCompact ? 13 : 13, weight: .medium))
+                        .lineSpacing(isCompact ? 1 : 2)
+                        .foregroundStyle(Color.storyInk.opacity(0.74))
+                        .lineLimit(isCompact ? 1 : 2)
+                }
 
                 HStack(spacing: 4) {
                     Text(entry.time)
@@ -3982,7 +4141,7 @@ private struct PrototypeEntryRow: View {
                             .lineLimit(1)
                     }
                 }
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: isCompact ? 11 : 11, weight: .semibold))
                 .foregroundStyle(accentColor)
 
                 if showsReferencePhotos, !entry.imageNames.isEmpty {
@@ -4022,13 +4181,16 @@ private struct PrototypeEntryRow: View {
             }
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: isCompact ? 10 : 11, weight: .bold))
                 .foregroundStyle(Color.storyGray.opacity(0.4))
-                .padding(.top, 4)
         }
-        .padding(.leading, leadingCoverImageName == nil ? 12 : leadingCoverWidth + 12)
-        .padding(.trailing, 12)
-        .padding(.vertical, 14)
+        .padding(.leading, leadingCoverImageName == nil ? compactCardInset : leadingCoverWidth + 12)
+        .padding(.trailing, compactCardInset)
+        .padding(.vertical, isCompact ? compactCardInset : 14)
+    }
+
+    private var compactCardInset: CGFloat {
+        isCompact ? 14 : 12
     }
 
     private func entryCoverPanel(imageName: String) -> some View {
@@ -4041,16 +4203,19 @@ private struct PrototypeEntryRow: View {
     }
 
     private func inlineCoverPanel(imageName: String) -> some View {
-        let height = max(rowContentHeight, 72)
+        let height = isCompact ? thumbnailSize : max(rowContentHeight, 72)
         let width = height * coverAspectRatio(for: imageName)
+        let frameWidth = isCompact ? thumbnailSize : width
+        let cornerRadius: CGFloat = 8
 
         return Image(imageName)
             .resizable()
-            .scaledToFit()
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .aspectRatio(contentMode: isCompact ? .fill : .fit)
+            .scaleEffect(isCompact ? 1.28 : 1)
+            .frame(width: frameWidth, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(Color.white.opacity(0.9), lineWidth: 1)
             }
             .accessibilityHidden(true)
