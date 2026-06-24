@@ -690,11 +690,16 @@ struct DaybookView: View {
         Group {
             if !comicBook.storyPages.isEmpty {
                 GeometryReader { proxy in
-                    let coverWidth = min(136, max(112, proxy.size.width * 0.34))
+                    let coverImageWidth = min(120, max(96, proxy.size.width * 0.29))
+                    let coverBorderWidth: CGFloat = 5
+                    let coverBinderWidth: CGFloat = 12
 
                     HStack(alignment: .center, spacing: 24) {
                         DaybookIssueCoverThumbnail(comicBook: comicBook)
-                            .frame(width: coverWidth, height: coverWidth * 1.32)
+                            .frame(
+                                width: coverImageWidth + coverBinderWidth + coverBorderWidth,
+                                height: (coverImageWidth / comicBook.imageAspectRatio(for: 0)) + (coverBorderWidth * 2)
+                            )
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text(comicBook.monthTitle)
@@ -817,36 +822,50 @@ struct DaybookView: View {
 
 private struct DaybookIssueCoverThumbnail: View {
     let comicBook: DaybookComicBook
+    private let borderWidth: CGFloat = 5
+    private let binderWidth: CGFloat = 12
 
     var body: some View {
-        Image(comicBook.coverImageName)
-            .resizable()
-            .scaledToFill()
-            .overlay(alignment: .leading) {
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.black)
-                        .frame(width: 12)
+        GeometryReader { proxy in
+            let contentHeight = max(1, proxy.size.height - (borderWidth * 2))
+            let imageWidth = max(1, proxy.size.width - binderWidth - borderWidth)
 
-                    LinearGradient(
-                        colors: [.black.opacity(0.42), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 24)
-                }
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.black)
+                    .frame(width: binderWidth, height: proxy.size.height)
+
+                Image(comicBook.coverImageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: imageWidth, height: contentHeight)
+                    .background(Color.black)
+            }
+            .padding(.vertical, borderWidth)
+            .padding(.trailing, borderWidth)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            .background(Color.black)
+            .overlay(alignment: .leading) {
+                LinearGradient(
+                    colors: [.black.opacity(0.32), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: binderWidth + 18)
             }
             .overlay {
                 Rectangle()
-                    .stroke(Color.black, lineWidth: 8)
+                    .stroke(Color.black, lineWidth: 1)
             }
             .overlay {
                 Rectangle()
                     .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    .padding(borderWidth)
             }
             .clipped()
             .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
             .accessibilityLabel("\(comicBook.monthTitle) comic cover")
+        }
     }
 }
 
