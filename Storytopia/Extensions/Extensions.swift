@@ -63,3 +63,26 @@ extension Color {
     static let homeBorder = Color(red: 0.86, green: 0.87, blue: 0.91)
     static let homeAccent = Color(uiColor: .systemIndigo)
 }
+
+private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        DispatchQueue.main.async {
+            guard let navigationController = uiViewController.navigationController else {
+                return
+            }
+
+            navigationController.interactivePopGestureRecognizer?.isEnabled = true
+            navigationController.interactivePopGestureRecognizer?.delegate = nil
+        }
+    }
+}
+
+extension View {
+    func enableInteractivePopGesture() -> some View {
+        background(InteractivePopGestureEnabler())
+    }
+}
