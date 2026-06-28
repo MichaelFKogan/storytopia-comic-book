@@ -42,6 +42,7 @@ struct CreateEntryView: View {
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
+    @State private var isShowingEntryOptionsPage = false
     @GestureState private var exitDragOffset: CGFloat = 0
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
@@ -61,7 +62,9 @@ struct CreateEntryView: View {
                     }
 
                 layoutPage
-                    .toolbar(.hidden, for: .navigationBar)
+            }
+            .navigationDestination(isPresented: $isShowingEntryOptionsPage) {
+                entryOptionsPage
             }
             .navigationDestination(isPresented: $isShowingExpandedEditor) {
                 ExpandedEntryEditor(entryText: $entryText, storyTitle: $storyTitle)
@@ -121,7 +124,7 @@ struct CreateEntryView: View {
             }
         }
         .alert("Save this draft?", isPresented: $isShowingExitConfirmation) {
-            Button("Save as Draft") {
+            Button("Save Draft") {
                 saveDraftAndExit()
             }
 
@@ -247,18 +250,38 @@ struct CreateEntryView: View {
 
     private var layoutPage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            pageHeader
-
-            ScrollView(showsIndicators: false) {
-                createEntryContent
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 28)
-            }
-            .scrollDismissesKeyboard(.interactively)
+            createEntryContent
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(pageTapBackground)
         }
         .background(Color.homePageBackground)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            createToolbarItems(title: "Write Entry", showsCloseButton: true)
+        }
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    private var entryOptionsPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            entryOptionsStepContent
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(pageTapBackground)
+        }
+        .background(Color.homePageBackground)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            createToolbarItems(title: "Entry Details", showsCloseButton: false)
+        }
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
     }
 
     private var pageTapBackground: some View {
@@ -269,42 +292,39 @@ struct CreateEntryView: View {
             }
     }
 
-    private var pageHeader: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Button {
-                requestExit()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.72))
-                    .frame(width: 34, height: 44)
-                    .contentShape(Rectangle())
+    @ToolbarContentBuilder
+    private func createToolbarItems(title: String, showsCloseButton: Bool) -> some ToolbarContent {
+        if showsCloseButton {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    requestExit()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.72))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+        }
 
-            Text("New Entry")
-                .font(.system(size: 24, weight: .bold, design: .serif))
+        ToolbarItem(placement: .principal) {
+            Text(title)
+                .font(.system(size: 18, weight: .semibold, design: .serif))
                 .foregroundColor(Color.storyGray.opacity(0.46))
-                .layoutPriority(1)
+        }
 
-            Spacer()
-
+        ToolbarItem(placement: .topBarTrailing) {
             Button {
                 saveDraftAndExit()
             } label: {
-                Text("Save as Draft")
+                Text("Save Draft")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color.storyPurple)
-                    .frame(height: 44)
             }
             .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            dismissKeyboard()
         }
     }
 
@@ -399,6 +419,7 @@ struct CreateEntryView: View {
         storyDate = Date()
         savesDraft = true
         isPrivateEntry = false
+        isShowingEntryOptionsPage = false
     }
 
     private func loadSavedDraftIfNeeded() {
@@ -427,7 +448,7 @@ struct CreateEntryView: View {
 
     private var createEntryContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            storyDetailsStepContent
+            entryDraftStepContent
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
@@ -436,10 +457,25 @@ struct CreateEntryView: View {
         }
     }
 
-    private var storyDetailsStepContent: some View {
+    private var entryDraftStepContent: some View {
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 14) {
+                editorCard(height: draftEditorHeight(for: proxy.size.height))
+                    .layoutPriority(1)
+
+                Spacer(minLength: 0)
+
+                photoStripSection
+                nextEntryOptionsButton
+                    .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var entryOptionsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            editorCard
-            photoStripSection
             journalDestinationCard
             // artStylePickerSection
             storyDetailsCard
@@ -449,6 +485,28 @@ struct CreateEntryView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+    private var nextEntryOptionsButton: some View {
+        Button {
+            dismissKeyboard()
+            isShowingEntryOptionsPage = true
+        } label: {
+            HStack(spacing: 8) {
+                Text("Next")
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Color.storyPurple, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Next")
+    }
+
     private var selectedEntryJournalTitle: String? {
         switch entryDestination {
         case .daily:
@@ -456,6 +514,17 @@ struct CreateEntryView: View {
         case .custom:
             return selectedCustomJournalTitle
         }
+    }
+
+    private func draftEditorHeight(for availableHeight: CGFloat) -> CGFloat {
+        let photoSectionHeight: CGFloat = hasStoryboardPhotos ? 128 : 76
+        let bottomControlsHeight: CGFloat = photoSectionHeight + 52 + 52
+        let preferredHeight = availableHeight - bottomControlsHeight
+        return min(504, max(300, preferredHeight))
+    }
+
+    private var hasStoryboardPhotos: Bool {
+        storyboardPhotos.contains { $0 != nil }
     }
 
     private func addCurrentEntry(to journalTitle: String) {
@@ -584,60 +653,16 @@ struct CreateEntryView: View {
     }
 
     private var photoStripSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 23, weight: .light))
-                    .foregroundStyle(Color.storyInk.opacity(0.86))
-                    .rotationEffect(.degrees(-18))
-                    .frame(width: 24, height: 24)
-
-                Text("Reference Photos")
-                    .font(.system(size: 15, weight: .semibold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer(minLength: 10)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 9) {
-                    ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
-                        StoryboardPhotoStripThumbnail(image: image) {
-                            removeStoryboardPhoto(at: index)
-                        }
-                            .onDrag {
-                                draggedStoryboardPhotoIndex = index
-                                return NSItemProvider(object: String(index) as NSString)
-                            }
-                            .onDrop(
-                                of: [.text],
-                                delegate: StoryboardPhotoDropDelegate(
-                                    photos: $storyboardPhotos,
-                                    draggedIndex: $draggedStoryboardPhotoIndex,
-                                    destinationIndex: index
-                                )
-                            )
-                    }
-
-                    if nextAvailablePhotoSlot != nil {
-                        Button {
-                            dismissKeyboard()
-                            selectedPhotoSlot = nextAvailablePhotoSlot
-                            isShowingPhotoSourceDialog = true
-                        } label: {
-                            StoryboardPhotoStripAddButton()
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Add reference photos")
-                    }
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 6)
+        Group {
+            if hasStoryboardPhotos {
+                populatedPhotoStripSection
+            } else {
+                emptyPhotoStripSection
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 10)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
         .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -650,6 +675,97 @@ struct CreateEntryView: View {
                 dismissKeyboard()
             }
         )
+    }
+
+    private var photoStripHeader: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 18, weight: .light))
+                .foregroundStyle(Color.storyInk.opacity(0.86))
+                .rotationEffect(.degrees(-18))
+                .frame(width: 20, height: 20)
+
+            Text("Photos")
+                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
+    }
+
+    private var emptyPhotoStripSection: some View {
+        HStack(alignment: .center, spacing: 10) {
+            photoStripHeader
+
+            Spacer(minLength: 10)
+
+            photoLimitText
+
+            addPhotoStripButton
+        }
+    }
+
+    private var populatedPhotoStripSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                photoStripHeader
+
+                Spacer(minLength: 10)
+
+                photoLimitText
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                photoStripContent
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 4)
+            }
+            .frame(height: 76)
+        }
+    }
+
+    private var photoLimitText: some View {
+        Text("Up to 5 photos")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color.homeMutedText.opacity(0.78))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+    }
+
+    private var photoStripContent: some View {
+        HStack(spacing: 9) {
+            ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
+                StoryboardPhotoStripThumbnail(image: image) {
+                    removeStoryboardPhoto(at: index)
+                }
+                    .onDrag {
+                        draggedStoryboardPhotoIndex = index
+                        return NSItemProvider(object: String(index) as NSString)
+                    }
+                    .onDrop(
+                        of: [.text],
+                        delegate: StoryboardPhotoDropDelegate(
+                            photos: $storyboardPhotos,
+                            draggedIndex: $draggedStoryboardPhotoIndex,
+                            destinationIndex: index
+                        )
+                    )
+            }
+
+            if nextAvailablePhotoSlot != nil {
+                addPhotoStripButton
+            }
+        }
+    }
+
+    private var addPhotoStripButton: some View {
+        Button {
+            dismissKeyboard()
+            selectedPhotoSlot = nextAvailablePhotoSlot
+            isShowingPhotoSourceDialog = true
+        } label: {
+            StoryboardPhotoStripAddButton()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add reference photos")
     }
 
     private func photoSourceButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
@@ -931,7 +1047,7 @@ struct CreateEntryView: View {
         return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
     }
 
-    private var editorCard: some View {
+    private func editorCard(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
                 ScrollView {
@@ -941,7 +1057,7 @@ struct CreateEntryView: View {
                             showsRuledLines: true,
                             firstRuledLineY: NotebookMetrics.firstNotebookRuleY
                         )
-                        .frame(maxWidth: .infinity, minHeight: 504, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: height, maxHeight: .infinity)
 
                         NotebookEditorContent(
                             storyTitle: $storyTitle,
@@ -950,19 +1066,19 @@ struct CreateEntryView: View {
                             editorFocusRequestID: editorFocusRequestID,
                             bodyPlaceholder: "Start writing...",
                             scrollsInternally: false,
-                            pageHeight: 504,
+                            pageHeight: height,
                             onTitleSubmit: {
                                 editorFocusRequestID += 1
                             }
                         )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 504)
+                    .frame(minHeight: height)
                 }
                 .scrollIndicators(.hidden)
                 .scrollDismissesKeyboard(.interactively)
             }
-            .frame(height: 504)
+            .frame(height: height)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .notebookPageChrome()
             .overlay(alignment: .bottomTrailing) {
@@ -1066,7 +1182,7 @@ struct CreateEntryView: View {
         VStack(spacing: 0) {
             entrySwitchRow(
                 icon: "tray.and.arrow.down",
-                title: "Save as Draft",
+                title: "Save Draft",
                 subtitle: "Save progress and come back later",
                 isOn: $savesDraft
             )
@@ -1802,8 +1918,8 @@ struct StoryboardPhotoStripThumbnail: View {
     let image: UIImage
     let removeAction: () -> Void
 
-    private let size: CGFloat = 64
-    private let bottomPadding: CGFloat = 16
+    private let size: CGFloat = 56
+    private let bottomPadding: CGFloat = 12
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -1837,7 +1953,7 @@ struct StoryboardPhotoStripThumbnail: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 17, height: 17)
+                    .frame(width: 16, height: 16)
                     .background(Color.black.opacity(0.58), in: Circle())
             }
             .buttonStyle(.plain)
@@ -1854,7 +1970,7 @@ struct StoryboardPhotoStripAddButton: View {
                 .font(.system(size: 20, weight: .light))
                 .foregroundStyle(Color.storyInk.opacity(0.82))
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 52, height: 52)
         .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
