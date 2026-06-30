@@ -8,6 +8,134 @@ private enum CreateEntryDestination {
     case custom
 }
 
+private enum CreateFormattingTab: String, CaseIterable, Identifiable {
+    case fontStyle
+    case paperStyle
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fontStyle:
+            "Font Style"
+        case .paperStyle:
+            "Paper Style"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .fontStyle:
+            "textformat"
+        case .paperStyle:
+            "doc"
+        }
+    }
+}
+
+private enum CreateFontChoice: String, CaseIterable, Identifiable {
+    case sans
+    case serif
+    case handwritten
+    case typewriter
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .serif:
+            "Serif"
+        case .sans:
+            "Sans"
+        case .handwritten:
+            "Handwritten"
+        case .typewriter:
+            "Typewriter"
+        }
+    }
+
+    var design: Font.Design {
+        switch self {
+        case .serif:
+            .serif
+        case .sans:
+            .default
+        case .handwritten:
+            .rounded
+        case .typewriter:
+            .monospaced
+        }
+    }
+
+    var uiKitDesign: UIFontDescriptor.SystemDesign {
+        switch self {
+        case .serif:
+            .serif
+        case .sans:
+            .default
+        case .handwritten:
+            .rounded
+        case .typewriter:
+            .monospaced
+        }
+    }
+}
+
+private enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
+    case collegeRuled
+    case wideRuled
+    case narrowRuled
+    case grid
+    case dotted
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .collegeRuled:
+            "College Ruled"
+        case .wideRuled:
+            "Wide Ruled"
+        case .narrowRuled:
+            "Narrow Ruled"
+        case .grid:
+            "Grid"
+        case .dotted:
+            "Dotted"
+        }
+    }
+}
+
+private struct CreateColorOption {
+    let color: Color
+    let uiColor: UIColor
+}
+
+private enum CreateFormattingPalette {
+    static let textColors: [CreateColorOption] = [
+        CreateColorOption(color: .black, uiColor: .black),
+        CreateColorOption(color: Color(red: 0.27, green: 0.31, blue: 0.42), uiColor: UIColor(red: 0.27, green: 0.31, blue: 0.42, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.08, green: 0.19, blue: 0.34), uiColor: UIColor(red: 0.08, green: 0.19, blue: 0.34, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.20, green: 0.45, blue: 0.72), uiColor: UIColor(red: 0.20, green: 0.45, blue: 0.72, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.10, green: 0.30, blue: 0.28), uiColor: UIColor(red: 0.10, green: 0.30, blue: 0.28, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.29, green: 0.18, blue: 0.47), uiColor: UIColor(red: 0.29, green: 0.18, blue: 0.47, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.46, green: 0.16, blue: 0.27), uiColor: UIColor(red: 0.46, green: 0.16, blue: 0.27, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.34, green: 0.20, blue: 0.17), uiColor: UIColor(red: 0.34, green: 0.20, blue: 0.17, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.55, green: 0.34, blue: 0.10), uiColor: UIColor(red: 0.55, green: 0.34, blue: 0.10, alpha: 1)),
+        CreateColorOption(color: Color(red: 0.42, green: 0.42, blue: 0.49), uiColor: UIColor(red: 0.42, green: 0.42, blue: 0.49, alpha: 1))
+    ]
+
+    static let paperColors: [Color] = [
+        Color.white,
+        .homePageBackground,
+        Color(red: 0.98, green: 0.93, blue: 0.86),
+        Color(red: 1.0, green: 0.95, blue: 0.75),
+        Color(red: 0.86, green: 0.93, blue: 0.97),
+        Color(red: 0.86, green: 0.94, blue: 0.86),
+        Color(red: 0.88, green: 0.83, blue: 0.95)
+    ]
+}
+
 struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
 
@@ -32,7 +160,14 @@ struct CreateEntryView: View {
     @State private var generationErrorMessage: String?
     @State private var isShowingExpandedEditor = false
     @State private var isShowingArtStyleGrid = false
+    @State private var isShowingFormattingSheet = false
     @State private var isShowingJournalDestinationSheet = false
+    @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
+    @State private var selectedFontChoice: CreateFontChoice = .sans
+    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .collegeRuled
+    @State private var selectedTextColorIndex = 0
+    @State private var selectedPaperColorIndex = 0
+    @State private var previewTextSize: Double = 0.36
     @State private var entryDestination: CreateEntryDestination = .daily
     @State private var selectedCustomJournalTitle: String?
     @State private var addedJournalTitle: String?
@@ -58,6 +193,26 @@ struct CreateEntryView: View {
         isShowingEntryOptionsPage = true
     }
 
+    private var selectedTextStyle: NotebookTextStyle {
+        let textColor = CreateFormattingPalette.textColors[
+            min(max(selectedTextColorIndex, 0), CreateFormattingPalette.textColors.count - 1)
+        ]
+
+        return NotebookTextStyle(
+            swiftUIDesign: selectedFontChoice.design,
+            uiKitDesign: selectedFontChoice.uiKitDesign,
+            bodyFontSize: CGFloat(14 + previewTextSize * 8),
+            color: textColor.color,
+            uiColor: textColor.uiColor
+        )
+    }
+
+    private var selectedPaperColor: Color {
+        CreateFormattingPalette.paperColors[
+            min(max(selectedPaperColorIndex, 0), CreateFormattingPalette.paperColors.count - 1)
+        ]
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -73,7 +228,12 @@ struct CreateEntryView: View {
                 entryOptionsPage
             }
             .navigationDestination(isPresented: $isShowingExpandedEditor) {
-                ExpandedEntryEditor(entryText: $entryText, storyTitle: $storyTitle)
+                ExpandedEntryEditor(
+                    entryText: $entryText,
+                    storyTitle: $storyTitle,
+                    textStyle: selectedTextStyle,
+                    paperColor: selectedPaperColor
+                )
             }
         }
         .offset(x: exitDragOffset)
@@ -92,6 +252,18 @@ struct CreateEntryView: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingFormattingSheet) {
+            CreateFormattingSheet(
+                selectedTab: $selectedFormattingTab,
+                selectedFont: $selectedFontChoice,
+                selectedPaperStyle: $selectedPaperStyleChoice,
+                selectedTextColorIndex: $selectedTextColorIndex,
+                selectedPaperColorIndex: $selectedPaperColorIndex,
+                previewTextSize: $previewTextSize
+            )
+            .presentationDetents([.height(430), .large])
+            .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $isShowingJournalDestinationSheet) {
             AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
@@ -260,12 +432,12 @@ struct CreateEntryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(pageTapBackground)
         }
-        .background(Color.homePageBackground)
+        .background(selectedPaperColor)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             createToolbarItems(title: "Write Entry", showsCloseButton: true)
         }
-        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(selectedPaperColor, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.snappy(duration: 0.22)) {
@@ -399,7 +571,11 @@ struct CreateEntryView: View {
                 location: storyLocation,
                 date: storyDate,
                 savesDraft: savesDraft,
-                isPrivate: isPrivateEntry
+                isPrivate: isPrivateEntry,
+                fontChoiceRawValue: selectedFontChoice.rawValue,
+                textColorIndex: selectedTextColorIndex,
+                textSize: previewTextSize,
+                paperColorIndex: selectedPaperColorIndex
             )
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         }
@@ -432,6 +608,11 @@ struct CreateEntryView: View {
         storyDate = Date()
         savesDraft = true
         isPrivateEntry = false
+        selectedFontChoice = .sans
+        selectedTextColorIndex = 0
+        previewTextSize = 0.36
+        selectedPaperStyleChoice = .collegeRuled
+        selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
     }
 
@@ -457,6 +638,10 @@ struct CreateEntryView: View {
         storyDate = draft.date
         savesDraft = draft.savesDraft
         isPrivateEntry = draft.isPrivate
+        selectedFontChoice = draft.fontChoiceRawValue.flatMap(CreateFontChoice.init(rawValue:)) ?? .sans
+        selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
+        previewTextSize = min(max(draft.textSize ?? 0.36, 0), 1)
+        selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
     }
 
     private var createEntryContent: some View {
@@ -477,6 +662,7 @@ struct CreateEntryView: View {
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     NotebookPaperBackground(
+                        paperColor: selectedPaperColor,
                         showsPaperWash: false,
                         showsRuledLines: true,
                         firstRuledLineY: NotebookMetrics.firstNotebookRuleY
@@ -491,6 +677,7 @@ struct CreateEntryView: View {
                         bodyPlaceholder: "Start writing...",
                         scrollsInternally: false,
                         pageHeight: scrollContentHeight,
+                        textStyle: selectedTextStyle,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -513,11 +700,20 @@ struct CreateEntryView: View {
             .overlay(alignment: .bottomTrailing) {
                 editorFloatingToolStack
                     .padding(.trailing, 31)
-                    .padding(.bottom, isKeyboardVisible ? 68 : 196)
+                    .padding(.bottom, editorFloatingToolBottomPadding)
             }
             .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
+            .animation(.snappy(duration: 0.22), value: hasStoryboardPhotos)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var editorFloatingToolBottomPadding: CGFloat {
+        if isKeyboardVisible {
+            return 68
+        }
+
+        return hasStoryboardPhotos ? 232 : 196
     }
 
     private var entryDraftBottomBar: some View {
@@ -615,7 +811,6 @@ struct CreateEntryView: View {
         VStack(spacing: 10) {
             expandEditorButton
             fontEditorButton
-            editPageButton
         }
     }
 
@@ -635,7 +830,9 @@ struct CreateEntryView: View {
 
     private var fontEditorButton: some View {
         Button {
-            // Font controls will be wired up later.
+            dismissKeyboard()
+            selectedFormattingTab = .fontStyle
+            isShowingFormattingSheet = true
         } label: {
             editorFloatingToolIcon {
                 Text("Aa")
@@ -644,19 +841,6 @@ struct CreateEntryView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Font options")
-    }
-
-    private var editPageButton: some View {
-        Button {
-            // Page editing controls will be wired up later.
-        } label: {
-            editorFloatingToolIcon {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 17, weight: .medium))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Edit page")
     }
 
     private func editorFloatingToolIcon<Content: View>(
@@ -851,7 +1035,7 @@ struct CreateEntryView: View {
         .padding(.horizontal, 10)
         .padding(.top, 9)
         .padding(.bottom, 8)
-        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
@@ -1822,6 +2006,8 @@ private enum AddToJournalTab: CaseIterable, Identifiable {
 struct ExpandedEntryEditor: View {
     @Binding var entryText: String
     @Binding var storyTitle: String
+    var textStyle: NotebookTextStyle = .default
+    var paperColor: Color = .homePageBackground
 
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
@@ -1831,6 +2017,7 @@ struct ExpandedEntryEditor: View {
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     NotebookPaperBackground(
+                        paperColor: paperColor,
                         showsPaperWash: false,
                         showsRuledLines: true,
                         firstRuledLineY: NotebookMetrics.firstNotebookRuleY
@@ -1845,6 +2032,7 @@ struct ExpandedEntryEditor: View {
                         bodyPlaceholder: "Start writing...",
                         scrollsInternally: false,
                         pageHeight: proxy.size.height,
+                        textStyle: textStyle,
                         onBodyTap: {
                             isTitleFocused = false
                             editorFocusRequestID += 1
@@ -1858,14 +2046,14 @@ struct ExpandedEntryEditor: View {
                 .frame(minHeight: proxy.size.height)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Color.homePageBackground)
+            .background(paperColor)
             .notebookPageChrome()
         }
-        .background(Color.homePageBackground)
+        .background(paperColor)
         .navigationTitle("Write")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(paperColor, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -1886,7 +2074,7 @@ struct ExpandedEntryEditor: View {
 }
 
 struct NotebookPaperBackground: View {
-    private let paperColor = Color.homePageBackground
+    var paperColor = Color.homePageBackground
     var showsPaperWash = true
     var showsRuledLines = true
     var firstRuledLineY: CGFloat = 135
@@ -1947,6 +2135,420 @@ struct NotebookPaperBackground: View {
                             .stroke(Color.storyBorder.opacity(0.32), lineWidth: 1)
                     )
             }
+        }
+    }
+}
+
+private struct CreateFormattingSheet: View {
+    @Binding var selectedTab: CreateFormattingTab
+    @Binding var selectedFont: CreateFontChoice
+    @Binding var selectedPaperStyle: CreatePaperStyleChoice
+    @Binding var selectedTextColorIndex: Int
+    @Binding var selectedPaperColorIndex: Int
+    @Binding var previewTextSize: Double
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var selectedTextColor: Color {
+        CreateFormattingPalette.textColors[
+            min(max(selectedTextColorIndex, 0), CreateFormattingPalette.textColors.count - 1)
+        ].color
+    }
+
+    private var selectedPreviewFontSize: CGFloat {
+        CGFloat(14 + previewTextSize * 8)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.58))
+                        .frame(width: 44, height: 44)
+                        .background(Color.homeInputGray.opacity(0.85), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close formatting options")
+            }
+            .overlay {
+                Text(selectedTab.title)
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+            }
+
+            CreateFormattingTabSwitcher(selectedTab: $selectedTab)
+
+            ScrollView(showsIndicators: false) {
+                Group {
+                    switch selectedTab {
+                    case .fontStyle:
+                        fontStyleContent
+                    case .paperStyle:
+                        paperStyleContent
+                    }
+                }
+                .padding(.bottom, 18)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .background(Color.homePageBackground)
+    }
+
+    private var fontStyleContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            sheetSectionTitle("Font")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(CreateFontChoice.allCases) { font in
+                        Button {
+                            selectedFont = font
+                        } label: {
+                            CreateFontOptionCard(font: font, isSelected: selectedFont == font)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.trailing, 8)
+                .padding(.bottom, 9)
+                .padding(.top, 1)
+            }
+
+            Divider()
+                .overlay(Color.storyBorder.opacity(0.42))
+
+            sheetSectionTitle("Text Size")
+
+            HStack(spacing: 14) {
+                Text("A")
+                    .font(.system(size: 18, weight: .bold, design: selectedFont.design))
+                    .foregroundStyle(Color.storyInk.opacity(0.82))
+
+                Slider(value: $previewTextSize, in: 0...1)
+                    .tint(Color.storyPurple)
+
+                Text("A")
+                    .font(.system(size: 34, weight: .bold, design: selectedFont.design))
+                    .foregroundStyle(Color.storyInk.opacity(0.82))
+            }
+
+            sheetSectionTitle("Text Color")
+            CreateColorSwatchRow(
+                colors: CreateFormattingPalette.textColors.map(\.color),
+                selectedIndex: $selectedTextColorIndex,
+                selectedCheckColor: .white,
+                emphasizedBorderIndex: nil,
+                showsMoreButton: false
+            )
+
+            Divider()
+                .overlay(Color.storyBorder.opacity(0.42))
+
+            sheetSectionTitle("Preview")
+            Text("The little story found its voice on the page, one careful sentence at a time.")
+                .font(.system(size: selectedPreviewFontSize, weight: .medium, design: selectedFont.design))
+                .foregroundStyle(selectedTextColor)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+                .padding(16)
+                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.storyBorder.opacity(0.56), lineWidth: 1)
+                )
+        }
+    }
+
+    private var paperStyleContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            sheetSectionTitle("Paper Style")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(CreatePaperStyleChoice.allCases) { paperStyle in
+                        Button {
+                            selectedPaperStyle = paperStyle
+                        } label: {
+                            CreatePaperStyleOption(
+                                style: paperStyle,
+                                paperColor: CreateFormattingPalette.paperColors[selectedPaperColorIndex],
+                                isSelected: selectedPaperStyle == paperStyle
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+
+            sheetSectionTitle("Paper Color")
+            CreateColorSwatchRow(
+                colors: CreateFormattingPalette.paperColors,
+                selectedIndex: $selectedPaperColorIndex,
+                selectedCheckColor: Color.storyPurple,
+                emphasizedBorderIndex: 1,
+                showsMoreButton: false
+            )
+        }
+    }
+
+    private func sheetSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(Color.storyInk.opacity(0.92))
+    }
+}
+
+private struct CreateFormattingTabSwitcher: View {
+    @Binding var selectedTab: CreateFormattingTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(CreateFormattingTab.allCases) { tab in
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 15, weight: .semibold))
+
+                        Text(tab.title)
+                            .font(.system(size: 15, weight: .bold, design: .serif))
+                    }
+                    .foregroundStyle(selectedTab == tab ? Color.storyPurple : Color.storyInk.opacity(0.68))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(selectedTab == tab ? Color.white : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(selectedTab == tab ? Color.storyPurple : Color.clear, lineWidth: 1.4)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.45), lineWidth: 1)
+        )
+    }
+}
+
+private struct CreateFontOptionCard: View {
+    let font: CreateFontChoice
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Aa")
+                .font(.system(size: 27, weight: .semibold, design: font.design))
+                .foregroundStyle(Color.storyInk.opacity(0.9))
+
+            Text(font.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(width: 116, height: 96)
+        .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Color.storyPurple, in: Circle())
+                    .offset(x: 8, y: 8)
+            }
+        }
+    }
+}
+
+private struct CreatePaperStyleOption: View {
+    let style: CreatePaperStyleChoice
+    let paperColor: Color
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            CreatePaperPreview(style: style, paperColor: paperColor)
+                .frame(width: 82, height: 82)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
+                )
+                .overlay(alignment: .bottomTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.storyPurple, in: Circle())
+                            .offset(x: 5, y: 5)
+                    }
+                }
+
+            Text(style.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+                .frame(width: 92)
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
+        }
+    }
+}
+
+private struct CreatePaperPreview: View {
+    let style: CreatePaperStyleChoice
+    let paperColor: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                paperColor
+
+                switch style {
+                case .collegeRuled:
+                    ruledLines(count: 7, in: proxy.size)
+                    marginLine(in: proxy.size)
+                case .wideRuled:
+                    ruledLines(count: 4, in: proxy.size)
+                case .narrowRuled:
+                    ruledLines(count: 10, in: proxy.size)
+                case .grid:
+                    gridLines(in: proxy.size)
+                case .dotted:
+                    dottedPattern(in: proxy.size)
+                }
+            }
+        }
+    }
+
+    private func ruledLines(count: Int, in size: CGSize) -> some View {
+        ForEach(1...count, id: \.self) { index in
+            Rectangle()
+                .fill(Color.blue.opacity(0.16))
+                .frame(height: 1)
+                .offset(y: CGFloat(index) * size.height / CGFloat(count + 1))
+        }
+    }
+
+    private func marginLine(in size: CGSize) -> some View {
+        Rectangle()
+            .fill(Color.storyRose.opacity(0.6))
+            .frame(width: 1)
+            .offset(x: size.width * 0.18)
+    }
+
+    private func gridLines(in size: CGSize) -> some View {
+        ZStack {
+            ForEach(1...5, id: \.self) { index in
+                Rectangle()
+                    .fill(Color.blue.opacity(0.16))
+                    .frame(width: 1)
+                    .offset(x: CGFloat(index) * size.width / 6 - size.width / 2)
+            }
+
+            ForEach(1...5, id: \.self) { index in
+                Rectangle()
+                    .fill(Color.blue.opacity(0.16))
+                    .frame(height: 1)
+                    .offset(y: CGFloat(index) * size.height / 6 - size.height / 2)
+            }
+        }
+    }
+
+    private func dottedPattern(in size: CGSize) -> some View {
+        VStack(spacing: 10) {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(spacing: 10) {
+                    ForEach(0..<6, id: \.self) { _ in
+                        Circle()
+                            .fill(Color.storyInk.opacity(0.13))
+                            .frame(width: 2, height: 2)
+                    }
+                }
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+}
+
+private struct CreateColorSwatchRow: View {
+    let colors: [Color]
+    @Binding var selectedIndex: Int
+    let selectedCheckColor: Color
+    let emphasizedBorderIndex: Int?
+    let showsMoreButton: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 18) {
+                ForEach(colors.indices, id: \.self) { index in
+                    Button {
+                        selectedIndex = index
+                    } label: {
+                        Circle()
+                            .fill(colors[index])
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        emphasizedBorderIndex == index ? Color.storyInk.opacity(0.26) : Color.storyBorder.opacity(0.34),
+                                        lineWidth: emphasizedBorderIndex == index ? 1.3 : 1
+                                    )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.86), lineWidth: selectedIndex == index ? 6 : 0)
+                            )
+                            .overlay {
+                                if selectedIndex == index {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundStyle(selectedCheckColor)
+                                }
+                            }
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if showsMoreButton {
+                    Button {
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.58))
+                            .frame(width: 50, height: 40)
+                            .background(Color.homeInputGray.opacity(0.86), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("More colors")
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 }

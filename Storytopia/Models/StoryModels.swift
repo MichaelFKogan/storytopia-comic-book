@@ -142,6 +142,10 @@ struct CreateEntryDraft: Identifiable {
     let date: Date
     let savesDraft: Bool
     let isPrivate: Bool
+    let fontChoiceRawValue: String?
+    let textColorIndex: Int?
+    let textSize: Double?
+    let paperColorIndex: Int?
     let createdAt: Date
     let updatedAt: Date
 }
@@ -182,7 +186,11 @@ enum CreateEntryDraftStore {
         location: String,
         date: Date,
         savesDraft: Bool,
-        isPrivate: Bool
+        isPrivate: Bool,
+        fontChoiceRawValue: String? = nil,
+        textColorIndex: Int? = nil,
+        textSize: Double? = nil,
+        paperColorIndex: Int? = nil
     ) -> UUID? {
         let draftID = id ?? UUID()
         let draftDirectory = directory(for: draftID)
@@ -221,6 +229,10 @@ enum CreateEntryDraftStore {
                 date: date,
                 savesDraft: savesDraft,
                 isPrivate: isPrivate,
+                fontChoiceRawValue: fontChoiceRawValue,
+                textColorIndex: textColorIndex,
+                textSize: textSize,
+                paperColorIndex: paperColorIndex,
                 createdAt: existingDraft?.createdAt ?? now,
                 updatedAt: now
             )
@@ -267,6 +279,10 @@ enum CreateEntryDraftStore {
             date: metadata.date ?? Date(),
             savesDraft: metadata.savesDraft ?? true,
             isPrivate: metadata.isPrivate ?? false,
+            fontChoiceRawValue: metadata.fontChoiceRawValue,
+            textColorIndex: metadata.textColorIndex,
+            textSize: metadata.textSize,
+            paperColorIndex: metadata.paperColorIndex,
             createdAt: metadata.createdAt ?? Date(),
             updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date()
         )
@@ -289,7 +305,11 @@ enum CreateEntryDraftStore {
             location: legacyDraft.location,
             date: legacyDraft.date,
             savesDraft: legacyDraft.savesDraft,
-            isPrivate: legacyDraft.isPrivate
+            isPrivate: legacyDraft.isPrivate,
+            fontChoiceRawValue: legacyDraft.fontChoiceRawValue,
+            textColorIndex: legacyDraft.textColorIndex,
+            textSize: legacyDraft.textSize,
+            paperColorIndex: legacyDraft.paperColorIndex
         )
         try? FileManager.default.removeItem(at: legacyDraftDirectory)
     }
@@ -319,6 +339,10 @@ private struct CreateEntryDraftMetadata: Codable {
     let date: Date?
     let savesDraft: Bool?
     let isPrivate: Bool?
+    let fontChoiceRawValue: String?
+    let textColorIndex: Int?
+    let textSize: Double?
+    let paperColorIndex: Int?
     let createdAt: Date?
     let updatedAt: Date?
 }

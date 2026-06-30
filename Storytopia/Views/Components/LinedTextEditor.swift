@@ -35,9 +35,32 @@ enum NotebookMetrics {
     }
 
     static var typingAttributes: [NSAttributedString.Key: Any] {
+        typingAttributes(for: .default)
+    }
+
+    static func titleFont(for style: NotebookTextStyle) -> Font {
+        .system(size: style.titleFontSize, weight: .bold, design: style.swiftUIDesign)
+    }
+
+    static func bodyPlaceholderFont(for style: NotebookTextStyle) -> Font {
+        .system(size: style.bodyFontSize, weight: .regular, design: style.swiftUIDesign)
+    }
+
+    static func uiBodyFont(for style: NotebookTextStyle) -> UIFont {
+        let baseFont = UIFont.systemFont(ofSize: style.bodyFontSize, weight: .medium)
+        guard
+            let descriptor = baseFont.fontDescriptor.withDesign(style.uiKitDesign)
+        else {
+            return baseFont
+        }
+
+        return UIFont(descriptor: descriptor, size: style.bodyFontSize)
+    }
+
+    static func typingAttributes(for style: NotebookTextStyle) -> [NSAttributedString.Key: Any] {
         [
-            .font: bodyFont,
-            .foregroundColor: bodyTextUIColor,
+            .font: uiBodyFont(for: style),
+            .foregroundColor: style.uiColor,
             .paragraphStyle: typingParagraphStyle
         ]
     }
@@ -80,8 +103,27 @@ enum NotebookMetrics {
     }
 }
 
+struct NotebookTextStyle: Equatable {
+    var swiftUIDesign: Font.Design = .serif
+    var uiKitDesign: UIFontDescriptor.SystemDesign = .serif
+    var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
+    var color: Color = Color(NotebookMetrics.bodyTextUIColor)
+    var uiColor: UIColor = NotebookMetrics.bodyTextUIColor
+
+    static let `default` = NotebookTextStyle()
+
+    var titleFontSize: CGFloat {
+        bodyFontSize + 4
+    }
+}
+
 final class LinedTextView: UITextView {
     var ruleSpacing: CGFloat = NotebookMetrics.ruleSpacing
+    var notebookTextStyle: NotebookTextStyle = .default {
+        didSet {
+            applyTextStyle()
+        }
+    }
     var drawsRuledLines = true
     var scrollsInternally = true {
         didSet {
@@ -108,13 +150,29 @@ final class LinedTextView: UITextView {
             right: 0
         )
         textContainer.lineFragmentPadding = 0
-        typingAttributes = NotebookMetrics.typingAttributes
-        font = NotebookMetrics.bodyFont
-        textColor = NotebookMetrics.bodyTextUIColor
+        applyTextStyle()
         returnKeyType = .default
         showsHorizontalScrollIndicator = false
         keyboardDismissMode = .interactive
         applyScrollBehavior()
+    }
+
+    private func applyTextStyle() {
+        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+        typingAttributes = attributes
+        font = NotebookMetrics.uiBodyFont(for: notebookTextStyle)
+        textColor = notebookTextStyle.uiColor
+
+        guard let text, !text.isEmpty else {
+            setNeedsDisplay()
+            return
+        }
+
+        let selectedRange = selectedRange
+        attributedText = NSAttributedString(string: text, attributes: attributes)
+        self.selectedRange = selectedRange
+        typingAttributes = attributes
+        setNeedsDisplay()
     }
 
     private func applyScrollBehavior() {
@@ -154,17 +212,19 @@ final class LinedTextView: UITextView {
     }
 
     func setNotebookText(_ string: String) {
+        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+
         if string.isEmpty {
             text = ""
-            typingAttributes = NotebookMetrics.typingAttributes
+            typingAttributes = attributes
             setNeedsDisplay()
             return
         }
 
         let selectedRange = selectedRange
-        attributedText = NSAttributedString(string: string, attributes: NotebookMetrics.typingAttributes)
+        attributedText = NSAttributedString(string: string, attributes: attributes)
         self.selectedRange = selectedRange
-        typingAttributes = NotebookMetrics.typingAttributes
+        typingAttributes = attributes
         setNeedsDisplay()
     }
 
@@ -174,9 +234,10 @@ final class LinedTextView: UITextView {
         }
 
         let selectedRange = selectedRange
-        attributedText = NSAttributedString(string: text, attributes: NotebookMetrics.typingAttributes)
+        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+        attributedText = NSAttributedString(string: text, attributes: attributes)
         self.selectedRange = selectedRange
-        typingAttributes = NotebookMetrics.typingAttributes
+        typingAttributes = attributes
     }
 
     override func layoutSubviews() {
@@ -223,6 +284,7 @@ struct LinedTextEditor: UIViewRepresentable {
     var drawsRuledLines: Bool? = nil
     var minimumHeight: CGFloat = NotebookMetrics.minimumBodyHeight
     var tintUIColor: UIColor = .systemBlue
+    var textStyle: NotebookTextStyle = .default
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally
@@ -238,6 +300,7 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.drawsRuledLines = shouldDrawRuledLines
         textView.delegate = context.coordinator
         textView.tintColor = tintUIColor
+        textView.notebookTextStyle = textStyle
         textView.setNotebookText(text)
         context.coordinator.onTextChange = { newText in
             text = newText
@@ -257,6 +320,10 @@ struct LinedTextEditor: UIViewRepresentable {
 
         if textView.drawsRuledLines != shouldDrawRuledLines {
             textView.drawsRuledLines = shouldDrawRuledLines
+        }
+
+        if textView.notebookTextStyle != textStyle {
+            textView.notebookTextStyle = textStyle
         }
 
         if !coordinator.isUpdatingFromTextView, textView.text != text {
@@ -326,6 +393,7 @@ struct NotebookEditorContent: View {
     var bodyPlaceholder: String
     var scrollsInternally: Bool = true
     var pageHeight: CGFloat?
+    var textStyle: NotebookTextStyle = .default
     var onBodyTap: (() -> Void)? = nil
     var onTitleSubmit: () -> Void
 
@@ -364,8 +432,8 @@ struct NotebookEditorContent: View {
                 prompt: Text("Title")
                     .foregroundColor(Color.storyGray.opacity(0.46))
             )
-            .font(.system(size: NotebookMetrics.titleFontSize, weight: .bold, design: .serif))
-            .foregroundStyle(Color.black)
+            .font(NotebookMetrics.titleFont(for: textStyle))
+            .foregroundStyle(textStyle.color)
             .focused($isTitleFocused)
             .textFieldStyle(.plain)
             .submitLabel(.next)
@@ -384,13 +452,15 @@ struct NotebookEditorContent: View {
                 focusRequestID: editorFocusRequestID,
                 scrollsInternally: scrollsInternally,
                 drawsRuledLines: false,
-                minimumHeight: bodyMinHeight
+                minimumHeight: bodyMinHeight,
+                tintUIColor: textStyle.uiColor,
+                textStyle: textStyle
             )
             .padding(.bottom, 28)
 
             if entryText.isEmpty {
                 Text(bodyPlaceholder)
-                    .font(.system(size: NotebookMetrics.bodyFontSize, weight: .regular))
+                    .font(NotebookMetrics.bodyPlaceholderFont(for: textStyle))
                     .foregroundStyle(Color.storyGray.opacity(0.46))
                     .padding(.leading, NotebookMetrics.textLeadingInset)
                     .padding(.top, NotebookMetrics.firstLineTextTopInset)
