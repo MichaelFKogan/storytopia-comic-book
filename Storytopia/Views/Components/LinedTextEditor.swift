@@ -13,7 +13,7 @@ enum NotebookMetrics {
     }
 
     static var bodyFont: UIFont {
-        UIFont.systemFont(ofSize: bodyFontSize, weight: .regular)
+        UIFont.systemFont(ofSize: bodyFontSize, weight: .medium)
     }
 
     static var ruleUIColor: UIColor {
@@ -42,9 +42,17 @@ enum NotebookMetrics {
         ]
     }
 
-    /// Vertical inset so placeholder text lines up with the first ruled row.
+    /// Vertical inset so placeholder text matches the text view's first-line position.
     static var firstLineTextTopInset: CGFloat {
-        max(0, (ruleSpacing - bodyFont.lineHeight) / 2)
+        max(0, (ruleSpacing - bodyFont.lineHeight) / 2 + 8)
+    }
+
+    static var bodyCaretHeight: CGFloat {
+        min(ruleSpacing, titleFont.lineHeight + 4)
+    }
+
+    static var bodyCaretYOffset: CGFloat {
+        (bodyCaretHeight - bodyFont.lineHeight) / 2 + 6
     }
 
     static var titleLineTextTopInset: CGFloat {
@@ -103,6 +111,7 @@ final class LinedTextView: UITextView {
         typingAttributes = NotebookMetrics.typingAttributes
         font = NotebookMetrics.bodyFont
         textColor = NotebookMetrics.bodyTextUIColor
+        returnKeyType = .default
         showsHorizontalScrollIndicator = false
         keyboardDismissMode = .interactive
         applyScrollBehavior()
@@ -121,6 +130,18 @@ final class LinedTextView: UITextView {
 
         let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width
         return sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        let rect = super.caretRect(for: position)
+        let height = NotebookMetrics.bodyCaretHeight
+
+        return CGRect(
+            x: rect.minX,
+            y: rect.minY + NotebookMetrics.bodyCaretYOffset,
+            width: rect.width,
+            height: height
+        )
     }
 
     func refreshLayoutAfterContentChange() {
@@ -201,7 +222,7 @@ struct LinedTextEditor: UIViewRepresentable {
     var scrollsInternally: Bool = true
     var drawsRuledLines: Bool? = nil
     var minimumHeight: CGFloat = NotebookMetrics.minimumBodyHeight
-    var tintUIColor: UIColor = .systemIndigo
+    var tintUIColor: UIColor = .systemBlue
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally

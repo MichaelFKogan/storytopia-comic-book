@@ -46,10 +46,16 @@ struct CreateEntryView: View {
     @GestureState private var exitDragOffset: CGFloat = 0
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
+    @State private var isKeyboardVisible = false
 
     private func dismissKeyboard() {
         isTitleFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func showEntryOptionsPage() {
+        dismissKeyboard()
+        isShowingEntryOptionsPage = true
     }
 
     var body: some View {
@@ -251,9 +257,6 @@ struct CreateEntryView: View {
     private var layoutPage: some View {
         VStack(alignment: .leading, spacing: 0) {
             createEntryContent
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(pageTapBackground)
         }
@@ -264,6 +267,16 @@ struct CreateEntryView: View {
         }
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.snappy(duration: 0.22)) {
+                isKeyboardVisible = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.snappy(duration: 0.22)) {
+                isKeyboardVisible = false
+            }
+        }
     }
 
     private var entryOptionsPage: some View {
@@ -450,7 +463,7 @@ struct CreateEntryView: View {
         VStack(alignment: .leading, spacing: 14) {
             entryDraftStepContent
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
         .onTapGesture {
             dismissKeyboard()
@@ -459,19 +472,202 @@ struct CreateEntryView: View {
 
     private var entryDraftStepContent: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 14) {
-                editorCard(height: draftEditorHeight(for: proxy.size.height))
-                    .layoutPriority(1)
+            let scrollContentHeight = proxy.size.height * 2
 
-                Spacer(minLength: 0)
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    NotebookPaperBackground(
+                        showsPaperWash: false,
+                        showsRuledLines: true,
+                        firstRuledLineY: NotebookMetrics.firstNotebookRuleY
+                    )
+                    .frame(maxWidth: .infinity, minHeight: scrollContentHeight, maxHeight: .infinity)
 
-                photoStripSection
-                nextEntryOptionsButton
-                    .padding(.bottom, 24)
+                    NotebookEditorContent(
+                        storyTitle: $storyTitle,
+                        entryText: $entryText,
+                        isTitleFocused: $isTitleFocused,
+                        editorFocusRequestID: editorFocusRequestID,
+                        bodyPlaceholder: "Start writing...",
+                        scrollsInternally: false,
+                        pageHeight: scrollContentHeight,
+                        onTitleSubmit: {
+                            editorFocusRequestID += 1
+                        }
+                    )
+                }
+                .frame(maxWidth: .infinity, minHeight: scrollContentHeight)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Group {
+                    if isKeyboardVisible {
+                        entryDraftKeyboardBar
+                    } else {
+                        entryDraftBottomBar
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            .overlay(alignment: .bottomTrailing) {
+                editorFloatingToolStack
+                    .padding(.trailing, 31)
+                    .padding(.bottom, isKeyboardVisible ? 68 : 196)
+            }
+            .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var entryDraftBottomBar: some View {
+        VStack(spacing: 14) {
+            photoStripSection
+            nextEntryOptionsButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 24)
+    }
+
+    private var entryDraftKeyboardBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismissKeyboard()
+            } label: {
+                Image(systemName: "keyboard.chevron.compact.down")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.storyInk.opacity(0.72))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close keyboard")
+
+            keyboardPhotoTray
+
+            Spacer(minLength: 4)
+
+            Button {
+                showEntryOptionsPage()
+            } label: {
+                HStack(spacing: 5) {
+                    Text("Next")
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Next")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+        .background(Color.homePageBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.storyBorder.opacity(0.45))
+                .frame(height: 0.5)
+        }
+    }
+
+    private var keyboardPhotoTray: some View {
+        let photos = storyboardPhotos.compactMap { $0 }
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(Array(photos.prefix(5).enumerated()), id: \.offset) { index, image in
+                    Button {
+                        dismissKeyboard()
+                    } label: {
+                        KeyboardPhotoThumbnail(image: image)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show reference photo \(index + 1)")
+                }
+
+                if photos.count > 5 {
+                    KeyboardPhotoOverflowBadge(count: photos.count - 5)
+                }
+
+                if nextAvailablePhotoSlot != nil {
+                    Button {
+                        dismissKeyboard()
+                        selectedPhotoSlot = nextAvailablePhotoSlot
+                        isShowingPhotoSourceDialog = true
+                    } label: {
+                        KeyboardPhotoAddButton(hasPhotos: !photos.isEmpty)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add reference photos")
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.vertical, 4)
+        }
+        .frame(maxWidth: 230, alignment: .leading)
+    }
+
+    private var editorFloatingToolStack: some View {
+        VStack(spacing: 10) {
+            expandEditorButton
+            fontEditorButton
+            editPageButton
+        }
+    }
+
+    private var expandEditorButton: some View {
+        Button {
+            dismissKeyboard()
+            isShowingExpandedEditor = true
+        } label: {
+            editorFloatingToolIcon {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 17, weight: .semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Expand to full page")
+    }
+
+    private var fontEditorButton: some View {
+        Button {
+            // Font controls will be wired up later.
+        } label: {
+            editorFloatingToolIcon {
+                Text("Aa")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Font options")
+    }
+
+    private var editPageButton: some View {
+        Button {
+            // Page editing controls will be wired up later.
+        } label: {
+            editorFloatingToolIcon {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 17, weight: .medium))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit page")
+    }
+
+    private func editorFloatingToolIcon<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .foregroundStyle(Color.storyInk.opacity(0.76))
+            .frame(width: 48, height: 48)
+            .background(Color.white.opacity(0.82), in: Circle())
+            .shadow(color: .black.opacity(0.12), radius: 10, y: 5)
+            .contentShape(Circle())
     }
 
     private var entryOptionsStepContent: some View {
@@ -487,8 +683,7 @@ struct CreateEntryView: View {
 
     private var nextEntryOptionsButton: some View {
         Button {
-            dismissKeyboard()
-            isShowingEntryOptionsPage = true
+            showEntryOptionsPage()
         } label: {
             HStack(spacing: 8) {
                 Text("Next")
@@ -514,13 +709,6 @@ struct CreateEntryView: View {
         case .custom:
             return selectedCustomJournalTitle
         }
-    }
-
-    private func draftEditorHeight(for availableHeight: CGFloat) -> CGFloat {
-        let photoSectionHeight: CGFloat = hasStoryboardPhotos ? 128 : 76
-        let bottomControlsHeight: CGFloat = photoSectionHeight + 52 + 52
-        let preferredHeight = availableHeight - bottomControlsHeight
-        return min(504, max(300, preferredHeight))
     }
 
     private var hasStoryboardPhotos: Bool {
@@ -1045,66 +1233,6 @@ struct CreateEntryView: View {
     private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
         let trimmedPhotos = Array(photos.prefix(storyboardPhotos.count))
         return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
-    }
-
-    private func editorCard(height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                ScrollView {
-                    ZStack(alignment: .topLeading) {
-                        NotebookPaperBackground(
-                            showsPaperWash: false,
-                            showsRuledLines: true,
-                            firstRuledLineY: NotebookMetrics.firstNotebookRuleY
-                        )
-                        .frame(maxWidth: .infinity, minHeight: height, maxHeight: .infinity)
-
-                        NotebookEditorContent(
-                            storyTitle: $storyTitle,
-                            entryText: $entryText,
-                            isTitleFocused: $isTitleFocused,
-                            editorFocusRequestID: editorFocusRequestID,
-                            bodyPlaceholder: "Start writing...",
-                            scrollsInternally: false,
-                            pageHeight: height,
-                            onTitleSubmit: {
-                                editorFocusRequestID += 1
-                            }
-                        )
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: height)
-                }
-                .scrollIndicators(.hidden)
-                .scrollDismissesKeyboard(.interactively)
-            }
-            .frame(height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .notebookPageChrome()
-            .overlay(alignment: .bottomTrailing) {
-                Button {
-                    dismissKeyboard()
-                    isShowingExpandedEditor = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                        .frame(width: 34, height: 34)
-                        .background(Color.storyPurple.opacity(0.1), in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.storyPurple.opacity(0.26), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Expand to full page")
-                .padding(8)
-            }
-            .padding(.horizontal, -28)
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
     }
 
     private var storyDetailsCard: some View {
@@ -1977,6 +2105,56 @@ struct StoryboardPhotoStripAddButton: View {
                 .stroke(Color.storyPurple.opacity(0.34), style: StrokeStyle(lineWidth: 1.1, dash: [4, 3]))
         )
         .accessibilityLabel("Add photos")
+    }
+}
+
+struct KeyboardPhotoThumbnail: View {
+    let image: UIImage
+
+    var body: some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: 34, height: 34)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.34), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+            .frame(width: 38, height: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+struct KeyboardPhotoAddButton: View {
+    let hasPhotos: Bool
+
+    var body: some View {
+        Image(systemName: hasPhotos ? "plus" : "photo.badge.plus")
+            .font(.system(size: hasPhotos ? 16 : 17, weight: .semibold))
+            .foregroundStyle(Color.storyInk.opacity(0.72))
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+struct KeyboardPhotoOverflowBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text("+\(count)")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(Color.storyPurple)
+            .frame(width: 34, height: 34)
+            .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.storyPurple.opacity(0.26), lineWidth: 1)
+            )
+            .frame(width: 38, height: 44)
+            .accessibilityLabel("\(count) more reference photos")
     }
 }
 

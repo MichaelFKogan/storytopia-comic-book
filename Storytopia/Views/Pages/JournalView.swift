@@ -784,7 +784,7 @@ private struct DaybookComicReaderView: View {
     @State private var panOffset: CGSize = .zero
     @State private var lastPanOffset: CGSize = .zero
     @State private var isShowingGestureHint = false
-    @State private var areReaderControlsVisible = false
+    @State private var isReaderBookOpen = false
     @State private var programmaticTurnOffset = 0
     @State private var programmaticTurnProgress: CGFloat = 0
     @State private var isBackwardTurnActive = false
@@ -795,6 +795,8 @@ private struct DaybookComicReaderView: View {
     private let maximumScale: CGFloat = 5
     private let thumbnailHeight: CGFloat = 56
     private let panEdgePaddingRatio: CGFloat = 0.28
+    private let readerSpineWidth: CGFloat = 18
+    private let readerTopToolbarClearance: CGFloat = 58
     private let zoomSteps: [CGFloat] = [1.75, 2.5, 3.5, 5]
 
     var body: some View {
@@ -803,7 +805,6 @@ private struct DaybookComicReaderView: View {
                 .ignoresSafeArea()
 
             readerPageContent
-                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 readerTopBar
@@ -827,9 +828,6 @@ private struct DaybookComicReaderView: View {
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
-            .opacity(areReaderControlsVisible ? 1 : 0)
-            .allowsHitTesting(areReaderControlsVisible)
-            .animation(.easeInOut(duration: 0.2), value: areReaderControlsVisible)
 
             if isShowingGestureHint {
                 gestureHintOverlay
@@ -844,12 +842,18 @@ private struct DaybookComicReaderView: View {
         .onAppear {
             currentPageIndex = clampedPageIndex(currentPageIndex)
             presentGestureHintIfNeeded()
+
+            isReaderBookOpen = false
+            withAnimation(.spring(response: 0.54, dampingFraction: 0.82).delay(0.06)) {
+                isReaderBookOpen = true
+            }
         }
         .onChange(of: currentPageIndex) { _ in
             resetZoom(animated: false)
         }
         .onDisappear {
             resetZoom(animated: false)
+            isReaderBookOpen = false
         }
     }
 
@@ -955,44 +959,82 @@ private struct DaybookComicReaderView: View {
             let viewport = proxy.size
             let pageSize = fittedPageSize(in: viewport)
 
-            Group {
-                if showsPageTurnView {
-                    DaybookPageTurnView(
-                        comicBook: comicBook,
-                        currentPageIndex: $currentPageIndex,
-                        programmaticTurnOffset: programmaticTurnOffset,
-                        programmaticTurnProgress: programmaticTurnProgress,
-                        showsCoverOverlay: false,
-                        isBackwardTurnActive: $isBackwardTurnActive,
-                        isPageTurnActive: $isPageTurnActive,
-                        leadingEdgeReserve: 24,
-                        onTap: toggleReaderControls
-                    )
-                    .frame(width: pageSize.width, height: pageSize.height)
-                    .scaleEffect(isMagnifying ? zoomScale : 1)
-                    .simultaneousGesture(fitZoomMagnificationGesture(pageSize: pageSize, viewport: viewport))
-                } else {
-                    DaybookComicPageContent(
-                        comicBook: comicBook,
-                        pageIndex: currentPageIndex
-                    )
-                    .frame(width: pageSize.width, height: pageSize.height)
-                    .scaleEffect(zoomScale)
-                    .offset(panOffset)
-                    .contentShape(Rectangle())
-                    .gesture(zoomedGestures(pageSize: pageSize, viewport: viewport))
-                    .onTapGesture(count: 2) {
-                        resetZoom(animated: true)
-                    }
-                    .simultaneousGesture(
-                        TapGesture(count: 1).onEnded {
-                            toggleReaderControls()
+            readerBookSurface(pageSize: pageSize) {
+                Group {
+                    if showsPageTurnView {
+                        DaybookPageTurnView(
+                            comicBook: comicBook,
+                            currentPageIndex: $currentPageIndex,
+                            programmaticTurnOffset: programmaticTurnOffset,
+                            programmaticTurnProgress: programmaticTurnProgress,
+                            showsCoverOverlay: false,
+                            isBackwardTurnActive: $isBackwardTurnActive,
+                            isPageTurnActive: $isPageTurnActive,
+                            leadingEdgeReserve: 0
+                        )
+                        .frame(width: pageSize.width, height: pageSize.height)
+                        .scaleEffect(isMagnifying ? zoomScale : 1)
+                        .simultaneousGesture(fitZoomMagnificationGesture(pageSize: pageSize, viewport: viewport))
+                    } else {
+                        DaybookComicPageContent(
+                            comicBook: comicBook,
+                            pageIndex: currentPageIndex
+                        )
+                        .frame(width: pageSize.width, height: pageSize.height)
+                        .scaleEffect(zoomScale)
+                        .offset(panOffset)
+                        .contentShape(Rectangle())
+                        .gesture(zoomedGestures(pageSize: pageSize, viewport: viewport))
+                        .onTapGesture(count: 2) {
+                            resetZoom(animated: true)
                         }
-                    )
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, readerTopToolbarClearance)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+    }
+
+    private func readerBookSurface<Content: View>(
+        pageSize: CGSize,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let bookWidth = pageSize.width + readerSpineWidth
+
+        return ZStack(alignment: .leading) {
+            DaybookReaderPageStack()
+                .frame(width: bookWidth, height: pageSize.height)
+                .offset(x: 7, y: 7)
+
+            DaybookReaderSpine()
+                .frame(width: readerSpineWidth, height: pageSize.height)
+                .allowsHitTesting(false)
+
+            content()
+                .shadow(color: .black.opacity(0.38), radius: 20, x: 0, y: 10)
+                .overlay(alignment: .trailing) {
+                    DaybookReaderSwipeCue()
+                        .frame(width: 54)
+                        .allowsHitTesting(false)
+                }
+                .overlay(alignment: .bottom) {
+                    DaybookReaderPageBlock()
+                        .frame(height: 5)
+                        .allowsHitTesting(false)
+                }
+                .offset(x: readerSpineWidth)
+        }
+        .frame(width: bookWidth, height: pageSize.height)
+        .rotation3DEffect(
+            .degrees(isReaderBookOpen ? 0 : -18),
+            axis: (x: 0, y: 1, z: 0),
+            anchor: .leading,
+            perspective: 0.72
+        )
+        .scaleEffect(isReaderBookOpen ? 1 : 0.96, anchor: .leading)
+        .opacity(isReaderBookOpen ? 1 : 0.88)
+        .animation(.spring(response: 0.54, dampingFraction: 0.82), value: isReaderBookOpen)
     }
 
     private var readerBottomBar: some View {
@@ -1338,15 +1380,9 @@ private struct DaybookComicReaderView: View {
 
     private func fittedPageSize(in viewport: CGSize) -> CGSize {
         let aspectRatio = comicBook.imageAspectRatio(for: currentPageIndex)
-        let width = max(viewport.width, 1)
+        let width = max(viewport.width - readerSpineWidth, 1)
         let height = width / aspectRatio
         return CGSize(width: width, height: height)
-    }
-
-    private func toggleReaderControls() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            areReaderControlsVisible.toggle()
-        }
     }
 
     private func boundedOffset(
@@ -2099,28 +2135,137 @@ private enum DaybookPageFoldStyle {
     case foldRight
 }
 
-private struct DaybookPagePaperBack: View {
+private struct DaybookReaderPageStack: View {
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(red: 0.78, green: 0.76, blue: 0.70))
+                .offset(x: 5, y: 5)
+
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(red: 0.88, green: 0.86, blue: 0.80))
+                .offset(x: 3, y: 3)
+
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(red: 0.96, green: 0.94, blue: 0.88))
+                .offset(x: 1.5, y: 1.5)
+        }
+        .overlay(alignment: .trailing) {
+            VStack(spacing: 3) {
+                ForEach(0..<8, id: \.self) { index in
+                    Capsule()
+                        .fill(Color.black.opacity(index.isMultiple(of: 2) ? 0.16 : 0.08))
+                        .frame(height: 1)
+                }
+            }
+            .padding(.vertical, 20)
+            .frame(width: 18)
+        }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 1) {
+                ForEach(0..<2, id: \.self) { _ in
+                    Rectangle()
+                        .fill(Color.black.opacity(0.08))
+                        .frame(height: 1)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 2)
+        }
+        .shadow(color: .black.opacity(0.22), radius: 12, x: 4, y: 7)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct DaybookReaderSpine: View {
     var body: some View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.97, green: 0.95, blue: 0.90),
-                    Color(red: 0.93, green: 0.91, blue: 0.86),
-                    Color(red: 0.89, green: 0.87, blue: 0.82)
+                    Color.black.opacity(0.76),
+                    Color.black.opacity(0.18),
+                    Color.white.opacity(0.12),
+                    Color.black.opacity(0.34)
                 ],
                 startPoint: .leading,
                 endPoint: .trailing
             )
 
+            Rectangle()
+                .fill(Color.white.opacity(0.16))
+                .frame(width: 1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.black.opacity(0.34))
+                .frame(width: 2)
+        }
+    }
+}
+
+private struct DaybookReaderSwipeCue: View {
+    var body: some View {
+        ZStack(alignment: .trailing) {
             LinearGradient(
-                colors: [.black.opacity(0.14), .clear, .black.opacity(0.05)],
+                colors: [
+                    .clear,
+                    Color.white.opacity(0.08),
+                    Color.black.opacity(0.3)
+                ],
                 startPoint: .leading,
                 endPoint: .trailing
             )
+
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.28),
+                            Color.white.opacity(0.02),
+                            Color.black.opacity(0.22)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 22, height: 22)
+                .padding(.top, 18)
+                .padding(.trailing, 8)
+                .frame(maxHeight: .infinity, alignment: .top)
         }
+    }
+}
+
+private struct DaybookReaderPageBlock: View {
+    var body: some View {
+        VStack(spacing: 1) {
+            ForEach(0..<2, id: \.self) { index in
+                Rectangle()
+                    .fill(Color.white.opacity(index == 0 ? 0.18 : 0.1))
+                    .frame(height: 1)
+            }
+        }
+        .padding(.horizontal, 28)
+        .background(
+            LinearGradient(
+                colors: [
+                    .clear,
+                    Color.black.opacity(0.12)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+}
+
+private struct DaybookPagePaperBack: View {
+    var body: some View {
+        Color(red: 0.96, green: 0.94, blue: 0.88)
         .overlay(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .stroke(Color.black.opacity(0.16), lineWidth: 1)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
@@ -2132,7 +2277,6 @@ private struct DaybookTurningPage: View {
     let progress: CGFloat
     let style: DaybookPageFoldStyle
     let showsCoverOverlay: Bool
-    let foldOverlayForward: Bool
 
     private let perspective: CGFloat = 0.65
 
@@ -2140,7 +2284,6 @@ private struct DaybookTurningPage: View {
         ZStack {
             if showsFrontFace {
                 pageFace
-                    .pageFoldOverlay(progress: progress, isForward: foldOverlayForward)
                     .rotation3DEffect(
                         .degrees(frontRotation),
                         axis: (x: 0, y: 1, z: 0),
@@ -2160,12 +2303,6 @@ private struct DaybookTurningPage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .shadow(
-            color: .black.opacity(0.34 * progress),
-            radius: 18,
-            x: shadowOffsetX,
-            y: 4
-        )
     }
 
     private var pageFace: some View {
@@ -2183,15 +2320,6 @@ private struct DaybookTurningPage: View {
             return .leading
         case .foldRight:
             return .trailing
-        }
-    }
-
-    private var shadowOffsetX: CGFloat {
-        switch style {
-        case .foldLeft, .unfoldFromLeft:
-            return -16
-        case .foldRight:
-            return 16
         }
     }
 
@@ -2331,22 +2459,19 @@ private struct DaybookPageTurnView: View {
                         pageIndex: folding,
                         progress: pageTurn.progress,
                         style: .foldLeft,
-                        showsCoverOverlay: showsCoverOverlay,
-                        foldOverlayForward: true
+                        showsCoverOverlay: showsCoverOverlay
                     )
                     .zIndex(1)
 
                 case .unfoldPrevious(let revealed, let folding):
                     pageView(at: revealed)
-                        .pageRevealedUnderFold(progress: pageTurn.progress)
 
                     DaybookTurningPage(
                         comicBook: comicBook,
                         pageIndex: folding,
                         progress: pageTurn.progress,
                         style: .unfoldFromLeft,
-                        showsCoverOverlay: showsCoverOverlay,
-                        foldOverlayForward: false
+                        showsCoverOverlay: showsCoverOverlay
                     )
                     .zIndex(1)
 
@@ -2358,8 +2483,7 @@ private struct DaybookPageTurnView: View {
                         pageIndex: folding,
                         progress: pageTurn.progress,
                         style: .foldRight,
-                        showsCoverOverlay: showsCoverOverlay,
-                        foldOverlayForward: true
+                        showsCoverOverlay: showsCoverOverlay
                     )
                     .zIndex(1)
                 }
@@ -2474,74 +2598,6 @@ private struct DaybookPageTurnView: View {
 
     private func clampedPageIndex(_ pageIndex: Int) -> Int {
         min(max(0, pageIndex), max(0, comicBook.totalPageCount - 1))
-    }
-}
-
-private extension View {
-    func pageFoldOverlay(progress: CGFloat, isForward: Bool) -> some View {
-        modifier(DaybookPageFoldOverlay(progress: progress, isForward: isForward))
-    }
-
-    func pageRevealedUnderFold(progress: CGFloat) -> some View {
-        modifier(DaybookPageRevealOverlay(progress: progress))
-    }
-}
-
-private struct DaybookPageFoldOverlay: ViewModifier {
-    let progress: CGFloat
-    let isForward: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .leading) {
-                LinearGradient(
-                    colors: [
-                        .black.opacity(0.34 * progress),
-                        .clear,
-                        .white.opacity(0.18 * progress),
-                        .black.opacity(0.28 * progress)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            }
-            .overlay(alignment: isForward ? .trailing : .leading) {
-                Rectangle()
-                    .fill(.white.opacity(0.42 * progress))
-                    .frame(width: 2)
-                    .blur(radius: 0.7)
-                    .padding(.vertical, 8)
-            }
-            .overlay(alignment: isForward ? .trailing : .leading) {
-                LinearGradient(
-                    colors: [
-                        .clear,
-                        .black.opacity(0.34 * progress)
-                    ],
-                    startPoint: isForward ? .leading : .trailing,
-                    endPoint: isForward ? .trailing : .leading
-                )
-                .frame(width: 54)
-            }
-    }
-}
-
-private struct DaybookPageRevealOverlay: ViewModifier {
-    let progress: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .overlay(
-                LinearGradient(
-                    colors: [
-                        .black.opacity(0.2 * progress),
-                        .clear,
-                        .white.opacity(0.08 * progress)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
     }
 }
 
