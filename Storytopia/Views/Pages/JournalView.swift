@@ -382,7 +382,12 @@ struct JournalView: View {
             } label: {
                 JournalChapterListRow(chapter: chapter)
             }
-            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 12))
+            .listRowInsets(EdgeInsets(
+                top: 0,
+                leading: JournalChapterListMetrics.horizontalInset,
+                bottom: 0,
+                trailing: JournalChapterListMetrics.trailingInset
+            ))
             .listRowBackground(Color.homePageBackground)
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 Button {
@@ -785,9 +790,6 @@ private struct DaybookComicReaderView: View {
     @State private var lastPanOffset: CGSize = .zero
     @State private var isShowingGestureHint = false
     @State private var isReaderBookOpen = false
-    @State private var programmaticTurnOffset = 0
-    @State private var programmaticTurnProgress: CGFloat = 0
-    @State private var isBackwardTurnActive = false
     @State private var isPageTurnActive = false
     @GestureState private var isMagnifying = false
 
@@ -962,15 +964,10 @@ private struct DaybookComicReaderView: View {
             readerBookSurface(pageSize: pageSize) {
                 Group {
                     if showsPageTurnView {
-                        DaybookPageTurnView(
+                        DaybookPageCurlReaderView(
                             comicBook: comicBook,
                             currentPageIndex: $currentPageIndex,
-                            programmaticTurnOffset: programmaticTurnOffset,
-                            programmaticTurnProgress: programmaticTurnProgress,
-                            showsCoverOverlay: false,
-                            isBackwardTurnActive: $isBackwardTurnActive,
-                            isPageTurnActive: $isPageTurnActive,
-                            leadingEdgeReserve: 0
+                            isPageTurnActive: $isPageTurnActive
                         )
                         .frame(width: pageSize.width, height: pageSize.height)
                         .scaleEffect(isMagnifying ? zoomScale : 1)
@@ -1159,7 +1156,7 @@ private struct DaybookComicReaderView: View {
     }
 
     private var isTurningProgrammatically: Bool {
-        programmaticTurnOffset != 0
+        isPageTurnActive
     }
 
     private var canZoomInFurther: Bool {
@@ -1292,23 +1289,7 @@ private struct DaybookComicReaderView: View {
             return
         }
 
-        programmaticTurnOffset = offset
-        programmaticTurnProgress = 0.02
-
-        withAnimation(.easeInOut(duration: 0.32)) {
-            programmaticTurnProgress = 1
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-            var transaction = Transaction()
-            transaction.animation = nil
-
-            withTransaction(transaction) {
-                currentPageIndex = nextPageIndex
-                programmaticTurnOffset = 0
-                programmaticTurnProgress = 0
-            }
-        }
+        currentPageIndex = nextPageIndex
     }
 
     private func goToPage(_ pageIndex: Int) {
@@ -1327,8 +1308,6 @@ private struct DaybookComicReaderView: View {
             lastZoomScale = minimumScale
             panOffset = .zero
             lastPanOffset = .zero
-            programmaticTurnOffset = 0
-            programmaticTurnProgress = 0
         }
 
         if animated {
@@ -1428,6 +1407,145 @@ private struct DaybookComicReaderView: View {
 
     private func rubberBandDistance(_ distance: CGFloat) -> CGFloat {
         (1 - (1 / ((distance * 0.008) + 1))) * 120
+    }
+}
+
+private struct DaybookPageCurlReaderView: UIViewControllerRepresentable {
+    let comicBook: DaybookComicBook
+    @Binding var currentPageIndex: Int
+    @Binding var isPageTurnActive: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pageViewController = UIPageViewController(
+            transitionStyle: .pageCurl,
+            navigationOrientation: .horizontal,
+            options: [.spineLocation: UIPageViewController.SpineLocation.min.rawValue]
+        )
+        pageViewController.dataSource = context.coordinator
+        pageViewController.delegate = context.coordinator
+        pageViewController.view.backgroundColor = .clear
+
+        let initialIndex = clampedPageIndex(currentPageIndex)
+        let initialController = context.coordinator.hostingController(for: initialIndex)
+        pageViewController.setViewControllers(
+            [initialController],
+            direction: .forward,
+            animated: false
+        )
+        context.coordinator.presentedPageIndex = initialIndex
+
+        return pageViewController
+    }
+
+    func updateUIViewController(_ pageViewController: UIPageViewController, context: Context) {
+        context.coordinator.parent = self
+
+        let targetIndex = clampedPageIndex(currentPageIndex)
+        guard targetIndex != context.coordinator.presentedPageIndex,
+              !context.coordinator.isAnimatingProgrammaticTurn else {
+            return
+        }
+
+        let direction: UIPageViewController.NavigationDirection = targetIndex > context.coordinator.presentedPageIndex ? .forward : .reverse
+        let nextController = context.coordinator.hostingController(for: targetIndex)
+
+        context.coordinator.isAnimatingProgrammaticTurn = true
+        isPageTurnActive = true
+
+        pageViewController.setViewControllers(
+            [nextController],
+            direction: direction,
+            animated: true
+        ) { completed in
+            context.coordinator.isAnimatingProgrammaticTurn = false
+            isPageTurnActive = false
+
+            guard completed else {
+                return
+            }
+
+            context.coordinator.presentedPageIndex = targetIndex
+        }
+    }
+
+    private func clampedPageIndex(_ pageIndex: Int) -> Int {
+        min(max(0, pageIndex), max(0, comicBook.totalPageCount - 1))
+    }
+
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: DaybookPageCurlReaderView
+        var presentedPageIndex: Int
+        var isAnimatingProgrammaticTurn = false
+
+        init(parent: DaybookPageCurlReaderView) {
+            self.parent = parent
+            self.presentedPageIndex = parent.currentPageIndex
+        }
+
+        func hostingController(for pageIndex: Int) -> UIViewController {
+            let controller = UIHostingController(
+                rootView: DaybookComicPageContent(
+                    comicBook: parent.comicBook,
+                    pageIndex: parent.clampedPageIndex(pageIndex)
+                )
+            )
+            controller.view.backgroundColor = .clear
+            controller.view.tag = parent.clampedPageIndex(pageIndex)
+            return controller
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            viewControllerBefore viewController: UIViewController
+        ) -> UIViewController? {
+            let previousIndex = viewController.view.tag - 1
+            guard previousIndex >= 0 else {
+                return nil
+            }
+
+            return hostingController(for: previousIndex)
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            viewControllerAfter viewController: UIViewController
+        ) -> UIViewController? {
+            let nextIndex = viewController.view.tag + 1
+            guard nextIndex < parent.comicBook.totalPageCount else {
+                return nil
+            }
+
+            return hostingController(for: nextIndex)
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            willTransitionTo pendingViewControllers: [UIViewController]
+        ) {
+            parent.isPageTurnActive = true
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            didFinishAnimating finished: Bool,
+            previousViewControllers: [UIViewController],
+            transitionCompleted completed: Bool
+        ) {
+            parent.isPageTurnActive = false
+
+            guard completed,
+                  let visibleController = pageViewController.viewControllers?.first else {
+                return
+            }
+
+            let visibleIndex = parent.clampedPageIndex(visibleController.view.tag)
+            presentedPageIndex = visibleIndex
+            parent.currentPageIndex = visibleIndex
+        }
     }
 }
 
@@ -3640,6 +3758,14 @@ private func draftPreviewText(_ draft: CreateEntryDraft) -> String {
     return "Draft ready to continue"
 }
 
+private enum JournalChapterListMetrics {
+    static let rowHeight: CGFloat = 50
+    static let horizontalInset: CGFloat = 16
+    static let trailingInset: CGFloat = 12
+    static let coverWidth: CGFloat = 26
+    static let coverHeight: CGFloat = 34
+}
+
 private struct JournalChapterListRow: View {
     let chapter: PrototypeChapter
 
@@ -3648,8 +3774,8 @@ private struct JournalChapterListRow: View {
             JournalListCover(
                 color: chapter.color,
                 imageName: nil,
-                width: 34,
-                height: 44
+                width: JournalChapterListMetrics.coverWidth,
+                height: JournalChapterListMetrics.coverHeight
             )
             .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
@@ -3659,16 +3785,18 @@ private struct JournalChapterListRow: View {
                     .foregroundStyle(Color.storyInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
-
-                Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(Color.homeMutedText)
-                    .lineLimit(1)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 8)
+
+            Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
         }
-        .frame(minHeight: 54)
+        .frame(height: JournalChapterListMetrics.rowHeight)
         .accessibilityLabel(chapter.title)
     }
 }

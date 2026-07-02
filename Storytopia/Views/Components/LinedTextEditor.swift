@@ -39,14 +39,27 @@ enum NotebookMetrics {
     }
 
     static func titleFont(for style: NotebookTextStyle) -> Font {
-        .system(size: style.titleFontSize, weight: .bold, design: style.swiftUIDesign)
+        if let customFontName = style.customFontName {
+            return .custom(customFontName, size: style.titleFontSize).weight(.bold)
+        }
+
+        return .system(size: style.titleFontSize, weight: .bold, design: style.swiftUIDesign)
     }
 
     static func bodyPlaceholderFont(for style: NotebookTextStyle) -> Font {
-        .system(size: style.bodyFontSize, weight: .regular, design: style.swiftUIDesign)
+        if let customFontName = style.customFontName {
+            return .custom(customFontName, size: style.bodyFontSize)
+        }
+
+        return .system(size: style.bodyFontSize, weight: .regular, design: style.swiftUIDesign)
     }
 
     static func uiBodyFont(for style: NotebookTextStyle) -> UIFont {
+        if let customFontName = style.customFontName,
+           let customFont = UIFont(name: customFontName, size: style.bodyFontSize) {
+            return customFont
+        }
+
         let baseFont = UIFont.systemFont(ofSize: style.bodyFontSize, weight: .medium)
         guard
             let descriptor = baseFont.fontDescriptor.withDesign(style.uiKitDesign)
@@ -57,10 +70,13 @@ enum NotebookMetrics {
         return UIFont(descriptor: descriptor, size: style.bodyFontSize)
     }
 
-    static func typingAttributes(for style: NotebookTextStyle) -> [NSAttributedString.Key: Any] {
+    static func typingAttributes(
+        for style: NotebookTextStyle,
+        usesTexturedPaperEffect: Bool = false
+    ) -> [NSAttributedString.Key: Any] {
         [
             .font: uiBodyFont(for: style),
-            .foregroundColor: style.uiColor,
+            .foregroundColor: usesTexturedPaperEffect ? UIColor.clear : style.uiColor,
             .paragraphStyle: typingParagraphStyle
         ]
     }
@@ -106,6 +122,7 @@ enum NotebookMetrics {
 struct NotebookTextStyle: Equatable {
     var swiftUIDesign: Font.Design = .serif
     var uiKitDesign: UIFontDescriptor.SystemDesign = .serif
+    var customFontName: String?
     var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
     var color: Color = Color(NotebookMetrics.bodyTextUIColor)
     var uiColor: UIColor = NotebookMetrics.bodyTextUIColor
@@ -114,6 +131,51 @@ struct NotebookTextStyle: Equatable {
 
     var titleFontSize: CGFloat {
         bodyFontSize + 4
+    }
+}
+
+enum TexturedPaperTextEffect {
+    static func shouldMultiplyBlend(_ color: UIColor) -> Bool {
+        relativeLuminance(of: color) < 0.55
+    }
+
+    static func inkShadow(for color: UIColor) -> NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowOffset = CGSize(width: 0, height: -0.45)
+        shadow.shadowBlurRadius = 0.45
+        shadow.shadowColor = UIColor.black.withAlphaComponent(shouldMultiplyBlend(color) ? 0.16 : 0.1)
+        return shadow
+    }
+
+    static func titleShadowColor(for color: UIColor) -> Color {
+        Color.black.opacity(shouldMultiplyBlend(color) ? 0.16 : 0.1)
+    }
+
+    static func bodyShadowColor(for color: UIColor) -> UIColor {
+        UIColor.black.withAlphaComponent(shouldMultiplyBlend(color) ? 0.28 : 0.18)
+    }
+
+    static func bodyHighlightColor(for color: UIColor) -> UIColor {
+        UIColor.white.withAlphaComponent(shouldMultiplyBlend(color) ? 0.24 : 0.16)
+    }
+
+    private static func relativeLuminance(of color: UIColor) -> CGFloat {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return 0
+        }
+
+        return 0.2126 * linearized(red) + 0.7152 * linearized(green) + 0.0722 * linearized(blue)
+    }
+
+    private static func linearized(_ component: CGFloat) -> CGFloat {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
     }
 }
 
@@ -133,6 +195,11 @@ final class LinedTextView: UITextView {
     var scrollsInternally = true {
         didSet {
             applyScrollBehavior()
+        }
+    }
+    var usesTexturedPaperEffect = false {
+        didSet {
+            applyTextStyle()
         }
     }
 
@@ -167,10 +234,14 @@ final class LinedTextView: UITextView {
     }
 
     private func applyTextStyle() {
-        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
         typingAttributes = attributes
         font = NotebookMetrics.uiBodyFont(for: notebookTextStyle)
-        textColor = notebookTextStyle.uiColor
+        textColor = usesTexturedPaperEffect ? .clear : notebookTextStyle.uiColor
+        layer.compositingFilter = nil
 
         guard let text, !text.isEmpty else {
             setNeedsDisplay()
@@ -221,7 +292,10 @@ final class LinedTextView: UITextView {
     }
 
     func setNotebookText(_ string: String) {
-        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
 
         if string.isEmpty {
             text = ""
@@ -243,7 +317,10 @@ final class LinedTextView: UITextView {
         }
 
         let selectedRange = selectedRange
-        let attributes = NotebookMetrics.typingAttributes(for: notebookTextStyle)
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
         attributedText = NSAttributedString(string: text, attributes: attributes)
         self.selectedRange = selectedRange
         typingAttributes = attributes
@@ -296,6 +373,7 @@ struct LinedTextEditor: UIViewRepresentable {
     var tintUIColor: UIColor = .systemBlue
     var textStyle: NotebookTextStyle = .default
     var textLeadingInset = NotebookMetrics.textLeadingInset
+    var usesTexturedPaperEffect = false
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally
@@ -313,6 +391,7 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.tintColor = tintUIColor
         textView.notebookTextStyle = textStyle
         textView.textLeadingInset = textLeadingInset
+        textView.usesTexturedPaperEffect = usesTexturedPaperEffect
         textView.setNotebookText(text)
         context.coordinator.onTextChange = { newText in
             text = newText
@@ -340,6 +419,10 @@ struct LinedTextEditor: UIViewRepresentable {
 
         if textView.textLeadingInset != textLeadingInset {
             textView.textLeadingInset = textLeadingInset
+        }
+
+        if textView.usesTexturedPaperEffect != usesTexturedPaperEffect {
+            textView.usesTexturedPaperEffect = usesTexturedPaperEffect
         }
 
         if !coordinator.isUpdatingFromTextView, textView.text != text {
@@ -409,6 +492,132 @@ struct LinedTextEditor: UIViewRepresentable {
     }
 }
 
+private final class TexturedPaperBodyTextView: UIView {
+    var text = "" {
+        didSet {
+            updateTextStorage()
+        }
+    }
+    var textStyle: NotebookTextStyle = .default {
+        didSet {
+            updateTextStorage()
+        }
+    }
+    var textLeadingInset = NotebookMetrics.textLeadingInset {
+        didSet {
+            setNeedsLayout()
+            setNeedsDisplay()
+        }
+    }
+
+    private let textStorage = NSTextStorage()
+    private let layoutManager = NSLayoutManager()
+    private let textContainer = NSTextContainer(size: .zero)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureTextSystem()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureTextSystem()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        textContainer.size = CGSize(
+            width: max(0, bounds.width - textLeadingInset),
+            height: .greatestFiniteMagnitude
+        )
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard !text.isEmpty, let context = UIGraphicsGetCurrentContext() else {
+            return
+        }
+
+        let glyphRange = layoutManager.glyphRange(for: textContainer)
+        guard glyphRange.length > 0 else {
+            return
+        }
+
+        let inkColor = textStyle.uiColor.withAlphaComponent(0.9)
+        let darkEdge = TexturedPaperTextEffect.bodyShadowColor(for: textStyle.uiColor)
+        let lightEdge = TexturedPaperTextEffect.bodyHighlightColor(for: textStyle.uiColor)
+
+        context.saveGState()
+        drawGlyphs(glyphRange, color: darkEdge, offset: CGSize(width: -0.7, height: -0.2))
+        drawGlyphs(glyphRange, color: darkEdge, offset: CGSize(width: 0, height: -1.1))
+        drawGlyphs(glyphRange, color: lightEdge, offset: CGSize(width: 0.8, height: 0.25))
+        drawGlyphs(glyphRange, color: lightEdge, offset: CGSize(width: 0, height: 1.15))
+        drawGlyphs(glyphRange, color: inkColor, offset: .zero)
+        context.restoreGState()
+    }
+
+    private func configureTextSystem() {
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        textContainer.lineFragmentPadding = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        layoutManager.addTextContainer(textContainer)
+        textStorage.addLayoutManager(layoutManager)
+    }
+
+    private func updateTextStorage() {
+        let attributes = NotebookMetrics.typingAttributes(for: textStyle)
+        textStorage.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+        setNeedsLayout()
+        setNeedsDisplay()
+    }
+
+    private func drawGlyphs(_ glyphRange: NSRange, color: UIColor, offset: CGSize) {
+        let characterRange = layoutManager.characterRange(
+            forGlyphRange: glyphRange,
+            actualGlyphRange: nil
+        )
+
+        textStorage.addAttribute(.foregroundColor, value: color, range: characterRange)
+        layoutManager.drawGlyphs(
+            forGlyphRange: glyphRange,
+            at: CGPoint(
+                x: textLeadingInset + offset.width,
+                y: offset.height
+            )
+        )
+    }
+}
+
+private struct TexturedPaperBodyTextOverlay: UIViewRepresentable {
+    let text: String
+    let textStyle: NotebookTextStyle
+    let textLeadingInset: CGFloat
+
+    func makeUIView(context: Context) -> TexturedPaperBodyTextView {
+        let view = TexturedPaperBodyTextView()
+        view.text = text
+        view.textStyle = textStyle
+        view.textLeadingInset = textLeadingInset
+        return view
+    }
+
+    func updateUIView(_ view: TexturedPaperBodyTextView, context: Context) {
+        if view.text != text {
+            view.text = text
+        }
+
+        if view.textStyle != textStyle {
+            view.textStyle = textStyle
+        }
+
+        if view.textLeadingInset != textLeadingInset {
+            view.textLeadingInset = textLeadingInset
+        }
+    }
+}
+
 struct NotebookEditorContent: View {
     @Binding var storyTitle: String
     @Binding var entryText: String
@@ -422,6 +631,7 @@ struct NotebookEditorContent: View {
     var showsTitleRule = true
     var leadingContentPadding = NotebookMetrics.marginLeading
     var leadingTextPadding = NotebookMetrics.textLeadingInset
+    var usesTexturedPaperEffect = false
     var onBodyTap: (() -> Void)? = nil
     var onTitleSubmit: () -> Void
 
@@ -464,6 +674,17 @@ struct NotebookEditorContent: View {
             )
             .font(NotebookMetrics.titleFont(for: textStyle))
             .foregroundStyle(textStyle.color)
+            .shadow(
+                color: usesTexturedPaperEffect ? TexturedPaperTextEffect.titleShadowColor(for: textStyle.uiColor) : .clear,
+                radius: usesTexturedPaperEffect ? 0.45 : 0,
+                x: 0,
+                y: usesTexturedPaperEffect ? -0.45 : 0
+            )
+            .blendMode(
+                usesTexturedPaperEffect && TexturedPaperTextEffect.shouldMultiplyBlend(textStyle.uiColor)
+                    ? .multiply
+                    : .normal
+            )
             .focused($isTitleFocused)
             .textFieldStyle(.plain)
             .submitLabel(.next)
@@ -485,8 +706,20 @@ struct NotebookEditorContent: View {
                 drawsRuledLines: false,
                 minimumHeight: bodyMinHeight,
                 textStyle: textStyle,
-                textLeadingInset: leadingTextPadding
+                textLeadingInset: leadingTextPadding,
+                usesTexturedPaperEffect: usesTexturedPaperEffect
             )
+            .overlay(alignment: .topLeading) {
+                if usesTexturedPaperEffect && !entryText.isEmpty {
+                    TexturedPaperBodyTextOverlay(
+                        text: entryText,
+                        textStyle: textStyle,
+                        textLeadingInset: leadingTextPadding
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                }
+            }
             .padding(.bottom, 28)
 
             if entryText.isEmpty {

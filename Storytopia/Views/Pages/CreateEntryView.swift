@@ -36,48 +36,122 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
 private enum CreateFontChoice: String, CaseIterable, Identifiable {
     case sans
     case serif
-    case handwritten
-    case typewriter
+    case nunito
+    case lora
+    case crimsonPro
+    case caveat
+    case patrickHand
+    case gloriaHallelujah
+    case handlee
+    case permanentMarker
+    case specialElite
+    case amaticSC
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .serif:
-            "Serif"
         case .sans:
             "Sans"
-        case .handwritten:
-            "Handwritten"
-        case .typewriter:
+        case .serif:
+            "Serif"
+        case .nunito:
+            "Nunito"
+        case .lora:
+            "Lora"
+        case .crimsonPro:
+            "Crimson Pro"
+        case .caveat:
+            "Caveat"
+        case .patrickHand:
+            "Patrick Hand"
+        case .gloriaHallelujah:
+            "Gloria"
+        case .handlee:
+            "Handlee"
+        case .permanentMarker:
+            "Marker"
+        case .specialElite:
             "Typewriter"
+        case .amaticSC:
+            "Amatic SC"
         }
     }
 
     var design: Font.Design {
         switch self {
-        case .serif:
+        case .serif, .lora, .crimsonPro:
             .serif
-        case .sans:
+        case .sans, .nunito:
             .default
-        case .handwritten:
+        case .caveat, .patrickHand, .gloriaHallelujah, .handlee, .permanentMarker, .amaticSC:
             .rounded
-        case .typewriter:
+        case .specialElite:
             .monospaced
         }
     }
 
     var uiKitDesign: UIFontDescriptor.SystemDesign {
         switch self {
-        case .serif:
+        case .serif, .lora, .crimsonPro:
             .serif
-        case .sans:
+        case .sans, .nunito:
             .default
-        case .handwritten:
+        case .caveat, .patrickHand, .gloriaHallelujah, .handlee, .permanentMarker, .amaticSC:
             .rounded
-        case .typewriter:
+        case .specialElite:
             .monospaced
         }
+    }
+
+    var fontName: String? {
+        switch self {
+        case .sans, .serif:
+            nil
+        case .nunito:
+            "Nunito-ExtraLight"
+        case .lora:
+            "Lora-Regular"
+        case .crimsonPro:
+            "CrimsonPro-Regular"
+        case .caveat:
+            "Caveat-Regular"
+        case .patrickHand:
+            "PatrickHand-Regular"
+        case .gloriaHallelujah:
+            "GloriaHallelujah"
+        case .handlee:
+            "Handlee-Regular"
+        case .permanentMarker:
+            "PermanentMarker-Regular"
+        case .specialElite:
+            "SpecialElite-Regular"
+        case .amaticSC:
+            "AmaticSC-Regular"
+        }
+    }
+
+    static func savedValue(_ rawValue: String?) -> CreateFontChoice {
+        guard let rawValue else {
+            return .sans
+        }
+
+        switch rawValue {
+        case "handwritten":
+            return .patrickHand
+        case "typewriter":
+            return .specialElite
+        default:
+            return CreateFontChoice(rawValue: rawValue) ?? .nunito
+        }
+    }
+
+    func swiftUIFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        guard let fontName else {
+            return .system(size: size, weight: weight, design: design)
+        }
+
+        return .custom(fontName, size: size).weight(weight)
     }
 }
 
@@ -115,6 +189,10 @@ fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
 
     var showsPaperColorOptions: Bool {
         backgroundImageName == nil
+    }
+
+    var usesTexturedPaperTextEffect: Bool {
+        backgroundImageName != nil
     }
 
     var backgroundImageName: String? {
@@ -246,6 +324,7 @@ struct CreateEntryView: View {
         return NotebookTextStyle(
             swiftUIDesign: selectedFontChoice.design,
             uiKitDesign: selectedFontChoice.uiKitDesign,
+            customFontName: selectedFontChoice.fontName,
             bodyFontSize: CGFloat(14 + previewTextSize * 8),
             color: textColor.color,
             uiColor: textColor.uiColor
@@ -563,6 +642,7 @@ struct CreateEntryView: View {
                         showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
                         leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
+                        usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                         onBodyTap: {
                             isTitleFocused = false
                             editorFocusRequestID += 1
@@ -796,7 +876,7 @@ struct CreateEntryView: View {
         storyDate = draft.date
         savesDraft = draft.savesDraft
         isPrivateEntry = draft.isPrivate
-        selectedFontChoice = draft.fontChoiceRawValue.flatMap(CreateFontChoice.init(rawValue:)) ?? .sans
+        selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
         selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         previewTextSize = min(max(draft.textSize ?? 0.36, 0), 1)
         selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
@@ -843,6 +923,7 @@ struct CreateEntryView: View {
                         showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
                         leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
+                        usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -2307,6 +2388,7 @@ struct ExpandedEntryEditor: View {
                         showsTitleRule: showsNotebookChrome,
                         leadingContentPadding: leadingContentPadding,
                         leadingTextPadding: leadingTextPadding,
+                        usesTexturedPaperEffect: paperImageName != nil,
                         onBodyTap: {
                             isTitleFocused = false
                             editorFocusRequestID += 1
@@ -2520,14 +2602,14 @@ private struct CreateFormattingSheet: View {
 
             HStack(spacing: 14) {
                 Text("A")
-                    .font(.system(size: 18, weight: .bold, design: selectedFont.design))
+                    .font(selectedFont.swiftUIFont(size: 18, weight: .bold))
                     .foregroundStyle(Color.storyInk.opacity(0.82))
 
                 Slider(value: $previewTextSize, in: 0...1)
                     .tint(Color.storyPurple)
 
                 Text("A")
-                    .font(.system(size: 34, weight: .bold, design: selectedFont.design))
+                    .font(selectedFont.swiftUIFont(size: 34, weight: .bold))
                     .foregroundStyle(Color.storyInk.opacity(0.82))
             }
 
@@ -2591,7 +2673,7 @@ private struct CreateFormattingSheet: View {
 
     private var formattingPreview: some View {
         Text("The little story found its voice on the page, one careful sentence at a time.")
-            .font(.system(size: selectedPreviewFontSize, weight: .medium, design: selectedFont.design))
+            .font(selectedFont.swiftUIFont(size: selectedPreviewFontSize, weight: .medium))
             .foregroundStyle(selectedTextColor)
             .lineSpacing(4)
             .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
@@ -2664,7 +2746,7 @@ private struct CreateFontOptionCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Text("Aa")
-                .font(.system(size: 27, weight: .semibold, design: font.design))
+                .font(font.swiftUIFont(size: 27, weight: .semibold))
                 .foregroundStyle(Color.storyInk.opacity(0.9))
 
             Text(font.title)
