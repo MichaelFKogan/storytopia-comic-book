@@ -81,12 +81,12 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
     }
 }
 
-private enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
+fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
     case collegeRuled
-    case wideRuled
-    case narrowRuled
-    case grid
-    case dotted
+    case blank
+    case watercolorPaper
+    case cottonPaper
+    case recycledPaper
 
     var id: String { rawValue }
 
@@ -94,14 +94,57 @@ private enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
         switch self {
         case .collegeRuled:
             "College Ruled"
-        case .wideRuled:
-            "Wide Ruled"
-        case .narrowRuled:
-            "Narrow Ruled"
-        case .grid:
-            "Grid"
-        case .dotted:
-            "Dotted"
+        case .blank:
+            "Blank"
+        case .watercolorPaper:
+            "Watercolor Paper"
+        case .cottonPaper:
+            "Cotton Paper"
+        case .recycledPaper:
+            "Recycled Paper"
+        }
+    }
+
+    var showsRuledLines: Bool {
+        self == .collegeRuled
+    }
+
+    var showsNotebookChrome: Bool {
+        self == .collegeRuled
+    }
+
+    var showsPaperColorOptions: Bool {
+        backgroundImageName == nil
+    }
+
+    var backgroundImageName: String? {
+        switch self {
+        case .watercolorPaper:
+            "watercolor-paper"
+        case .cottonPaper:
+            "cotton-paper"
+        case .recycledPaper:
+            "recycled-paper"
+        case .collegeRuled, .blank:
+            nil
+        }
+    }
+
+    var leadingContentPadding: CGFloat {
+        switch self {
+        case .collegeRuled:
+            NotebookMetrics.marginLeading
+        case .blank, .watercolorPaper, .cottonPaper, .recycledPaper:
+            18
+        }
+    }
+
+    var leadingTextPadding: CGFloat {
+        switch self {
+        case .collegeRuled:
+            NotebookMetrics.textLeadingInset
+        case .blank, .watercolorPaper, .cottonPaper, .recycledPaper:
+            0
         }
     }
 }
@@ -158,7 +201,7 @@ struct CreateEntryView: View {
     @State private var isShowingExitConfirmation = false
     @State private var isGeneratingStoryboard = false
     @State private var generationErrorMessage: String?
-    @State private var isShowingExpandedEditor = false
+    @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
     @State private var isShowingFormattingSheet = false
     @State private var isShowingJournalDestinationSheet = false
@@ -181,10 +224,12 @@ struct CreateEntryView: View {
     @GestureState private var exitDragOffset: CGFloat = 0
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
+    @State private var editorBlurRequestID = 0
     @State private var isKeyboardVisible = false
 
     private func dismissKeyboard() {
         isTitleFocused = false
+        editorBlurRequestID += 1
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
@@ -213,10 +258,22 @@ struct CreateEntryView: View {
         ]
     }
 
+    private var selectedPageBackgroundColor: Color {
+        selectedPaperStyleChoice.showsPaperColorOptions ? selectedPaperColor : .homePageBackground
+    }
+
+    private var selectedPaperSurfaceColor: Color {
+        usesPaperImageBackground ? .clear : selectedPageBackgroundColor
+    }
+
+    private var usesPaperImageBackground: Bool {
+        selectedPaperStyleChoice.backgroundImageName != nil
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.homePageBackground
+                pageBackground
                     .ignoresSafeArea()
                     .onTapGesture {
                         dismissKeyboard()
@@ -226,14 +283,6 @@ struct CreateEntryView: View {
             }
             .navigationDestination(isPresented: $isShowingEntryOptionsPage) {
                 entryOptionsPage
-            }
-            .navigationDestination(isPresented: $isShowingExpandedEditor) {
-                ExpandedEntryEditor(
-                    entryText: $entryText,
-                    storyTitle: $storyTitle,
-                    textStyle: selectedTextStyle,
-                    paperColor: selectedPaperColor
-                )
             }
         }
         .offset(x: exitDragOffset)
@@ -264,6 +313,7 @@ struct CreateEntryView: View {
             )
             .presentationDetents([.height(430), .large])
             .presentationDragIndicator(.hidden)
+            .presentationBackground(Color.homePageBackground)
         }
         .sheet(isPresented: $isShowingJournalDestinationSheet) {
             AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
@@ -428,18 +478,33 @@ struct CreateEntryView: View {
 
     private var layoutPage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            createEntryContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(pageTapBackground)
+            if isFullScreenEditorVisible {
+                fullScreenEditorContent
+            } else {
+                createEntryContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(pageTapBackground)
+            }
         }
-        .background(selectedPaperColor)
+        .background(selectedPaperSurfaceColor)
+        .overlay(alignment: .bottomTrailing) {
+            if !isKeyboardVisible {
+                editorFloatingToolStack
+                    .padding(.trailing, 31)
+                    .padding(.bottom, editorFloatingToolBottomPadding)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            createToolbarItems(title: "Write Entry", showsCloseButton: true)
+            if !isFullScreenEditorVisible {
+                createToolbarItems(title: "Write Entry", showsCloseButton: true)
+            }
         }
-        .toolbarBackground(selectedPaperColor, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar(isFullScreenEditorVisible ? .hidden : .visible, for: .navigationBar)
+        .toolbarBackground(usesPaperImageBackground ? .hidden : .visible, for: .navigationBar)
+        .toolbarBackground(selectedPageBackgroundColor, for: .navigationBar)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            KeyboardCornerRadiusRemover.removeKeyboardCornerRadius()
             withAnimation(.snappy(duration: 0.22)) {
                 isKeyboardVisible = true
             }
@@ -469,12 +534,104 @@ struct CreateEntryView: View {
         .toolbarBackground(.visible, for: .navigationBar)
     }
 
+    private var fullScreenEditorContent: some View {
+        GeometryReader { proxy in
+            let scrollContentHeight = editorScrollContentHeight(for: proxy.size.height)
+
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    NotebookPaperBackground(
+                        paperColor: selectedPaperSurfaceColor,
+                        paperImageName: selectedPaperStyleChoice.backgroundImageName,
+                        showsPaperWash: false,
+                        showsRuledLines: selectedPaperStyleChoice.showsRuledLines,
+                        showsNotebookChrome: selectedPaperStyleChoice.showsNotebookChrome,
+                        firstRuledLineY: NotebookMetrics.firstNotebookRuleY
+                    )
+                    .frame(maxWidth: .infinity, minHeight: scrollContentHeight, maxHeight: .infinity)
+
+                    NotebookEditorContent(
+                        storyTitle: $storyTitle,
+                        entryText: $entryText,
+                        isTitleFocused: $isTitleFocused,
+                        editorFocusRequestID: editorFocusRequestID,
+                        editorBlurRequestID: editorBlurRequestID,
+                        bodyPlaceholder: "Start writing...",
+                        scrollsInternally: false,
+                        pageHeight: scrollContentHeight,
+                        textStyle: selectedTextStyle,
+                        showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
+                        leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
+                        leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
+                        onBodyTap: {
+                            isTitleFocused = false
+                            editorFocusRequestID += 1
+                        },
+                        onTitleSubmit: {
+                            editorFocusRequestID += 1
+                        }
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: scrollContentHeight)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(selectedPaperSurfaceColor)
+            .notebookPageChrome()
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isKeyboardVisible {
+                    fullScreenKeyboardBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
+        }
+        .background(selectedPaperSurfaceColor)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var fullScreenKeyboardBar: some View {
+        HStack {
+            Spacer()
+
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    isFullScreenEditorVisible = false
+                }
+            } label: {
+                editorFloatingToolIcon {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show Create controls")
+        }
+        .padding(.horizontal, 31)
+        .padding(.vertical, 8)
+    }
+
     private var pageTapBackground: some View {
-        Color.homePageBackground
+        Color.homePageBackground.opacity(usesPaperImageBackground ? 0 : 1)
             .contentShape(Rectangle())
             .onTapGesture {
                 dismissKeyboard()
             }
+    }
+
+    @ViewBuilder
+    private var pageBackground: some View {
+        if let paperImageName = selectedPaperStyleChoice.backgroundImageName {
+            GeometryReader { proxy in
+                Image(paperImageName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+        } else {
+            Color.homePageBackground
+        }
     }
 
     @ToolbarContentBuilder
@@ -575,6 +732,7 @@ struct CreateEntryView: View {
                 fontChoiceRawValue: selectedFontChoice.rawValue,
                 textColorIndex: selectedTextColorIndex,
                 textSize: previewTextSize,
+                paperStyleRawValue: selectedPaperStyleChoice.rawValue,
                 paperColorIndex: selectedPaperColorIndex
             )
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
@@ -641,6 +799,7 @@ struct CreateEntryView: View {
         selectedFontChoice = draft.fontChoiceRawValue.flatMap(CreateFontChoice.init(rawValue:)) ?? .sans
         selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         previewTextSize = min(max(draft.textSize ?? 0.36, 0), 1)
+        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
         selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
     }
 
@@ -657,14 +816,16 @@ struct CreateEntryView: View {
 
     private var entryDraftStepContent: some View {
         GeometryReader { proxy in
-            let scrollContentHeight = proxy.size.height * 2
+            let scrollContentHeight = editorScrollContentHeight(for: proxy.size.height)
 
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     NotebookPaperBackground(
-                        paperColor: selectedPaperColor,
+                        paperColor: selectedPaperSurfaceColor,
+                        paperImageName: selectedPaperStyleChoice.backgroundImageName,
                         showsPaperWash: false,
-                        showsRuledLines: true,
+                        showsRuledLines: selectedPaperStyleChoice.showsRuledLines,
+                        showsNotebookChrome: selectedPaperStyleChoice.showsNotebookChrome,
                         firstRuledLineY: NotebookMetrics.firstNotebookRuleY
                     )
                     .frame(maxWidth: .infinity, minHeight: scrollContentHeight, maxHeight: .infinity)
@@ -674,10 +835,14 @@ struct CreateEntryView: View {
                         entryText: $entryText,
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
+                        editorBlurRequestID: editorBlurRequestID,
                         bodyPlaceholder: "Start writing...",
                         scrollsInternally: false,
                         pageHeight: scrollContentHeight,
                         textStyle: selectedTextStyle,
+                        showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
+                        leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
+                        leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -697,18 +862,21 @@ struct CreateEntryView: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .overlay(alignment: .bottomTrailing) {
-                editorFloatingToolStack
-                    .padding(.trailing, 31)
-                    .padding(.bottom, editorFloatingToolBottomPadding)
-            }
             .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
             .animation(.snappy(duration: 0.22), value: hasStoryboardPhotos)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func editorScrollContentHeight(for visibleHeight: CGFloat) -> CGFloat {
+        max(visibleHeight, UIScreen.main.bounds.height) * 2
+    }
+
     private var editorFloatingToolBottomPadding: CGFloat {
+        if isFullScreenEditorVisible {
+            return 24
+        }
+
         if isKeyboardVisible {
             return 68
         }
@@ -726,38 +894,58 @@ struct CreateEntryView: View {
     }
 
     private var entryDraftKeyboardBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismissKeyboard()
-            } label: {
-                Image(systemName: "keyboard.chevron.compact.down")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.storyInk.opacity(0.72))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                keyboardToolButton(
+                    systemName: "keyboard.chevron.compact.down",
+                    accessibilityLabel: "Close keyboard",
+                    action: dismissKeyboard
+                )
+
+                keyboardPhotoButton
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close keyboard")
 
-            keyboardPhotoTray
+            Spacer(minLength: 0)
 
-            Spacer(minLength: 4)
-
-            Button {
-                showEntryOptionsPage()
-            } label: {
-                HStack(spacing: 5) {
-                    Text("Next")
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .bold))
+            HStack(spacing: 2) {
+                keyboardToolButton(
+                    systemName: isFullScreenEditorVisible ? "arrow.down.right.and.arrow.up.left" : "viewfinder",
+                    accessibilityLabel: isFullScreenEditorVisible ? "Show Create controls" : "Show full screen editor"
+                ) {
+                    dismissKeyboard()
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isFullScreenEditorVisible.toggle()
+                    }
                 }
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color.storyPurple)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 10)
+
+                keyboardToolButton(systemName: "textformat", accessibilityLabel: "Font options") {
+                    dismissKeyboard()
+                    selectedFormattingTab = .fontStyle
+                    isShowingFormattingSheet = true
+                }
+
+                keyboardToolButton(systemName: "doc", accessibilityLabel: "Paper style options") {
+                    dismissKeyboard()
+                    selectedFormattingTab = .paperStyle
+                    isShowingFormattingSheet = true
+                }
+
+                Button {
+                    showEntryOptionsPage()
+                } label: {
+                    HStack(spacing: 5) {
+                        Text("Next")
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Next")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Next")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -770,62 +958,61 @@ struct CreateEntryView: View {
         }
     }
 
-    private var keyboardPhotoTray: some View {
-        let photos = storyboardPhotos.compactMap { $0 }
-
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(Array(photos.prefix(5).enumerated()), id: \.offset) { index, image in
-                    Button {
-                        dismissKeyboard()
-                    } label: {
-                        KeyboardPhotoThumbnail(image: image)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Show reference photo \(index + 1)")
-                }
-
-                if photos.count > 5 {
-                    KeyboardPhotoOverflowBadge(count: photos.count - 5)
-                }
-
-                if nextAvailablePhotoSlot != nil {
-                    Button {
-                        dismissKeyboard()
-                        selectedPhotoSlot = nextAvailablePhotoSlot
-                        isShowingPhotoSourceDialog = true
-                    } label: {
-                        KeyboardPhotoAddButton(hasPhotos: !photos.isEmpty)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Add reference photos")
-                }
-            }
-            .padding(.horizontal, 1)
-            .padding(.vertical, 4)
+    private func keyboardToolButton(
+        systemName: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.72))
+                .frame(width: 34, height: 44)
+                .contentShape(Rectangle())
         }
-        .frame(maxWidth: 230, alignment: .leading)
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var keyboardPhotoButton: some View {
+        Button {
+            dismissKeyboard()
+            selectedPhotoSlot = nextAvailablePhotoSlot
+            isShowingPhotoSourceDialog = true
+        } label: {
+            KeyboardPhotoAddButton(hasPhotos: hasStoryboardPhotos)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add reference photos")
+        .disabled(nextAvailablePhotoSlot == nil)
+        .opacity(nextAvailablePhotoSlot == nil ? 0.42 : 1)
     }
 
     private var editorFloatingToolStack: some View {
         VStack(spacing: 10) {
             expandEditorButton
-            fontEditorButton
+
+            if !isFullScreenEditorVisible {
+                fontEditorButton
+                paperStyleButton
+            }
         }
     }
 
     private var expandEditorButton: some View {
         Button {
             dismissKeyboard()
-            isShowingExpandedEditor = true
+            withAnimation(.snappy(duration: 0.22)) {
+                isFullScreenEditorVisible.toggle()
+            }
         } label: {
             editorFloatingToolIcon {
-                Image(systemName: "viewfinder")
+                Image(systemName: isFullScreenEditorVisible ? "arrow.down.right.and.arrow.up.left" : "viewfinder")
                     .font(.system(size: 17, weight: .semibold))
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Expand to full page")
+        .accessibilityLabel(isFullScreenEditorVisible ? "Show Create controls" : "Show full screen editor")
     }
 
     private var fontEditorButton: some View {
@@ -841,6 +1028,21 @@ struct CreateEntryView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Font options")
+    }
+
+    private var paperStyleButton: some View {
+        Button {
+            dismissKeyboard()
+            selectedFormattingTab = .paperStyle
+            isShowingFormattingSheet = true
+        } label: {
+            editorFloatingToolIcon {
+                Image(systemName: "doc")
+                    .font(.system(size: 18, weight: .semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Paper style options")
     }
 
     private func editorFloatingToolIcon<Content: View>(
@@ -2003,14 +2205,81 @@ private enum AddToJournalTab: CaseIterable, Identifiable {
     }
 }
 
+private enum KeyboardCornerRadiusRemover {
+    static func removeKeyboardCornerRadius() {
+        DispatchQueue.main.async {
+            removeKeyboardCornerRadius(in: UIApplication.shared.connectedScenes)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            removeKeyboardCornerRadius(in: UIApplication.shared.connectedScenes)
+        }
+    }
+
+    private static func removeKeyboardCornerRadius(in scenes: Set<UIScene>) {
+        scenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .forEach { window in
+                removeKeyboardCornerRadius(from: window)
+            }
+    }
+
+    private static func removeKeyboardCornerRadius(from view: UIView) {
+        let className = NSStringFromClass(type(of: view))
+
+        if className.contains("UIInputSet") || className.contains("UIKeyboard") {
+            view.layer.cornerRadius = 0
+            view.layer.maskedCorners = []
+        }
+
+        view.subviews.forEach(removeKeyboardCornerRadius(from:))
+    }
+}
+
 struct ExpandedEntryEditor: View {
     @Binding var entryText: String
     @Binding var storyTitle: String
     var textStyle: NotebookTextStyle = .default
     var paperColor: Color = .homePageBackground
+    private var paperImageName: String?
+    private var showsRuledLines = true
+    private var showsNotebookChrome = true
+    private var leadingContentPadding = NotebookMetrics.marginLeading
+    private var leadingTextPadding = NotebookMetrics.textLeadingInset
 
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
+
+    init(
+        entryText: Binding<String>,
+        storyTitle: Binding<String>,
+        textStyle: NotebookTextStyle = .default,
+        paperColor: Color = .homePageBackground
+    ) {
+        self._entryText = entryText
+        self._storyTitle = storyTitle
+        self.textStyle = textStyle
+        self.paperColor = paperColor
+    }
+
+    fileprivate init(
+        entryText: Binding<String>,
+        storyTitle: Binding<String>,
+        textStyle: NotebookTextStyle = .default,
+        paperColor: Color = .homePageBackground,
+        paperStyle: CreatePaperStyleChoice
+    ) {
+        self._entryText = entryText
+        self._storyTitle = storyTitle
+        self.textStyle = textStyle
+        self.paperColor = paperColor
+        self.paperImageName = paperStyle.backgroundImageName
+        self.showsRuledLines = paperStyle.showsRuledLines
+        self.showsNotebookChrome = paperStyle.showsNotebookChrome
+        self.leadingContentPadding = paperStyle.leadingContentPadding
+        self.leadingTextPadding = paperStyle.leadingTextPadding
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -2018,8 +2287,10 @@ struct ExpandedEntryEditor: View {
                 ZStack(alignment: .topLeading) {
                     NotebookPaperBackground(
                         paperColor: paperColor,
+                        paperImageName: paperImageName,
                         showsPaperWash: false,
-                        showsRuledLines: true,
+                        showsRuledLines: showsRuledLines,
+                        showsNotebookChrome: showsNotebookChrome,
                         firstRuledLineY: NotebookMetrics.firstNotebookRuleY
                     )
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height, maxHeight: .infinity)
@@ -2033,6 +2304,9 @@ struct ExpandedEntryEditor: View {
                         scrollsInternally: false,
                         pageHeight: proxy.size.height,
                         textStyle: textStyle,
+                        showsTitleRule: showsNotebookChrome,
+                        leadingContentPadding: leadingContentPadding,
+                        leadingTextPadding: leadingTextPadding,
                         onBodyTap: {
                             isTitleFocused = false
                             editorFocusRequestID += 1
@@ -2075,14 +2349,24 @@ struct ExpandedEntryEditor: View {
 
 struct NotebookPaperBackground: View {
     var paperColor = Color.homePageBackground
+    var paperImageName: String?
     var showsPaperWash = true
     var showsRuledLines = true
+    var showsNotebookChrome = true
     var firstRuledLineY: CGFloat = 135
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
-                paperColor
+                if let paperImageName {
+                    Image(paperImageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                } else {
+                    paperColor
+                }
 
                 if showsPaperWash {
                     LinearGradient(
@@ -2100,14 +2384,16 @@ struct NotebookPaperBackground: View {
                     ruledLines(in: proxy.size)
                 }
 
-                Rectangle()
-                    .fill(Color.storyRose.opacity(0.52))
-                    .frame(width: 1.2)
-                    .padding(.leading, NotebookMetrics.marginLeading)
+                if showsNotebookChrome {
+                    Rectangle()
+                        .fill(Color.storyRose.opacity(0.52))
+                        .frame(width: 1.2)
+                        .padding(.leading, NotebookMetrics.marginLeading)
 
-                pageHoles
-                    .padding(.leading, 20)
-                    .padding(.top, 92)
+                    pageHoles
+                        .padding(.leading, 20)
+                        .padding(.top, 92)
+                }
             }
         }
     }
@@ -2153,6 +2439,12 @@ private struct CreateFormattingSheet: View {
         CreateFormattingPalette.textColors[
             min(max(selectedTextColorIndex, 0), CreateFormattingPalette.textColors.count - 1)
         ].color
+    }
+
+    private var selectedPaperColor: Color {
+        CreateFormattingPalette.paperColors[
+            min(max(selectedPaperColorIndex, 0), CreateFormattingPalette.paperColors.count - 1)
+        ]
     }
 
     private var selectedPreviewFontSize: CGFloat {
@@ -2252,17 +2544,7 @@ private struct CreateFormattingSheet: View {
                 .overlay(Color.storyBorder.opacity(0.42))
 
             sheetSectionTitle("Preview")
-            Text("The little story found its voice on the page, one careful sentence at a time.")
-                .font(.system(size: selectedPreviewFontSize, weight: .medium, design: selectedFont.design))
-                .foregroundStyle(selectedTextColor)
-                .lineSpacing(4)
-                .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
-                .padding(16)
-                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.storyBorder.opacity(0.56), lineWidth: 1)
-                )
+            formattingPreview
         }
     }
 
@@ -2288,15 +2570,41 @@ private struct CreateFormattingSheet: View {
                 .padding(.vertical, 1)
             }
 
-            sheetSectionTitle("Paper Color")
-            CreateColorSwatchRow(
-                colors: CreateFormattingPalette.paperColors,
-                selectedIndex: $selectedPaperColorIndex,
-                selectedCheckColor: Color.storyPurple,
-                emphasizedBorderIndex: 1,
-                showsMoreButton: false
-            )
+            if selectedPaperStyle.showsPaperColorOptions {
+                sheetSectionTitle("Paper Color")
+                CreateColorSwatchRow(
+                    colors: CreateFormattingPalette.paperColors,
+                    selectedIndex: $selectedPaperColorIndex,
+                    selectedCheckColor: Color.storyPurple,
+                    emphasizedBorderIndex: 1,
+                    showsMoreButton: false
+                )
+            }
+
+            Divider()
+                .overlay(Color.storyBorder.opacity(0.42))
+
+            sheetSectionTitle("Preview")
+            formattingPreview
         }
+    }
+
+    private var formattingPreview: some View {
+        Text("The little story found its voice on the page, one careful sentence at a time.")
+            .font(.system(size: selectedPreviewFontSize, weight: .medium, design: selectedFont.design))
+            .foregroundStyle(selectedTextColor)
+            .lineSpacing(4)
+            .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+            .padding(16)
+            .background {
+                CreatePaperPreview(style: selectedPaperStyle, paperColor: selectedPaperColor, ruledLineCount: 5)
+                    .allowsHitTesting(false)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.56), lineWidth: 1)
+            )
     }
 
     private func sheetSectionTitle(_ title: String) -> some View {
@@ -2422,6 +2730,7 @@ private struct CreatePaperStyleOption: View {
 private struct CreatePaperPreview: View {
     let style: CreatePaperStyleChoice
     let paperColor: Color
+    var ruledLineCount = 7
 
     var body: some View {
         GeometryReader { proxy in
@@ -2430,16 +2739,18 @@ private struct CreatePaperPreview: View {
 
                 switch style {
                 case .collegeRuled:
-                    ruledLines(count: 7, in: proxy.size)
+                    ruledLines(count: ruledLineCount, in: proxy.size)
                     marginLine(in: proxy.size)
-                case .wideRuled:
-                    ruledLines(count: 4, in: proxy.size)
-                case .narrowRuled:
-                    ruledLines(count: 10, in: proxy.size)
-                case .grid:
-                    gridLines(in: proxy.size)
-                case .dotted:
-                    dottedPattern(in: proxy.size)
+                case .blank:
+                    EmptyView()
+                case .watercolorPaper, .cottonPaper, .recycledPaper:
+                    if let backgroundImageName = style.backgroundImageName {
+                        Image(backgroundImageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                    }
                 }
             }
         }
@@ -2461,38 +2772,6 @@ private struct CreatePaperPreview: View {
             .offset(x: size.width * 0.18)
     }
 
-    private func gridLines(in size: CGSize) -> some View {
-        ZStack {
-            ForEach(1...5, id: \.self) { index in
-                Rectangle()
-                    .fill(Color.blue.opacity(0.16))
-                    .frame(width: 1)
-                    .offset(x: CGFloat(index) * size.width / 6 - size.width / 2)
-            }
-
-            ForEach(1...5, id: \.self) { index in
-                Rectangle()
-                    .fill(Color.blue.opacity(0.16))
-                    .frame(height: 1)
-                    .offset(y: CGFloat(index) * size.height / 6 - size.height / 2)
-            }
-        }
-    }
-
-    private func dottedPattern(in size: CGSize) -> some View {
-        VStack(spacing: 10) {
-            ForEach(0..<6, id: \.self) { _ in
-                HStack(spacing: 10) {
-                    ForEach(0..<6, id: \.self) { _ in
-                        Circle()
-                            .fill(Color.storyInk.opacity(0.13))
-                            .frame(width: 2, height: 2)
-                    }
-                }
-            }
-        }
-        .frame(width: size.width, height: size.height)
-    }
 }
 
 private struct CreateColorSwatchRow: View {
@@ -2734,8 +3013,8 @@ struct KeyboardPhotoAddButton: View {
     let hasPhotos: Bool
 
     var body: some View {
-        Image(systemName: hasPhotos ? "plus" : "photo.badge.plus")
-            .font(.system(size: hasPhotos ? 16 : 17, weight: .semibold))
+        Image(systemName: "photo.on.rectangle.angled")
+            .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(Color.storyInk.opacity(0.72))
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())

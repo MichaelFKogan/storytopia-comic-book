@@ -145,6 +145,7 @@ struct CreateEntryDraft: Identifiable {
     let fontChoiceRawValue: String?
     let textColorIndex: Int?
     let textSize: Double?
+    let paperStyleRawValue: String?
     let paperColorIndex: Int?
     let createdAt: Date
     let updatedAt: Date
@@ -190,6 +191,7 @@ enum CreateEntryDraftStore {
         fontChoiceRawValue: String? = nil,
         textColorIndex: Int? = nil,
         textSize: Double? = nil,
+        paperStyleRawValue: String? = nil,
         paperColorIndex: Int? = nil
     ) -> UUID? {
         let draftID = id ?? UUID()
@@ -232,6 +234,7 @@ enum CreateEntryDraftStore {
                 fontChoiceRawValue: fontChoiceRawValue,
                 textColorIndex: textColorIndex,
                 textSize: textSize,
+                paperStyleRawValue: paperStyleRawValue,
                 paperColorIndex: paperColorIndex,
                 createdAt: existingDraft?.createdAt ?? now,
                 updatedAt: now
@@ -282,6 +285,7 @@ enum CreateEntryDraftStore {
             fontChoiceRawValue: metadata.fontChoiceRawValue,
             textColorIndex: metadata.textColorIndex,
             textSize: metadata.textSize,
+            paperStyleRawValue: metadata.paperStyleRawValue,
             paperColorIndex: metadata.paperColorIndex,
             createdAt: metadata.createdAt ?? Date(),
             updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date()
@@ -309,6 +313,7 @@ enum CreateEntryDraftStore {
             fontChoiceRawValue: legacyDraft.fontChoiceRawValue,
             textColorIndex: legacyDraft.textColorIndex,
             textSize: legacyDraft.textSize,
+            paperStyleRawValue: legacyDraft.paperStyleRawValue,
             paperColorIndex: legacyDraft.paperColorIndex
         )
         try? FileManager.default.removeItem(at: legacyDraftDirectory)
@@ -342,6 +347,7 @@ private struct CreateEntryDraftMetadata: Codable {
     let fontChoiceRawValue: String?
     let textColorIndex: Int?
     let textSize: Double?
+    let paperStyleRawValue: String?
     let paperColorIndex: Int?
     let createdAt: Date?
     let updatedAt: Date?

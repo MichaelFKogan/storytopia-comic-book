@@ -124,6 +124,11 @@ final class LinedTextView: UITextView {
             applyTextStyle()
         }
     }
+    var textLeadingInset = NotebookMetrics.textLeadingInset {
+        didSet {
+            applyTextContainerInset()
+        }
+    }
     var drawsRuledLines = true
     var scrollsInternally = true {
         didSet {
@@ -143,18 +148,22 @@ final class LinedTextView: UITextView {
 
     private func configureNotebookAppearance() {
         backgroundColor = .clear
-        textContainerInset = UIEdgeInsets(
-            top: 0,
-            left: NotebookMetrics.textLeadingInset,
-            bottom: 0,
-            right: 0
-        )
+        applyTextContainerInset()
         textContainer.lineFragmentPadding = 0
         applyTextStyle()
         returnKeyType = .default
         showsHorizontalScrollIndicator = false
         keyboardDismissMode = .interactive
         applyScrollBehavior()
+    }
+
+    private func applyTextContainerInset() {
+        textContainerInset = UIEdgeInsets(
+            top: 0,
+            left: textLeadingInset,
+            bottom: 0,
+            right: 0
+        )
     }
 
     private func applyTextStyle() {
@@ -280,11 +289,13 @@ final class LinedTextView: UITextView {
 struct LinedTextEditor: UIViewRepresentable {
     @Binding var text: String
     var focusRequestID: Int = 0
+    var blurRequestID: Int = 0
     var scrollsInternally: Bool = true
     var drawsRuledLines: Bool? = nil
     var minimumHeight: CGFloat = NotebookMetrics.minimumBodyHeight
     var tintUIColor: UIColor = .systemBlue
     var textStyle: NotebookTextStyle = .default
+    var textLeadingInset = NotebookMetrics.textLeadingInset
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally
@@ -301,6 +312,7 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.tintColor = tintUIColor
         textView.notebookTextStyle = textStyle
+        textView.textLeadingInset = textLeadingInset
         textView.setNotebookText(text)
         context.coordinator.onTextChange = { newText in
             text = newText
@@ -326,6 +338,10 @@ struct LinedTextEditor: UIViewRepresentable {
             textView.notebookTextStyle = textStyle
         }
 
+        if textView.textLeadingInset != textLeadingInset {
+            textView.textLeadingInset = textLeadingInset
+        }
+
         if !coordinator.isUpdatingFromTextView, textView.text != text {
             textView.setNotebookText(text)
         }
@@ -334,6 +350,13 @@ struct LinedTextEditor: UIViewRepresentable {
             coordinator.handledFocusRequestID = focusRequestID
             DispatchQueue.main.async {
                 textView.becomeFirstResponder()
+            }
+        }
+
+        if blurRequestID != coordinator.handledBlurRequestID {
+            coordinator.handledBlurRequestID = blurRequestID
+            DispatchQueue.main.async {
+                textView.resignFirstResponder()
             }
         }
     }
@@ -358,6 +381,7 @@ struct LinedTextEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var isUpdatingFromTextView = false
         var handledFocusRequestID = 0
+        var handledBlurRequestID = 0
         var onTextChange: ((String) -> Void)?
 
         func textViewDidChange(_ textView: UITextView) {
@@ -390,10 +414,14 @@ struct NotebookEditorContent: View {
     @Binding var entryText: String
     @FocusState.Binding var isTitleFocused: Bool
     var editorFocusRequestID: Int
+    var editorBlurRequestID: Int = 0
     var bodyPlaceholder: String
     var scrollsInternally: Bool = true
     var pageHeight: CGFloat?
     var textStyle: NotebookTextStyle = .default
+    var showsTitleRule = true
+    var leadingContentPadding = NotebookMetrics.marginLeading
+    var leadingTextPadding = NotebookMetrics.textLeadingInset
     var onBodyTap: (() -> Void)? = nil
     var onTitleSubmit: () -> Void
 
@@ -410,7 +438,7 @@ struct NotebookEditorContent: View {
             titleRow
             bodyEditor
         }
-        .padding(.leading, NotebookMetrics.marginLeading)
+        .padding(.leading, leadingContentPadding)
         .padding(.trailing, 18)
         .padding(.top, NotebookMetrics.contentTopPadding)
         .padding(.bottom, NotebookMetrics.contentBottomPadding)
@@ -421,9 +449,11 @@ struct NotebookEditorContent: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
 
-                Rectangle()
-                    .fill(NotebookMetrics.ruleColor)
-                    .frame(height: 1)
+                if showsTitleRule {
+                    Rectangle()
+                        .fill(NotebookMetrics.ruleColor)
+                        .frame(height: 1)
+                }
             }
 
             TextField(
@@ -437,7 +467,7 @@ struct NotebookEditorContent: View {
             .focused($isTitleFocused)
             .textFieldStyle(.plain)
             .submitLabel(.next)
-            .padding(.leading, NotebookMetrics.textLeadingInset)
+            .padding(.leading, leadingTextPadding)
             .padding(.top, NotebookMetrics.titleLineTextTopInset)
             .onSubmit(onTitleSubmit)
         }
@@ -450,11 +480,12 @@ struct NotebookEditorContent: View {
             LinedTextEditor(
                 text: $entryText,
                 focusRequestID: editorFocusRequestID,
+                blurRequestID: editorBlurRequestID,
                 scrollsInternally: scrollsInternally,
                 drawsRuledLines: false,
                 minimumHeight: bodyMinHeight,
-                tintUIColor: textStyle.uiColor,
-                textStyle: textStyle
+                textStyle: textStyle,
+                textLeadingInset: leadingTextPadding
             )
             .padding(.bottom, 28)
 
@@ -462,7 +493,7 @@ struct NotebookEditorContent: View {
                 Text(bodyPlaceholder)
                     .font(NotebookMetrics.bodyPlaceholderFont(for: textStyle))
                     .foregroundStyle(Color.storyGray.opacity(0.46))
-                    .padding(.leading, NotebookMetrics.textLeadingInset)
+                    .padding(.leading, leadingTextPadding)
                     .padding(.top, NotebookMetrics.firstLineTextTopInset)
                     .allowsHitTesting(false)
             }
