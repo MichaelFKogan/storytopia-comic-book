@@ -40,7 +40,13 @@ enum NotebookMetrics {
 
     static func titleFont(for style: NotebookTextStyle) -> Font {
         if let customFontName = style.customFontName {
-            return .custom(customFontName, size: style.titleFontSize).weight(.bold)
+            return VariableFont.font(
+                name: customFontName,
+                size: style.titleFontSize,
+                weight: .bold,
+                usesWeightAxis: style.customFontUsesVariableWeight,
+                wghtOverride: style.customFontWght.map { max($0, 700) }
+            )
         }
 
         return .system(size: style.titleFontSize, weight: .bold, design: style.swiftUIDesign)
@@ -48,7 +54,13 @@ enum NotebookMetrics {
 
     static func bodyPlaceholderFont(for style: NotebookTextStyle) -> Font {
         if let customFontName = style.customFontName {
-            return .custom(customFontName, size: style.bodyFontSize)
+            return VariableFont.font(
+                name: customFontName,
+                size: style.scaledBodyFontSize,
+                weight: style.customFontWeight,
+                usesWeightAxis: style.customFontUsesVariableWeight,
+                wghtOverride: style.customFontWght
+            )
         }
 
         return .system(size: style.bodyFontSize, weight: .regular, design: style.swiftUIDesign)
@@ -56,7 +68,13 @@ enum NotebookMetrics {
 
     static func uiBodyFont(for style: NotebookTextStyle) -> UIFont {
         if let customFontName = style.customFontName,
-           let customFont = UIFont(name: customFontName, size: style.bodyFontSize) {
+           let customFont = VariableFont.uiFont(
+               name: customFontName,
+               size: style.scaledBodyFontSize,
+               weight: style.customFontWeight,
+               usesWeightAxis: style.customFontUsesVariableWeight,
+               wghtOverride: style.customFontWght
+           ) {
             return customFont
         }
 
@@ -123,14 +141,22 @@ struct NotebookTextStyle: Equatable {
     var swiftUIDesign: Font.Design = .serif
     var uiKitDesign: UIFontDescriptor.SystemDesign = .serif
     var customFontName: String?
+    var customFontWeight: Font.Weight = .regular
+    var customFontWght: CGFloat?
+    var customFontUsesVariableWeight: Bool = false
+    var customFontSizeScale: CGFloat = 1
     var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
     var color: Color = Color(NotebookMetrics.bodyTextUIColor)
     var uiColor: UIColor = NotebookMetrics.bodyTextUIColor
 
     static let `default` = NotebookTextStyle()
 
+    var scaledBodyFontSize: CGFloat {
+        bodyFontSize * customFontSizeScale
+    }
+
     var titleFontSize: CGFloat {
-        bodyFontSize + 4
+        scaledBodyFontSize + 4
     }
 }
 

@@ -4,11 +4,9 @@
 <dict>
 	<key>UIAppFonts</key>
 	<array>
-		<string>AmaticSC-Regular.ttf</string>
 		<string>Caveat-VariableFont_wght.ttf</string>
 		<string>CrimsonPro-VariableFont_wght.ttf</string>
 		<string>GloriaHallelujah-Regular.ttf</string>
-		<string>Handlee-Regular.ttf</string>
 		<string>Lora-VariableFont_wght.ttf</string>
 		<string>Nunito-VariableFont_wght.ttf</string>
 		<string>PatrickHand-Regular.ttf</string>

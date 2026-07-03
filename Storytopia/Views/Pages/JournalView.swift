@@ -14,6 +14,7 @@ struct JournalView: View {
     @State private var editMode: EditMode = .inactive
     @State private var journalBeingRenamed: PrototypeChapter?
     @State private var renamedJournalTitle = ""
+    @State private var selectedJournalTab: JournalContentTab = .journals
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -36,12 +37,19 @@ struct JournalView: View {
                     header
                         .padding(.horizontal, 16)
 
-                    if showsPrototypeData {
+                    journalTabSwitcher
+                        .padding(.horizontal, 16)
+
+                    if selectedJournalTab == .journals && showsPrototypeData {
                         prototypeNotice
                             .padding(.horizontal, 16)
                     }
 
-                    chapterList
+                    if selectedJournalTab == .journals {
+                        chapterList
+                    } else {
+                        savedDraftList
+                    }
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
@@ -51,9 +59,13 @@ struct JournalView: View {
             .environment(\.editMode, $editMode)
         }
         .onAppear {
-            savedDrafts = CreateEntryDraftStore.loadAll()
+            refreshSavedDrafts()
             chapters = DailyJournalData.allChapters()
-            isDraftSaved = !savedDrafts.isEmpty
+        }
+        .onChange(of: selectedPage) { newPage in
+            if newPage != .create {
+                refreshSavedDrafts()
+            }
         }
         .preferredColorScheme(.light)
         .alert("Rename Journal", isPresented: isRenameAlertPresented) {
@@ -125,94 +137,48 @@ struct JournalView: View {
         )
     }
 
-    private var savedDraftsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .lastTextBaseline) {
-                Text("Saved Drafts")
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer()
-
-                if !savedDrafts.isEmpty {
-                    NavigationLink {
-                        SavedDraftsView(
-                            selectedPage: $selectedPage,
-                            activeDraftID: $activeDraftID
-                        )
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("View All")
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .bold))
-                        }
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.homeAccent)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            if let mostRecentDraft {
-                savedDraftCard(mostRecentDraft)
-            } else if !savedDrafts.isEmpty {
-                noDraftSearchResults
-            } else {
-                noSavedDrafts
-            }
+    private var journalTabSwitcher: some View {
+        HStack(spacing: 4) {
+            journalTabButton(.journals)
+            journalTabButton(.drafts)
         }
-        .padding(.top, 2)
+        .padding(4)
+        .frame(height: 42)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
-    private func savedDraftCard(_ draft: CreateEntryDraft) -> some View {
-        Button {
-            activeDraftID = draft.id
-            selectedPage = .create
-        } label: {
-            HStack(spacing: 12) {
-                draftThumbnail(draft)
+    private func journalTabButton(_ tab: JournalContentTab) -> some View {
+        let isSelected = selectedJournalTab == tab
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(draftDisplayTitle(draft))
-                        .font(.system(size: 15, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
-                        .lineLimit(1)
-
-                    Text(draftPreviewText(draft))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.storyInk.opacity(0.66))
-                        .lineLimit(2)
-
-                    HStack(spacing: 5) {
-                        Image(systemName: "pencil.line")
-                        Text("Continue writing")
-
-                        if !draft.photos.isEmpty {
-                            Text("•")
-                            Image(systemName: "photo")
-                            Text("\(draft.photos.count)")
-                        }
-                    }
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.homeAccent)
-                }
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.homeMutedText.opacity(0.52))
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedJournalTab = tab
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.homeBorder, lineWidth: 1)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: tab.systemImage)
+                    .font(.system(size: 13, weight: .bold))
+
+                Text(tab.title)
+                    .font(.system(size: 13, weight: .bold))
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.homeMutedText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                Group {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.storyInk)
+                    }
+                }
             )
-            .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func deleteDraft(_ draft: CreateEntryDraft) {
@@ -224,24 +190,9 @@ struct JournalView: View {
         isDraftSaved = !savedDrafts.isEmpty
     }
 
-    @ViewBuilder
-    private func draftThumbnail(_ draft: CreateEntryDraft) -> some View {
-        if let image = draft.photos.first {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 58, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.homeAccent.opacity(0.1))
-                .frame(width: 58, height: 70)
-                .overlay {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color.homeAccent)
-                }
-        }
+    private func refreshSavedDrafts() {
+        savedDrafts = CreateEntryDraftStore.loadAll()
+        isDraftSaved = !savedDrafts.isEmpty
     }
 
     private var noSavedDrafts: some View {
@@ -281,27 +232,12 @@ struct JournalView: View {
         return trimmedTitle.isEmpty ? "Untitled Draft" : trimmedTitle
     }
 
-    private func draftPreviewText(_ draft: CreateEntryDraft) -> String {
-        let trimmedText = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedText.isEmpty {
-            return trimmedText
-        }
-        if !draft.photos.isEmpty {
-            return draft.photos.count == 1 ? "1 reference photo" : "\(draft.photos.count) reference photos"
-        }
-        return "Draft ready to continue"
-    }
-
     private var filteredDrafts: [CreateEntryDraft] {
         savedDrafts.filter { draft in
             searchText.isEmpty
                 || draftDisplayTitle(draft).localizedCaseInsensitiveContains(searchText)
                 || draft.text.localizedCaseInsensitiveContains(searchText)
         }
-    }
-
-    private var mostRecentDraft: CreateEntryDraft? {
-        filteredDrafts.first
     }
 
     private var prototypeNotice: some View {
@@ -375,6 +311,42 @@ struct JournalView: View {
         }
     }
 
+    private var savedDraftList: some View {
+        List {
+            Section {
+                if filteredDrafts.isEmpty {
+                    if savedDrafts.isEmpty {
+                        noSavedDrafts
+                    } else {
+                        noDraftSearchResults
+                    }
+                } else {
+                    draftRows
+                }
+            } header: {
+                HStack(alignment: .lastTextBaseline) {
+                    Text("Saved Drafts")
+                        .font(.system(size: 19, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                        .textCase(nil)
+
+                    Spacer()
+
+                    Text("\(filteredDrafts.count) \(filteredDrafts.count == 1 ? "draft" : "drafts")")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 76)
+        }
+    }
+
     private var journalRows: some View {
         ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
             NavigationLink {
@@ -400,6 +372,39 @@ struct JournalView: View {
         }
         .onDelete(perform: deleteChapters)
         .onMove(perform: moveChapters)
+    }
+
+    private var draftRows: some View {
+        ForEach(filteredDrafts) { draft in
+            Button {
+                activeDraftID = draft.id
+                selectedPage = .create
+            } label: {
+                SavedDraftListRow(draft: draft)
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(
+                top: 0,
+                leading: JournalChapterListMetrics.horizontalInset,
+                bottom: 0,
+                trailing: JournalChapterListMetrics.trailingInset
+            ))
+            .listRowBackground(Color.homePageBackground)
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    deleteDraft(draft)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+        .onDelete(perform: deleteDrafts)
+    }
+
+    private func deleteDrafts(at offsets: IndexSet) {
+        offsets
+            .map { filteredDrafts[$0] }
+            .forEach(deleteDraft)
     }
 
     private var isRenameAlertPresented: Binding<Bool> {
@@ -3484,119 +3489,156 @@ private struct DailyJournalDaySummary: Identifiable {
 
 private struct SavedDraftsView: View {
     @Binding var selectedPage: StoryPage
+    @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
     @State private var drafts: [CreateEntryDraft] = []
     @State private var searchText = ""
-    @State private var isEditingDrafts = false
-    @State private var selectedDraftIDs: Set<UUID> = []
-    @State private var isConfirmingSelectedDeletion = false
+    @State private var editMode: EditMode = .inactive
+    @State private var draftBeingRenamed: CreateEntryDraft?
+    @State private var renamedDraftTitle = ""
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.storyCream, .white, Color.storyBlush],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+        ZStack(alignment: .bottom) {
+            Color.homePageBackground
+                .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .lastTextBaseline) {
-                        Text("Saved Drafts")
-                            .font(.system(size: 28, weight: .bold, design: .serif))
-                            .foregroundStyle(Color.storyInk)
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                    .padding(.horizontal, 16)
 
-                        Spacer()
+                draftSearchField
+                    .padding(.horizontal, 16)
 
-                        Text("\(drafts.count) \(drafts.count == 1 ? "draft" : "drafts")")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.storyGray)
-                    }
-
-                    draftSearchField
-
-                    if filteredDrafts.isEmpty {
-                        emptyDraftsState
-                    } else {
-                        LazyVStack(spacing: 10) {
-                            ForEach(filteredDrafts) { draft in
-                                Button {
-                                    if isEditingDrafts {
-                                        toggleSelection(draft.id)
-                                    } else {
-                                        activeDraftID = draft.id
-                                        selectedPage = .create
-                                    }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        if isEditingDrafts {
-                                            Image(systemName: selectedDraftIDs.contains(draft.id) ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 22, weight: .semibold))
-                                                .foregroundStyle(
-                                                    selectedDraftIDs.contains(draft.id)
-                                                        ? Color.storyPurple
-                                                        : Color.storyGray.opacity(0.55)
-                                                )
-                                        }
-
-                                        SavedDraftRow(draft: draft)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 30)
+                draftList
             }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(Color.storyCream, for: .navigationBar)
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 14) {
-                    if isEditingDrafts {
-                        Button(role: .destructive) {
-                            isConfirmingSelectedDeletion = true
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .disabled(selectedDraftIDs.isEmpty)
-                    }
+                EditButton()
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.homeAccent)
+            }
+        }
+        .environment(\.editMode, $editMode)
+        .onAppear(perform: refreshDrafts)
+        .onChange(of: selectedPage) { newPage in
+            if newPage != .create {
+                refreshDrafts()
+            }
+        }
+        .onChange(of: activeDraftID) { newDraftID in
+            if newDraftID == nil && selectedPage != .create {
+                refreshDrafts()
+            }
+        }
+        .preferredColorScheme(.light)
+        .alert("Rename Draft", isPresented: isRenameDraftAlertPresented) {
+            TextField("Draft name", text: $renamedDraftTitle)
 
-                    Button(isEditingDrafts ? "Done" : "Edit") {
-                        isEditingDrafts.toggle()
-                        if !isEditingDrafts {
-                            selectedDraftIDs.removeAll()
-                        }
-                    }
+            Button("Cancel", role: .cancel) {
+                draftBeingRenamed = nil
+                renamedDraftTitle = ""
+            }
+
+            Button("Save") {
+                renameSelectedDraft()
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 14) {
+            Text("Saved Drafts")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            Text("\(drafts.count) \(drafts.count == 1 ? "draft" : "drafts")")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+        }
+        .padding(.top, 12)
+    }
+
+    private var draftList: some View {
+        List {
+            Section {
+                if filteredDrafts.isEmpty {
+                    emptyDraftsState
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } else {
+                    draftRows
+                }
+            } header: {
+                HStack(alignment: .lastTextBaseline) {
+                    Text("Your Drafts")
+                        .font(.system(size: 19, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                        .textCase(nil)
+
+                    Spacer()
+
+                    Text("\(filteredDrafts.count) \(filteredDrafts.count == 1 ? "draft" : "drafts")")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .textCase(nil)
                 }
             }
         }
-        .onAppear {
-            drafts = CreateEntryDraftStore.loadAll()
-        }
-        .alert("Delete Selected Drafts?", isPresented: $isConfirmingSelectedDeletion) {
-            Button("Delete", role: .destructive) {
-                deleteSelectedDrafts()
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.homePageBackground)
+    }
+
+    private var draftRows: some View {
+        ForEach(filteredDrafts) { draft in
+            Button {
+                activeDraftID = draft.id
+                selectedPage = .create
+            } label: {
+                SavedDraftListRow(draft: draft)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("\(selectedDraftIDs.count) selected \(selectedDraftIDs.count == 1 ? "draft" : "drafts") will be permanently deleted.")
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(
+                top: 0,
+                leading: JournalChapterListMetrics.horizontalInset,
+                bottom: 0,
+                trailing: JournalChapterListMetrics.trailingInset
+            ))
+            .listRowBackground(Color.homePageBackground)
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button {
+                    beginRenaming(draft)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(Color.homeAccent)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    deleteDraft(draft)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         }
+        .onDelete(perform: deleteDrafts)
+        .onMove(perform: moveDrafts)
     }
 
     private var draftSearchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.storyGray.opacity(0.76))
+                .foregroundStyle(Color.homeMutedText.opacity(0.76))
 
             TextField("Search drafts...", text: $searchText)
                 .font(.system(size: 14, weight: .medium))
@@ -3607,17 +3649,17 @@ private struct SavedDraftsView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.storyGray.opacity(0.5))
+                        .foregroundStyle(Color.homeMutedText.opacity(0.5))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 42)
-        .background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(height: 39)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.48), lineWidth: 1)
+                .stroke(Color.homeBorder, lineWidth: 1)
         )
     }
 
@@ -3625,7 +3667,7 @@ private struct SavedDraftsView: View {
         VStack(spacing: 10) {
             Image(systemName: searchText.isEmpty ? "doc.badge.plus" : "text.magnifyingglass")
                 .font(.system(size: 30))
-                .foregroundStyle(Color.storyPurple.opacity(0.65))
+                .foregroundStyle(Color.homeAccent.opacity(0.65))
 
             Text(searchText.isEmpty ? "No saved drafts" : "No matching drafts")
                 .font(.system(size: 16, weight: .bold))
@@ -3633,11 +3675,15 @@ private struct SavedDraftsView: View {
 
             Text(searchText.isEmpty ? "Drafts you save will appear here." : "Try another search.")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.storyGray)
+                .foregroundStyle(Color.homeMutedText)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
-        .background(Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 38)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
     private var filteredDrafts: [CreateEntryDraft] {
@@ -3649,96 +3695,137 @@ private struct SavedDraftsView: View {
         }
     }
 
+    private func deleteDrafts(at offsets: IndexSet) {
+        offsets
+            .map { filteredDrafts[$0] }
+            .forEach(deleteDraft)
+    }
+
     private func deleteDraft(_ draft: CreateEntryDraft) {
         CreateEntryDraftStore.delete(id: draft.id)
         drafts.removeAll { $0.id == draft.id }
         if activeDraftID == draft.id {
             activeDraftID = nil
         }
+        isDraftSaved = !drafts.isEmpty
     }
 
-    private func toggleSelection(_ draftID: UUID) {
-        if selectedDraftIDs.contains(draftID) {
-            selectedDraftIDs.remove(draftID)
-        } else {
-            selectedDraftIDs.insert(draftID)
+    private var isRenameDraftAlertPresented: Binding<Bool> {
+        Binding(
+            get: { draftBeingRenamed != nil },
+            set: { isPresented in
+                if !isPresented {
+                    draftBeingRenamed = nil
+                    renamedDraftTitle = ""
+                }
+            }
+        )
+    }
+
+    private func beginRenaming(_ draft: CreateEntryDraft) {
+        draftBeingRenamed = draft
+        renamedDraftTitle = draftDisplayTitle(draft)
+    }
+
+    private func renameSelectedDraft() {
+        guard let draft = draftBeingRenamed else {
+            return
         }
+
+        let trimmedTitle = renamedDraftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return
+        }
+
+        let renamedID = CreateEntryDraftStore.save(
+            id: draft.id,
+            title: trimmedTitle,
+            text: draft.text,
+            photos: draft.photos,
+            artStyle: draft.artStyle,
+            location: draft.location,
+            date: draft.date,
+            savesDraft: draft.savesDraft,
+            isPrivate: draft.isPrivate,
+            fontChoiceRawValue: draft.fontChoiceRawValue,
+            textColorIndex: draft.textColorIndex,
+            textSize: draft.textSize,
+            paperStyleRawValue: draft.paperStyleRawValue,
+            paperColorIndex: draft.paperColorIndex
+        )
+
+        if renamedID != nil {
+            refreshDrafts()
+        }
+
+        draftBeingRenamed = nil
+        renamedDraftTitle = ""
     }
 
-    private func deleteSelectedDrafts() {
-        drafts
-            .filter { selectedDraftIDs.contains($0.id) }
-            .forEach(deleteDraft)
-        selectedDraftIDs.removeAll()
-        isEditingDrafts = false
+    private func moveDrafts(from source: IndexSet, to destination: Int) {
+        guard searchText.isEmpty else {
+            return
+        }
+
+        drafts.move(fromOffsets: source, toOffset: destination)
+    }
+
+    private func refreshDrafts() {
+        drafts = CreateEntryDraftStore.loadAll()
+        isDraftSaved = !drafts.isEmpty
     }
 }
 
-private struct SavedDraftRow: View {
+private struct SavedDraftListRow: View {
     let draft: CreateEntryDraft
 
     var body: some View {
-        HStack(spacing: 12) {
-            thumbnail
+        HStack(spacing: 10) {
+            draftIcon
+                .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(draftDisplayTitle(draft))
-                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Color.storyInk)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.78)
 
-                Text(draftPreviewText(draft))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.storyInk.opacity(0.66))
-                    .lineLimit(2)
-
-                HStack(spacing: 5) {
-                    Text("Edited \(draft.updatedAt.formatted(date: .abbreviated, time: .omitted))")
-
-                    if !draft.photos.isEmpty {
-                        Text("•")
-                        Image(systemName: "photo")
-                        Text("\(draft.photos.count)")
-                    }
-                }
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Color.storyPurple)
+                Text("Edited \(draft.updatedAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(Color.homeMutedText)
+                    .lineLimit(1)
             }
+            .layoutPriority(1)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 8)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyGray.opacity(0.52))
+            Text(draftDetailText)
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.storyPurple.opacity(0.22), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
+        .frame(height: JournalChapterListMetrics.rowHeight)
+        .accessibilityLabel(draftDisplayTitle(draft))
     }
 
-    @ViewBuilder
-    private var thumbnail: some View {
-        if let image = draft.photos.first {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 58, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.storyLavender.opacity(0.72))
-                .frame(width: 58, height: 70)
-                .overlay {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color.storyPurple)
-                }
+    private var draftIcon: some View {
+        Image(systemName: "doc.text")
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(Color.homeAccent)
+        .frame(
+            width: JournalChapterListMetrics.coverWidth,
+            height: JournalChapterListMetrics.coverHeight
+        )
+    }
+
+    private var draftDetailText: String {
+        if !draft.photos.isEmpty {
+            return "\(draft.photos.count) \(draft.photos.count == 1 ? "photo" : "photos")"
         }
+
+        return "draft"
     }
 }
 
@@ -3747,15 +3834,27 @@ private func draftDisplayTitle(_ draft: CreateEntryDraft) -> String {
     return trimmedTitle.isEmpty ? "Untitled Draft" : trimmedTitle
 }
 
-private func draftPreviewText(_ draft: CreateEntryDraft) -> String {
-    let trimmedText = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !trimmedText.isEmpty {
-        return trimmedText
+private enum JournalContentTab {
+    case journals
+    case drafts
+
+    var title: String {
+        switch self {
+        case .journals:
+            return "Journals"
+        case .drafts:
+            return "Saved Drafts"
+        }
     }
-    if !draft.photos.isEmpty {
-        return draft.photos.count == 1 ? "1 reference photo" : "\(draft.photos.count) reference photos"
+
+    var systemImage: String {
+        switch self {
+        case .journals:
+            return "books.vertical"
+        case .drafts:
+            return "doc.text"
+        }
     }
-    return "Draft ready to continue"
 }
 
 private enum JournalChapterListMetrics {
@@ -3772,11 +3871,16 @@ private struct JournalChapterListRow: View {
     var body: some View {
         HStack(spacing: 10) {
             JournalListCover(
-                color: chapter.color,
+                color: Color.homeAccent.opacity(0.82),
                 imageName: nil,
                 width: JournalChapterListMetrics.coverWidth,
                 height: JournalChapterListMetrics.coverHeight
             )
+            .overlay {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
             .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
             VStack(alignment: .leading, spacing: 2) {

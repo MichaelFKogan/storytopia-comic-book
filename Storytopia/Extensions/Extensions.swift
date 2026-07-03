@@ -1,6 +1,102 @@
+import CoreText
 import Foundation
 import SwiftUI
 import UIKit
+
+enum VariableFont {
+    private static let wghtAxisTag = NSNumber(value: Int(0x77676874)) // 'wght'
+
+    static func wghtValue(for weight: Font.Weight) -> CGFloat {
+        switch weight {
+        case .ultraLight:
+            100
+        case .thin:
+            200
+        case .light:
+            300
+        case .regular:
+            400
+        case .medium:
+            500
+        case .semibold:
+            600
+        case .bold:
+            700
+        case .heavy:
+            800
+        case .black:
+            900
+        default:
+            400
+        }
+    }
+
+    private static func resolvedWght(weight: Font.Weight, override: CGFloat?) -> CGFloat {
+        override ?? wghtValue(for: weight)
+    }
+
+    private static func resolvedFontName(_ name: String, size: CGFloat) -> String? {
+        if UIFont(name: name, size: size) != nil {
+            return name
+        }
+
+        if name == "Nunito", UIFont(name: "Nunito-ExtraLight", size: size) != nil {
+            return "Nunito-ExtraLight"
+        }
+
+        return nil
+    }
+
+    private static func variationAttributes(for wght: CGFloat) -> [UIFontDescriptor.AttributeName: Any] {
+        [
+            UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): [
+                "wght": wght,
+                wghtAxisTag: wght
+            ]
+        ]
+    }
+
+    static func uiFont(
+        name: String,
+        size: CGFloat,
+        weight: Font.Weight,
+        usesWeightAxis: Bool,
+        wghtOverride: CGFloat? = nil
+    ) -> UIFont? {
+        guard let resolvedName = resolvedFontName(name, size: size) else {
+            return nil
+        }
+
+        if usesWeightAxis {
+            let wght = resolvedWght(weight: weight, override: wghtOverride)
+            let baseDescriptor = UIFontDescriptor(name: resolvedName, size: size)
+            let descriptor = baseDescriptor.addingAttributes(variationAttributes(for: wght))
+            return UIFont(descriptor: descriptor, size: size)
+        }
+
+        return UIFont(name: resolvedName, size: size)
+    }
+
+    static func font(
+        name: String,
+        size: CGFloat,
+        weight: Font.Weight,
+        usesWeightAxis: Bool,
+        wghtOverride: CGFloat? = nil
+    ) -> Font {
+        guard let uiFont = uiFont(
+            name: name,
+            size: size,
+            weight: weight,
+            usesWeightAxis: usesWeightAxis,
+            wghtOverride: wghtOverride
+        ) else {
+            return .system(size: size, weight: weight)
+        }
+
+        return Font(uiFont)
+    }
+}
 
 extension Data {
     mutating func appendMultipartField(name: String, value: String, boundary: String) {

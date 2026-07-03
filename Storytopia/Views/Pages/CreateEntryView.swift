@@ -42,10 +42,8 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
     case caveat
     case patrickHand
     case gloriaHallelujah
-    case handlee
     case permanentMarker
     case specialElite
-    case amaticSC
 
     var id: String { rawValue }
 
@@ -67,14 +65,10 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             "Patrick Hand"
         case .gloriaHallelujah:
             "Gloria"
-        case .handlee:
-            "Handlee"
         case .permanentMarker:
             "Marker"
         case .specialElite:
             "Typewriter"
-        case .amaticSC:
-            "Amatic SC"
         }
     }
 
@@ -84,7 +78,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             .serif
         case .sans, .nunito:
             .default
-        case .caveat, .patrickHand, .gloriaHallelujah, .handlee, .permanentMarker, .amaticSC:
+        case .caveat, .patrickHand, .gloriaHallelujah, .permanentMarker:
             .rounded
         case .specialElite:
             .monospaced
@@ -97,7 +91,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             .serif
         case .sans, .nunito:
             .default
-        case .caveat, .patrickHand, .gloriaHallelujah, .handlee, .permanentMarker, .amaticSC:
+        case .caveat, .patrickHand, .gloriaHallelujah, .permanentMarker:
             .rounded
         case .specialElite:
             .monospaced
@@ -109,7 +103,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
         case .sans, .serif:
             nil
         case .nunito:
-            "Nunito-ExtraLight"
+            "Nunito"
         case .lora:
             "Lora-Regular"
         case .crimsonPro:
@@ -120,14 +114,58 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             "PatrickHand-Regular"
         case .gloriaHallelujah:
             "GloriaHallelujah"
-        case .handlee:
-            "Handlee-Regular"
         case .permanentMarker:
             "PermanentMarker-Regular"
         case .specialElite:
             "SpecialElite-Regular"
-        case .amaticSC:
-            "AmaticSC-Regular"
+        }
+    }
+
+    var usesVariableWeight: Bool {
+        switch self {
+        case .nunito, .lora, .crimsonPro, .caveat:
+            true
+        default:
+            false
+        }
+    }
+
+    var bodyWeight: Font.Weight {
+        switch self {
+        case .nunito, .lora, .caveat:
+            .bold
+        case .crimsonPro:
+            .semibold
+        case .patrickHand, .gloriaHallelujah, .permanentMarker, .specialElite:
+            .regular
+        default:
+            .medium
+        }
+    }
+
+    /// Direct wght-axis values for variable fonts that need tuning beyond `bodyWeight`.
+    var bodyWght: CGFloat? {
+        switch self {
+        case .nunito:
+            700
+        case .caveat:
+            700
+        default:
+            nil
+        }
+    }
+
+    /// Compensates for fonts that render smaller at the same point size.
+    var bodySizeScale: CGFloat {
+        switch self {
+        case .crimsonPro:
+            1.18
+        case .patrickHand:
+            1.18
+        case .caveat:
+            1.28
+        default:
+            1
         }
     }
 
@@ -151,7 +189,26 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             return .system(size: size, weight: weight, design: design)
         }
 
-        return .custom(fontName, size: size).weight(weight)
+        return VariableFont.font(
+            name: fontName,
+            size: size,
+            weight: weight,
+            usesWeightAxis: usesVariableWeight
+        )
+    }
+
+    func swiftUIBodyFont(size: CGFloat) -> Font {
+        guard let fontName else {
+            return .system(size: size * bodySizeScale, weight: bodyWeight, design: design)
+        }
+
+        return VariableFont.font(
+            name: fontName,
+            size: size * bodySizeScale,
+            weight: bodyWeight,
+            usesWeightAxis: usesVariableWeight,
+            wghtOverride: bodyWght
+        )
     }
 }
 
@@ -325,6 +382,10 @@ struct CreateEntryView: View {
             swiftUIDesign: selectedFontChoice.design,
             uiKitDesign: selectedFontChoice.uiKitDesign,
             customFontName: selectedFontChoice.fontName,
+            customFontWeight: selectedFontChoice.bodyWeight,
+            customFontWght: selectedFontChoice.bodyWght,
+            customFontUsesVariableWeight: selectedFontChoice.usesVariableWeight,
+            customFontSizeScale: selectedFontChoice.bodySizeScale,
             bodyFontSize: CGFloat(14 + previewTextSize * 8),
             color: textColor.color,
             uiColor: textColor.uiColor
@@ -2673,7 +2734,7 @@ private struct CreateFormattingSheet: View {
 
     private var formattingPreview: some View {
         Text("The little story found its voice on the page, one careful sentence at a time.")
-            .font(selectedFont.swiftUIFont(size: selectedPreviewFontSize, weight: .medium))
+            .font(selectedFont.swiftUIBodyFont(size: selectedPreviewFontSize))
             .foregroundStyle(selectedTextColor)
             .lineSpacing(4)
             .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
@@ -2746,7 +2807,7 @@ private struct CreateFontOptionCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Text("Aa")
-                .font(font.swiftUIFont(size: 27, weight: .semibold))
+                .font(font.swiftUIBodyFont(size: 27))
                 .foregroundStyle(Color.storyInk.opacity(0.9))
 
             Text(font.title)
