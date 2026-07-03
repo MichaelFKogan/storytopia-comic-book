@@ -3806,18 +3806,19 @@ private struct SavedDraftListRow: View {
                 .lineLimit(1)
                 .multilineTextAlignment(.trailing)
         }
-        .frame(height: JournalChapterListMetrics.rowHeight)
+        .frame(maxWidth: .infinity, minHeight: JournalChapterListMetrics.rowHeight, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityLabel(draftDisplayTitle(draft))
     }
 
     private var draftIcon: some View {
         Image(systemName: "doc.text")
-            .font(.system(size: 24, weight: .semibold))
-            .foregroundStyle(Color.homeAccent)
-        .frame(
-            width: JournalChapterListMetrics.coverWidth,
-            height: JournalChapterListMetrics.coverHeight
-        )
+            .font(.system(size: 24, weight: .regular))
+            .foregroundStyle(Color.storyInk.opacity(0.72))
+            .frame(
+                width: JournalChapterListMetrics.coverWidth,
+                height: JournalChapterListMetrics.coverHeight
+            )
     }
 
     private var draftDetailText: String {

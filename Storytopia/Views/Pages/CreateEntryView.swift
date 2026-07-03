@@ -8,6 +8,55 @@ private enum CreateEntryDestination {
     case custom
 }
 
+private struct LoadedCreateEntryDraftSnapshot: Equatable {
+    let id: UUID
+    let title: String
+    let text: String
+    let photoIDs: [ObjectIdentifier]
+    let artStyle: String
+    let location: String
+    let date: Date
+    let savesDraft: Bool
+    let isPrivate: Bool
+    let fontChoiceRawValue: String?
+    let textColorIndex: Int
+    let textSize: Double
+    let paperStyleRawValue: String
+    let paperColorIndex: Int
+
+    init(
+        id: UUID,
+        title: String,
+        text: String,
+        photos: [UIImage],
+        artStyle: String,
+        location: String,
+        date: Date,
+        savesDraft: Bool,
+        isPrivate: Bool,
+        fontChoiceRawValue: String?,
+        textColorIndex: Int,
+        textSize: Double,
+        paperStyleRawValue: String,
+        paperColorIndex: Int
+    ) {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.photoIDs = photos.map { ObjectIdentifier($0) }
+        self.artStyle = artStyle
+        self.location = location
+        self.date = date
+        self.savesDraft = savesDraft
+        self.isPrivate = isPrivate
+        self.fontChoiceRawValue = fontChoiceRawValue
+        self.textColorIndex = textColorIndex
+        self.textSize = textSize
+        self.paperStyleRawValue = paperStyleRawValue
+        self.paperColorIndex = paperColorIndex
+    }
+}
+
 private enum CreateFormattingTab: String, CaseIterable, Identifiable {
     case fontStyle
     case paperStyle
@@ -356,6 +405,7 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var isShowingEntryOptionsPage = false
+    @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @GestureState private var exitDragOffset: CGFloat = 0
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
@@ -815,6 +865,14 @@ struct CreateEntryView: View {
         !storyTitle.isEmpty || !entryText.isEmpty || storyboardPhotos.contains { $0 != nil }
     }
 
+    private var hasUnsavedDraftChanges: Bool {
+        guard let loadedDraftSnapshot else {
+            return hasDraftContent
+        }
+
+        return currentDraftSnapshot(id: loadedDraftSnapshot.id) != loadedDraftSnapshot
+    }
+
     private var exitSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 18, coordinateSpace: .local)
             .updating($exitDragOffset) { value, state, _ in
@@ -842,15 +900,18 @@ struct CreateEntryView: View {
     private func requestExit() {
         dismissKeyboard()
 
-        if hasDraftContent {
+        if hasUnsavedDraftChanges {
             isShowingExitConfirmation = true
         } else {
-            dismissToPreviousPage()
+            closeEditorWithoutSaving()
         }
     }
 
-    private func dismissToPreviousPage() {
+    private func closeEditorWithoutSaving() {
         dismissKeyboard()
+        clearEditor()
+        activeDraftID = nil
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         withAnimation(.snappy(duration: 0.32)) {
             dismissCreate()
         }
@@ -913,6 +974,7 @@ struct CreateEntryView: View {
         selectedPaperStyleChoice = .collegeRuled
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
+        loadedDraftSnapshot = nil
     }
 
     private func loadSavedDraftIfNeeded() {
@@ -942,6 +1004,26 @@ struct CreateEntryView: View {
         previewTextSize = min(max(draft.textSize ?? 0.36, 0), 1)
         selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
         selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
+        loadedDraftSnapshot = currentDraftSnapshot(id: draft.id)
+    }
+
+    private func currentDraftSnapshot(id: UUID) -> LoadedCreateEntryDraftSnapshot {
+        LoadedCreateEntryDraftSnapshot(
+            id: id,
+            title: storyTitle,
+            text: entryText,
+            photos: storyboardPhotos.compactMap { $0 },
+            artStyle: selectedArtStyle,
+            location: storyLocation,
+            date: storyDate,
+            savesDraft: savesDraft,
+            isPrivate: isPrivateEntry,
+            fontChoiceRawValue: selectedFontChoice.rawValue,
+            textColorIndex: selectedTextColorIndex,
+            textSize: previewTextSize,
+            paperStyleRawValue: selectedPaperStyleChoice.rawValue,
+            paperColorIndex: selectedPaperColorIndex
+        )
     }
 
     private var createEntryContent: some View {
