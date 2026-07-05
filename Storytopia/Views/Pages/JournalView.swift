@@ -8,6 +8,7 @@ struct JournalView: View {
     @Binding var activeDraftID: UUID?
 
     @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
     @State private var showsPrototypeData = true
     @State private var chapters: [PrototypeChapter]
     @State private var entries: [CreateEntryDraft]
@@ -18,6 +19,8 @@ struct JournalView: View {
     @State private var newJournalTitle = ""
     @State private var selectedJournalTab: JournalContentTab = .entries
     @State private var selectedEntryLayout: JournalEntryLayout = .grid
+    @State private var selectedEntrySort: JournalEntrySort = .newestCreated
+    @State private var entriesPendingDeletion: [CreateEntryDraft] = []
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -44,7 +47,10 @@ struct JournalView: View {
                         .padding(.horizontal, 16)
 
                     if selectedJournalTab == .entries {
-                        entryLayoutSwitcher
+                        searchField
+                            .padding(.horizontal, 16)
+
+                        entryControls
                             .padding(.horizontal, 16)
                     }
 
@@ -57,7 +63,7 @@ struct JournalView: View {
                         if selectedEntryLayout == .list {
                             entryList
                         } else {
-                            entryGridPlaceholder
+                            entryGrid
                         }
                     } else {
                         chapterList
@@ -75,6 +81,7 @@ struct JournalView: View {
             chapters = DailyJournalData.allChapters()
         }
         .onChange(of: selectedPage) { newPage in
+            dismissSearchKeyboard()
             if newPage != .create {
                 refreshEntries()
             }
@@ -103,6 +110,17 @@ struct JournalView: View {
                 createJournal()
             }
         }
+        .alert(deleteEntryAlertTitle, isPresented: isDeleteEntryAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                entriesPendingDeletion = []
+            }
+
+            Button("Delete", role: .destructive) {
+                deletePendingEntries()
+            }
+        } message: {
+            Text(deleteEntryAlertMessage)
+        }
     }
 
     private var header: some View {
@@ -130,6 +148,11 @@ struct JournalView: View {
             .accessibilityLabel(selectedJournalTab == .entries ? "Create a new journal entry" : "Create a new journal")
         }
         .padding(.top, 12)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissSearchKeyboard()
+            }
+        )
     }
 
     private var searchField: some View {
@@ -141,10 +164,16 @@ struct JournalView: View {
             TextField("Search entries...", text: $searchText)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.storyInk)
+                .focused($isSearchFocused)
+                .submitLabel(.search)
+                .onSubmit {
+                    dismissSearchKeyboard()
+                }
 
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
+                    dismissSearchKeyboard()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(Color.homeMutedText.opacity(0.5))
@@ -173,12 +202,18 @@ struct JournalView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.homeBorder, lineWidth: 1)
         )
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissSearchKeyboard()
+            }
+        )
     }
 
     private func journalTabButton(_ tab: JournalContentTab) -> some View {
         let isSelected = selectedJournalTab == tab
 
         return Button {
+            dismissSearchKeyboard()
             withAnimation(.easeInOut(duration: 0.18)) {
                 selectedJournalTab = tab
             }
@@ -205,8 +240,10 @@ struct JournalView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var entryLayoutSwitcher: some View {
+    private var entryControls: some View {
         HStack {
+            entrySortMenu
+
             Spacer()
 
             HStack(spacing: 4) {
@@ -220,13 +257,62 @@ struct JournalView: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .stroke(Color.homeBorder, lineWidth: 1)
             )
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissSearchKeyboard()
+                }
+            )
         }
+    }
+
+    private var entrySortMenu: some View {
+        Menu {
+            ForEach(JournalEntrySort.allCases) { sort in
+                Button {
+                    dismissSearchKeyboard()
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedEntrySort = sort
+                    }
+                } label: {
+                    Label(sort.title, systemImage: selectedEntrySort == sort ? "checkmark" : sort.systemImage)
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: selectedEntrySort.systemImage)
+                    .font(.system(size: 13, weight: .bold))
+
+                Text("Sort")
+                    .font(.system(size: 12, weight: .bold))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.66))
+            }
+            .foregroundStyle(Color.storyInk)
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.homeBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort entries")
+        .accessibilityValue(selectedEntrySort.title)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissSearchKeyboard()
+            }
+        )
     }
 
     private func entryLayoutButton(_ layout: JournalEntryLayout) -> some View {
         let isSelected = selectedEntryLayout == layout
 
         return Button {
+            dismissSearchKeyboard()
             withAnimation(.easeInOut(duration: 0.18)) {
                 selectedEntryLayout = layout
             }
@@ -249,6 +335,47 @@ struct JournalView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private func dismissSearchKeyboard() {
+        isSearchFocused = false
+    }
+
+    private var isDeleteEntryAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !entriesPendingDeletion.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    entriesPendingDeletion = []
+                }
+            }
+        )
+    }
+
+    private var deleteEntryAlertTitle: String {
+        entriesPendingDeletion.count == 1 ? "Delete Entry?" : "Delete Entries?"
+    }
+
+    private var deleteEntryAlertMessage: String {
+        if let entry = entriesPendingDeletion.first, entriesPendingDeletion.count == 1 {
+            return "Are you sure you want to delete \"\(entryDisplayTitle(entry))\"? This can't be undone."
+        }
+
+        return "Are you sure you want to delete these entries? This can't be undone."
+    }
+
+    private func requestDeleteEntry(_ entry: CreateEntryDraft) {
+        entriesPendingDeletion = [entry]
+    }
+
+    private func requestDeleteEntries(_ entries: [CreateEntryDraft]) {
+        entriesPendingDeletion = entries
+    }
+
+    private func deletePendingEntries() {
+        let entriesToDelete = entriesPendingDeletion
+        entriesPendingDeletion = []
+        entriesToDelete.forEach(deleteEntry)
+    }
+
     private func deleteEntry(_ entry: CreateEntryDraft) {
         CreateEntryDraftStore.delete(id: entry.id)
         entries.removeAll { $0.id == entry.id }
@@ -260,6 +387,7 @@ struct JournalView: View {
 
     private func refreshEntries() {
         entries = CreateEntryDraftStore.loadAll()
+        backfillEntryThumbnailsIfNeeded()
         isDraftSaved = !entries.isEmpty
     }
 
@@ -301,10 +429,18 @@ struct JournalView: View {
     }
 
     private var filteredEntries: [CreateEntryDraft] {
-        entries.filter { entry in
+        let matchingEntries = entries.filter { entry in
             searchText.isEmpty
                 || entryDisplayTitle(entry).localizedCaseInsensitiveContains(searchText)
                 || entry.text.localizedCaseInsensitiveContains(searchText)
+        }
+
+        return matchingEntries.sorted { first, second in
+            selectedEntrySort.areInIncreasingOrder(
+                first,
+                second,
+                titleProvider: entryDisplayTitle
+            )
         }
     }
 
@@ -409,18 +545,84 @@ struct JournalView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissSearchKeyboard()
+            }
+        )
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 76)
         }
     }
 
-    private var entryGridPlaceholder: some View {
-        Color.homePageBackground
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 76)
+    private var entryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                entrySectionHeader
+                    .padding(.horizontal, 16)
+
+                if filteredEntries.isEmpty {
+                    if entries.isEmpty {
+                        noEntries
+                    } else {
+                        noEntrySearchResults
+                    }
+                } else {
+                    LazyVGrid(columns: entryGridColumns, spacing: 14) {
+                        ForEach(filteredEntries) { entry in
+                            EntryGridPreviewCard(
+                                entry: entry,
+                                isEditing: editMode == .active,
+                                title: entryDisplayTitle(entry),
+                                onOpen: {
+                                    activeDraftID = entry.id
+                                    selectedPage = .create
+                                },
+                                onDelete: {
+                                    requestDeleteEntry(entry)
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
             }
+            .padding(.top, 4)
+            .padding(.horizontal, filteredEntries.isEmpty ? 16 : 0)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissSearchKeyboard()
+            }
+        )
+        .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 76)
+        }
+    }
+
+    private var entryGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 14),
+            GridItem(.flexible(), spacing: 14)
+        ]
+    }
+
+    private var entrySectionHeader: some View {
+        HStack(alignment: .lastTextBaseline) {
+            Text("Entries")
+                .font(.system(size: 19, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "entry" : "entries")")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+        }
     }
 
     private var journalRows: some View {
@@ -468,7 +670,7 @@ struct JournalView: View {
             .listRowBackground(Color.homePageBackground)
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
-                    deleteEntry(entry)
+                    requestDeleteEntry(entry)
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -478,9 +680,41 @@ struct JournalView: View {
     }
 
     private func deleteEntries(at offsets: IndexSet) {
-        offsets
-            .map { filteredEntries[$0] }
-            .forEach(deleteEntry)
+        requestDeleteEntries(offsets.map { filteredEntries[$0] })
+    }
+
+    private func backfillEntryThumbnailsIfNeeded() {
+        var didCreateThumbnail = false
+
+        for entry in entries where entry.thumbnail == nil {
+            guard
+                let thumbnail = DraftThumbnailRenderer.render(
+                    title: entry.title,
+                    text: entry.text,
+                    photos: entry.photos,
+                    fontChoiceRawValue: entry.fontChoiceRawValue,
+                    textColorIndex: entry.textColorIndex,
+                    textSize: entry.textSize,
+                    paperStyleRawValue: entry.paperStyleRawValue,
+                    paperColorIndex: entry.paperColorIndex,
+                    isBold: entry.isBold,
+                    isItalic: entry.isItalic,
+                    isUnderlined: entry.isUnderlined,
+                    isStrikethrough: entry.isStrikethrough,
+                    isHighlighted: entry.isHighlighted,
+                    textAlignmentRawValue: entry.textAlignmentRawValue
+                )
+            else {
+                continue
+            }
+
+            CreateEntryDraftStore.saveThumbnail(thumbnail, for: entry.id)
+            didCreateThumbnail = true
+        }
+
+        if didCreateThumbnail {
+            entries = CreateEntryDraftStore.loadAll()
+        }
     }
 
     private var isRenameAlertPresented: Binding<Bool> {
@@ -3606,6 +3840,7 @@ private struct EntriesView: View {
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
+    @State private var entriesPendingDeletion: [CreateEntryDraft] = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3657,6 +3892,17 @@ private struct EntriesView: View {
             Button("Save") {
                 renameSelectedEntry()
             }
+        }
+        .alert(deleteEntryAlertTitle, isPresented: isDeleteEntryAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                entriesPendingDeletion = []
+            }
+
+            Button("Delete", role: .destructive) {
+                deletePendingEntries()
+            }
+        } message: {
+            Text(deleteEntryAlertMessage)
         }
     }
 
@@ -3733,7 +3979,7 @@ private struct EntriesView: View {
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
-                    deleteEntry(entry)
+                    requestDeleteEntry(entry)
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -3805,9 +4051,7 @@ private struct EntriesView: View {
     }
 
     private func deleteEntries(at offsets: IndexSet) {
-        offsets
-            .map { filteredEntries[$0] }
-            .forEach(deleteEntry)
+        requestDeleteEntries(offsets.map { filteredEntries[$0] })
     }
 
     private func deleteEntry(_ entry: CreateEntryDraft) {
@@ -3817,6 +4061,43 @@ private struct EntriesView: View {
             activeDraftID = nil
         }
         isDraftSaved = !entries.isEmpty
+    }
+
+    private var isDeleteEntryAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !entriesPendingDeletion.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    entriesPendingDeletion = []
+                }
+            }
+        )
+    }
+
+    private var deleteEntryAlertTitle: String {
+        entriesPendingDeletion.count == 1 ? "Delete Entry?" : "Delete Entries?"
+    }
+
+    private var deleteEntryAlertMessage: String {
+        if let entry = entriesPendingDeletion.first, entriesPendingDeletion.count == 1 {
+            return "Are you sure you want to delete \"\(entryDisplayTitle(entry))\"? This can't be undone."
+        }
+
+        return "Are you sure you want to delete these entries? This can't be undone."
+    }
+
+    private func requestDeleteEntry(_ entry: CreateEntryDraft) {
+        entriesPendingDeletion = [entry]
+    }
+
+    private func requestDeleteEntries(_ entries: [CreateEntryDraft]) {
+        entriesPendingDeletion = entries
+    }
+
+    private func deletePendingEntries() {
+        let entriesToDelete = entriesPendingDeletion
+        entriesPendingDeletion = []
+        entriesToDelete.forEach(deleteEntry)
     }
 
     private var isRenameEntryAlertPresented: Binding<Bool> {
@@ -4007,6 +4288,75 @@ private func entryDisplayTitle(_ entry: CreateEntryDraft) -> String {
     return trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle
 }
 
+private struct EntryGridPreviewCard: View {
+    let entry: CreateEntryDraft
+    let isEditing: Bool
+    let title: String
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            previewImage
+                .aspectRatio(260.0 / 340.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+
+            if isEditing {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(Color.red.opacity(0.92), in: Circle())
+                        .shadow(color: Color.storyInk.opacity(0.16), radius: 5, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel("Delete \(title)")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onOpen()
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    @ViewBuilder
+    private var previewImage: some View {
+        if let thumbnail = entry.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color(red: 0.985, green: 0.978, blue: 0.955)
+
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.08), lineWidth: 1)
+                    .padding(12)
+
+                Image(systemName: "doc.text")
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(Color.storyInk.opacity(0.34))
+            }
+        }
+    }
+}
+
 private enum JournalContentTab {
     case entries
     case journals
@@ -4050,6 +4400,88 @@ private enum JournalEntryLayout {
         case .list:
             return "Show entries as list"
         }
+    }
+}
+
+private enum JournalEntrySort: CaseIterable, Hashable, Identifiable {
+    case newestCreated
+    case recentlyEdited
+    case entryDateNewest
+    case oldestCreated
+    case title
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .newestCreated:
+            return "Newest Created"
+        case .recentlyEdited:
+            return "Recently Edited"
+        case .entryDateNewest:
+            return "Entry Date"
+        case .oldestCreated:
+            return "Oldest Created"
+        case .title:
+            return "Title A-Z"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .newestCreated:
+            return "clock"
+        case .recentlyEdited:
+            return "pencil"
+        case .entryDateNewest:
+            return "calendar"
+        case .oldestCreated:
+            return "arrow.up.arrow.down"
+        case .title:
+            return "textformat"
+        }
+    }
+
+    func areInIncreasingOrder(
+        _ first: CreateEntryDraft,
+        _ second: CreateEntryDraft,
+        titleProvider: (CreateEntryDraft) -> String
+    ) -> Bool {
+        switch self {
+        case .newestCreated:
+            return compare(first, second, by: \.createdAt, descending: true)
+        case .recentlyEdited:
+            return compare(first, second, by: \.updatedAt, descending: true)
+        case .entryDateNewest:
+            return compare(first, second, by: \.date, descending: true)
+        case .oldestCreated:
+            return compare(first, second, by: \.createdAt, descending: false)
+        case .title:
+            let firstTitle = titleProvider(first)
+            let secondTitle = titleProvider(second)
+
+            if firstTitle.localizedCaseInsensitiveCompare(secondTitle) == .orderedSame {
+                return first.createdAt > second.createdAt
+            }
+
+            return firstTitle.localizedCaseInsensitiveCompare(secondTitle) == .orderedAscending
+        }
+    }
+
+    private func compare(
+        _ first: CreateEntryDraft,
+        _ second: CreateEntryDraft,
+        by keyPath: KeyPath<CreateEntryDraft, Date>,
+        descending: Bool
+    ) -> Bool {
+        let firstDate = first[keyPath: keyPath]
+        let secondDate = second[keyPath: keyPath]
+
+        if firstDate == secondDate {
+            return first.title.localizedCaseInsensitiveCompare(second.title) == .orderedAscending
+        }
+
+        return descending ? firstDate > secondDate : firstDate < secondDate
     }
 }
 

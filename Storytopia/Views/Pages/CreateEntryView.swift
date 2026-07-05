@@ -495,58 +495,58 @@ private struct DraftPageThumbnail: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            NotebookPaperBackground(
-                paperColor: paperStyle.backgroundImageName == nil ? paperColor : .homePageBackground,
-                paperImageName: paperStyle.backgroundImageName,
-                showsPaperWash: false,
-                showsRuledLines: paperStyle.showsRuledLines,
-                showsNotebookChrome: paperStyle.showsNotebookChrome,
-                firstRuledLineY: 84
-            )
+        ZStack {
+            Color.homePageBackground
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(displayTitle)
-                    .font(.system(size: 21, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-                    .lineLimit(2)
+            ZStack(alignment: .topLeading) {
+                NotebookPaperBackground(
+                    paperColor: paperStyle.backgroundImageName == nil ? paperColor : .homePageBackground,
+                    paperImageName: paperStyle.backgroundImageName,
+                    showsPaperWash: false,
+                    showsRuledLines: paperStyle.showsRuledLines,
+                    showsNotebookChrome: paperStyle.showsNotebookChrome,
+                    firstRuledLineY: 84
+                )
 
-                if !photos.isEmpty {
-                    HStack(spacing: 7) {
-                        ForEach(Array(photos.enumerated()), id: \.offset) { _, photo in
-                            Image(uiImage: photo)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(height: 74)
-                                .frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(displayTitle)
+                        .font(.system(size: 21, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                        .lineLimit(2)
+
+                    if !photos.isEmpty {
+                        HStack(spacing: 7) {
+                            ForEach(Array(photos.enumerated()), id: \.offset) { _, photo in
+                                Image(uiImage: photo)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 74)
+                                    .frame(maxWidth: .infinity)
+                                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            }
                         }
                     }
-                }
 
-                Text(displayText)
-                    .font(isItalic ? fontChoice.swiftUIBodyFont(size: min(textSize, 19)).italic() : fontChoice.swiftUIBodyFont(size: min(textSize, 19)))
-                    .fontWeight(isBold ? .bold : .regular)
-                    .underline(isUnderlined)
-                    .strikethrough(isStrikethrough)
-                    .foregroundStyle(textColor)
-                    .padding(.horizontal, isHighlighted ? 3 : 0)
-                    .background(isHighlighted ? Color.yellow.opacity(0.26) : Color.clear)
-                    .multilineTextAlignment(textAlignment == .center ? .center : textAlignment == .trailing ? .trailing : .leading)
-                    .lineSpacing(4)
-                    .lineLimit(10)
+                    Text(displayText)
+                        .font(isItalic ? fontChoice.swiftUIBodyFont(size: min(textSize, 19)).italic() : fontChoice.swiftUIBodyFont(size: min(textSize, 19)))
+                        .fontWeight(isBold ? .bold : .regular)
+                        .underline(isUnderlined)
+                        .strikethrough(isStrikethrough)
+                        .foregroundStyle(textColor)
+                        .padding(.horizontal, isHighlighted ? 3 : 0)
+                        .background(isHighlighted ? Color.yellow.opacity(0.26) : Color.clear)
+                        .multilineTextAlignment(textAlignment == .center ? .center : textAlignment == .trailing ? .trailing : .leading)
+                        .lineSpacing(4)
+                        .lineLimit(10)
+                }
+                .padding(.top, 28)
+                .padding(.trailing, 18)
+                .padding(.bottom, 20)
+                .padding(.leading, paperStyle.leadingContentPadding)
             }
-            .padding(.top, 28)
-            .padding(.trailing, 18)
-            .padding(.bottom, 20)
-            .padding(.leading, paperStyle.leadingContentPadding)
+            .background(paperStyle.backgroundImageName == nil ? paperColor : Color.homePageBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .background(paperStyle.backgroundImageName == nil ? paperColor : Color.homePageBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.42), lineWidth: 1)
-        )
     }
 }
 
