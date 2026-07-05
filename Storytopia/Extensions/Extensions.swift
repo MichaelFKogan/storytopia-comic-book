@@ -153,7 +153,7 @@ extension Color {
     static let storyGold = Color(red: 0.95, green: 0.69, blue: 0.34)
     static let storyBorder = Color(red: 0.88, green: 0.80, blue: 0.78)
     static let homePageBackground = Color(red: 0.949, green: 0.949, blue: 0.969)
-    static let homeCardGray = Color(uiColor: .systemGray6)
+    static let homeCardGray = Color(red: 0.965, green: 0.965, blue: 0.982)
     static let homeInputGray = Color(red: 0.92, green: 0.92, blue: 0.94)
     static let homeMutedText = Color(red: 0.43, green: 0.44, blue: 0.54)
     static let homeBorder = Color(red: 0.86, green: 0.87, blue: 0.91)
@@ -180,5 +180,16 @@ private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
 extension View {
     func enableInteractivePopGesture() -> some View {
         background(InteractivePopGestureEnabler())
+    }
+}
+
+extension ToolbarContent {
+    @ToolbarContentBuilder
+    func hideSharedBackgroundIfAvailable() -> some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }

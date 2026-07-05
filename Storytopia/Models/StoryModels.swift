@@ -147,12 +147,20 @@ struct CreateEntryDraft: Identifiable {
     let textSize: Double?
     let paperStyleRawValue: String?
     let paperColorIndex: Int?
+    let isBold: Bool
+    let isItalic: Bool
+    let isUnderlined: Bool
+    let isStrikethrough: Bool
+    let isHighlighted: Bool
+    let textAlignmentRawValue: String
+    let thumbnail: UIImage?
     let createdAt: Date
     let updatedAt: Date
 }
 
 enum CreateEntryDraftStore {
     private static let metadataFileName = "draft.json"
+    private static let thumbnailFileName = "thumbnail.jpg"
 
     static func loadAll() -> [CreateEntryDraft] {
         migrateLegacyDraftIfNeeded()
@@ -169,7 +177,7 @@ enum CreateEntryDraftStore {
 
         return draftURLs
             .compactMap(loadDraft(at:))
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     static func load(id: UUID) -> CreateEntryDraft? {
@@ -192,7 +200,14 @@ enum CreateEntryDraftStore {
         textColorIndex: Int? = nil,
         textSize: Double? = nil,
         paperStyleRawValue: String? = nil,
-        paperColorIndex: Int? = nil
+        paperColorIndex: Int? = nil,
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        isStrikethrough: Bool = false,
+        isHighlighted: Bool = false,
+        textAlignmentRawValue: String = "leading",
+        thumbnail: UIImage? = nil
     ) -> UUID? {
         let draftID = id ?? UUID()
         let draftDirectory = directory(for: draftID)
@@ -220,6 +235,14 @@ enum CreateEntryDraftStore {
                 photoFileNames.append(fileName)
             }
 
+            let thumbnailToSave = thumbnail ?? existingDraft?.thumbnail
+            if let thumbnailData = thumbnailToSave?.jpegData(compressionQuality: 0.86) {
+                try thumbnailData.write(
+                    to: draftDirectory.appendingPathComponent(thumbnailFileName),
+                    options: [.atomic]
+                )
+            }
+
             let now = Date()
             let metadata = CreateEntryDraftMetadata(
                 id: draftID,
@@ -236,6 +259,12 @@ enum CreateEntryDraftStore {
                 textSize: textSize,
                 paperStyleRawValue: paperStyleRawValue,
                 paperColorIndex: paperColorIndex,
+                isBold: isBold,
+                isItalic: isItalic,
+                isUnderlined: isUnderlined,
+                isStrikethrough: isStrikethrough,
+                isHighlighted: isHighlighted,
+                textAlignmentRawValue: textAlignmentRawValue,
                 createdAt: existingDraft?.createdAt ?? now,
                 updatedAt: now
             )
@@ -255,6 +284,17 @@ enum CreateEntryDraftStore {
         try? FileManager.default.removeItem(at: directory(for: id))
     }
 
+    static func saveThumbnail(_ thumbnail: UIImage, for id: UUID) {
+        guard let thumbnailData = thumbnail.jpegData(compressionQuality: 0.86) else {
+            return
+        }
+
+        try? thumbnailData.write(
+            to: directory(for: id).appendingPathComponent(thumbnailFileName),
+            options: [.atomic]
+        )
+    }
+
     private static func loadDraft(at draftDirectory: URL) -> CreateEntryDraft? {
         let metadataURL = draftDirectory.appendingPathComponent(metadataFileName)
         guard
@@ -272,6 +312,9 @@ enum CreateEntryDraftStore {
             return UIImage(data: data)
         }
 
+        let thumbnailURL = draftDirectory.appendingPathComponent(thumbnailFileName)
+        let thumbnail = (try? Data(contentsOf: thumbnailURL)).flatMap(UIImage.init(data:))
+
         return CreateEntryDraft(
             id: metadata.id ?? UUID(),
             title: metadata.title,
@@ -287,6 +330,13 @@ enum CreateEntryDraftStore {
             textSize: metadata.textSize,
             paperStyleRawValue: metadata.paperStyleRawValue,
             paperColorIndex: metadata.paperColorIndex,
+            isBold: metadata.isBold ?? false,
+            isItalic: metadata.isItalic ?? false,
+            isUnderlined: metadata.isUnderlined ?? false,
+            isStrikethrough: metadata.isStrikethrough ?? false,
+            isHighlighted: metadata.isHighlighted ?? false,
+            textAlignmentRawValue: metadata.textAlignmentRawValue ?? "leading",
+            thumbnail: thumbnail,
             createdAt: metadata.createdAt ?? Date(),
             updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date()
         )
@@ -314,7 +364,13 @@ enum CreateEntryDraftStore {
             textColorIndex: legacyDraft.textColorIndex,
             textSize: legacyDraft.textSize,
             paperStyleRawValue: legacyDraft.paperStyleRawValue,
-            paperColorIndex: legacyDraft.paperColorIndex
+            paperColorIndex: legacyDraft.paperColorIndex,
+            isBold: legacyDraft.isBold,
+            isItalic: legacyDraft.isItalic,
+            isUnderlined: legacyDraft.isUnderlined,
+            isStrikethrough: legacyDraft.isStrikethrough,
+            isHighlighted: legacyDraft.isHighlighted,
+            textAlignmentRawValue: legacyDraft.textAlignmentRawValue
         )
         try? FileManager.default.removeItem(at: legacyDraftDirectory)
     }
@@ -349,6 +405,12 @@ private struct CreateEntryDraftMetadata: Codable {
     let textSize: Double?
     let paperStyleRawValue: String?
     let paperColorIndex: Int?
+    let isBold: Bool?
+    let isItalic: Bool?
+    let isUnderlined: Bool?
+    let isStrikethrough: Bool?
+    let isHighlighted: Bool?
+    let textAlignmentRawValue: String?
     let createdAt: Date?
     let updatedAt: Date?
 }

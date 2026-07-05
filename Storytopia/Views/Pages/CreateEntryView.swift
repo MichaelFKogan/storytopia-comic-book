@@ -57,6 +57,58 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     }
 }
 
+private enum CreateTextAlignmentChoice: String, CaseIterable, Identifiable {
+    case leading
+    case center
+    case trailing
+
+    var id: String { rawValue }
+
+    var textAlignment: NSTextAlignment {
+        switch self {
+        case .leading:
+            .left
+        case .center:
+            .center
+        case .trailing:
+            .right
+        }
+    }
+
+    var systemName: String {
+        switch self {
+        case .leading:
+            "text.alignleft"
+        case .center:
+            "text.aligncenter"
+        case .trailing:
+            "text.alignright"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .leading:
+            "Align text left"
+        case .center:
+            "Align text center"
+        case .trailing:
+            "Align text right"
+        }
+    }
+
+    var next: CreateTextAlignmentChoice {
+        switch self {
+        case .leading:
+            .center
+        case .center:
+            .trailing
+        case .trailing:
+            .leading
+        }
+    }
+}
+
 private enum CreateFormattingTab: String, CaseIterable, Identifiable {
     case fontStyle
     case paperStyle
@@ -363,6 +415,141 @@ private enum CreateFormattingPalette {
     ]
 }
 
+@MainActor
+enum DraftThumbnailRenderer {
+    static func render(
+        title: String,
+        text: String,
+        photos: [UIImage],
+        fontChoiceRawValue: String?,
+        textColorIndex: Int?,
+        textSize: Double?,
+        paperStyleRawValue: String?,
+        paperColorIndex: Int?,
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        isStrikethrough: Bool = false,
+        isHighlighted: Bool = false,
+        textAlignmentRawValue: String = CreateTextAlignmentChoice.leading.rawValue
+    ) -> UIImage? {
+        let fontChoice = CreateFontChoice.savedValue(fontChoiceRawValue)
+        let normalizedTextColorIndex = min(max(textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
+        let normalizedTextSize = min(max(textSize ?? 0.36, 0), 1)
+        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
+        let normalizedPaperColorIndex = min(max(paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
+        let paperColor = CreateFormattingPalette.paperColors[normalizedPaperColorIndex]
+        let textColor = CreateFormattingPalette.textColors[normalizedTextColorIndex].color
+        let textAlignment = CreateTextAlignmentChoice(rawValue: textAlignmentRawValue) ?? .leading
+
+        let thumbnailSize = CGSize(width: 260, height: 340)
+        let thumbnail = DraftPageThumbnail(
+            title: title,
+            text: text,
+            photos: Array(photos.prefix(2)),
+            fontChoice: fontChoice,
+            textColor: textColor,
+            textSize: CGFloat(14 + normalizedTextSize * 8),
+            paperStyle: paperStyle,
+            paperColor: paperStyle.showsPaperColorOptions ? paperColor : .homePageBackground,
+            isBold: isBold,
+            isItalic: isItalic,
+            isUnderlined: isUnderlined,
+            isStrikethrough: isStrikethrough,
+            isHighlighted: isHighlighted,
+            textAlignment: textAlignment
+        )
+        .frame(width: thumbnailSize.width, height: thumbnailSize.height)
+
+        let renderer = ImageRenderer(content: thumbnail)
+        renderer.proposedSize = ProposedViewSize(width: thumbnailSize.width, height: thumbnailSize.height)
+        renderer.scale = UIScreen.main.scale
+        return renderer.uiImage
+    }
+}
+
+private struct DraftPageThumbnail: View {
+    let title: String
+    let text: String
+    let photos: [UIImage]
+    let fontChoice: CreateFontChoice
+    let textColor: Color
+    let textSize: CGFloat
+    let paperStyle: CreatePaperStyleChoice
+    let paperColor: Color
+    let isBold: Bool
+    let isItalic: Bool
+    let isUnderlined: Bool
+    let isStrikethrough: Bool
+    let isHighlighted: Bool
+    let textAlignment: CreateTextAlignmentChoice
+
+    private var displayTitle: String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle
+    }
+
+    private var displayText: String {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedText.isEmpty ? "Start writing..." : trimmedText
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            NotebookPaperBackground(
+                paperColor: paperStyle.backgroundImageName == nil ? paperColor : .homePageBackground,
+                paperImageName: paperStyle.backgroundImageName,
+                showsPaperWash: false,
+                showsRuledLines: paperStyle.showsRuledLines,
+                showsNotebookChrome: paperStyle.showsNotebookChrome,
+                firstRuledLineY: 84
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(displayTitle)
+                    .font(.system(size: 21, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+                    .lineLimit(2)
+
+                if !photos.isEmpty {
+                    HStack(spacing: 7) {
+                        ForEach(Array(photos.enumerated()), id: \.offset) { _, photo in
+                            Image(uiImage: photo)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 74)
+                                .frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        }
+                    }
+                }
+
+                Text(displayText)
+                    .font(isItalic ? fontChoice.swiftUIBodyFont(size: min(textSize, 19)).italic() : fontChoice.swiftUIBodyFont(size: min(textSize, 19)))
+                    .fontWeight(isBold ? .bold : .regular)
+                    .underline(isUnderlined)
+                    .strikethrough(isStrikethrough)
+                    .foregroundStyle(textColor)
+                    .padding(.horizontal, isHighlighted ? 3 : 0)
+                    .background(isHighlighted ? Color.yellow.opacity(0.26) : Color.clear)
+                    .multilineTextAlignment(textAlignment == .center ? .center : textAlignment == .trailing ? .trailing : .leading)
+                    .lineSpacing(4)
+                    .lineLimit(10)
+            }
+            .padding(.top, 28)
+            .padding(.trailing, 18)
+            .padding(.bottom, 20)
+            .padding(.leading, paperStyle.leadingContentPadding)
+        }
+        .background(paperStyle.backgroundImageName == nil ? paperColor : Color.homePageBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.42), lineWidth: 1)
+        )
+    }
+}
+
 struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
 
@@ -395,6 +582,8 @@ struct CreateEntryView: View {
     @State private var selectedTextColorIndex = 0
     @State private var selectedPaperColorIndex = 0
     @State private var previewTextSize: Double = 0.36
+    @State private var textFormattingRequestID = 0
+    @State private var textFormattingRequest: NotebookTextFormattingRequest?
     @State private var entryDestination: CreateEntryDestination = .daily
     @State private var selectedCustomJournalTitle: String?
     @State private var addedJournalTitle: String?
@@ -541,8 +730,8 @@ struct CreateEntryView: View {
             Button("Cancel", role: .cancel) {
             }
         }
-        .alert("Save this draft?", isPresented: $isShowingExitConfirmation) {
-            Button("Save Draft") {
+        .alert("Save this entry?", isPresented: $isShowingExitConfirmation) {
+            Button("Save Entry") {
                 saveDraftAndExit()
             }
 
@@ -746,6 +935,7 @@ struct CreateEntryView: View {
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         editorBlurRequestID: editorBlurRequestID,
+                        formattingRequest: textFormattingRequest,
                         bodyPlaceholder: "Start writing...",
                         scrollsInternally: false,
                         pageHeight: scrollContentHeight,
@@ -841,6 +1031,7 @@ struct CreateEntryView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close")
             }
+            .hideSharedBackgroundIfAvailable()
         }
 
         ToolbarItem(placement: .principal) {
@@ -853,12 +1044,13 @@ struct CreateEntryView: View {
             Button {
                 saveDraftAndExit()
             } label: {
-                Text("Save Draft")
+                Text("Save")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color.storyPurple)
             }
             .buttonStyle(.plain)
         }
+        .hideSharedBackgroundIfAvailable()
     }
 
     private var hasDraftContent: Bool {
@@ -921,11 +1113,23 @@ struct CreateEntryView: View {
         dismissKeyboard()
 
         if hasDraftContent {
+            let draftPhotos = storyboardPhotos.compactMap { $0 }
+            let draftThumbnail = DraftThumbnailRenderer.render(
+                title: storyTitle,
+                text: entryText,
+                photos: draftPhotos,
+                fontChoiceRawValue: selectedFontChoice.rawValue,
+                textColorIndex: selectedTextColorIndex,
+                textSize: previewTextSize,
+                paperStyleRawValue: selectedPaperStyleChoice.rawValue,
+                paperColorIndex: selectedPaperColorIndex
+            )
+
             _ = CreateEntryDraftStore.save(
                 id: activeDraftID,
                 title: storyTitle,
                 text: entryText,
-                photos: storyboardPhotos.compactMap { $0 },
+                photos: draftPhotos,
                 artStyle: selectedArtStyle,
                 location: storyLocation,
                 date: storyDate,
@@ -935,7 +1139,8 @@ struct CreateEntryView: View {
                 textColorIndex: selectedTextColorIndex,
                 textSize: previewTextSize,
                 paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-                paperColorIndex: selectedPaperColorIndex
+                paperColorIndex: selectedPaperColorIndex,
+                thumbnail: draftThumbnail
             )
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         }
@@ -971,6 +1176,7 @@ struct CreateEntryView: View {
         selectedFontChoice = .sans
         selectedTextColorIndex = 0
         previewTextSize = 0.36
+        textFormattingRequest = nil
         selectedPaperStyleChoice = .collegeRuled
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
@@ -1059,6 +1265,7 @@ struct CreateEntryView: View {
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         editorBlurRequestID: editorBlurRequestID,
+                        formattingRequest: textFormattingRequest,
                         bodyPlaceholder: "Start writing...",
                         scrollsInternally: false,
                         pageHeight: scrollContentHeight,
@@ -1119,57 +1326,55 @@ struct CreateEntryView: View {
 
     private var entryDraftKeyboardBar: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 2) {
-                keyboardToolButton(
-                    systemName: "keyboard.chevron.compact.down",
-                    accessibilityLabel: "Close keyboard",
-                    action: dismissKeyboard
-                )
+            keyboardPhotoButton
 
-                keyboardPhotoButton
+            Spacer(minLength: 0)
+
+            HStack(spacing: 1) {
+                keyboardFormattingButton(
+                    title: "B",
+                    accessibilityLabel: "Bold",
+                    isSelected: false
+                ) {
+                    sendTextFormattingCommand(.bold)
+                }
+
+                keyboardFormattingButton(
+                    title: "I",
+                    accessibilityLabel: "Italic",
+                    isSelected: false,
+                    isItalic: true
+                ) {
+                    sendTextFormattingCommand(.italic)
+                }
+
+                keyboardFormattingButton(
+                    title: "U",
+                    accessibilityLabel: "Underline",
+                    isSelected: false,
+                    isUnderlined: true
+                ) {
+                    sendTextFormattingCommand(.underline)
+                }
+
+                keyboardFormattingButton(
+                    title: "S",
+                    accessibilityLabel: "Strikethrough",
+                    isSelected: false,
+                    isStrikethrough: true
+                ) {
+                    sendTextFormattingCommand(.strikethrough)
+                }
             }
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 2) {
-                keyboardToolButton(
-                    systemName: isFullScreenEditorVisible ? "arrow.down.right.and.arrow.up.left" : "viewfinder",
-                    accessibilityLabel: isFullScreenEditorVisible ? "Show Create controls" : "Show full screen editor"
-                ) {
-                    dismissKeyboard()
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isFullScreenEditorVisible.toggle()
-                    }
-                }
-
-                keyboardToolButton(systemName: "textformat", accessibilityLabel: "Font options") {
-                    dismissKeyboard()
-                    selectedFormattingTab = .fontStyle
-                    isShowingFormattingSheet = true
-                }
-
-                keyboardToolButton(systemName: "doc", accessibilityLabel: "Paper style options") {
-                    dismissKeyboard()
-                    selectedFormattingTab = .paperStyle
-                    isShowingFormattingSheet = true
-                }
-
-                Button {
-                    showEntryOptionsPage()
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Next")
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 10)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Next")
-            }
+            keyboardToolButton(
+                systemName: "keyboard.chevron.compact.down",
+                accessibilityLabel: "Close keyboard",
+                isSelected: false,
+                action: dismissKeyboard
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -1182,20 +1387,69 @@ struct CreateEntryView: View {
         }
     }
 
+    private func sendTextFormattingCommand(_ command: NotebookTextFormattingCommand) {
+        isTitleFocused = false
+        textFormattingRequestID += 1
+        textFormattingRequest = NotebookTextFormattingRequest(
+            id: textFormattingRequestID,
+            command: command
+        )
+    }
+
     private func keyboardToolButton(
         systemName: String,
         accessibilityLabel: String,
+        isSelected: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.storyInk.opacity(0.72))
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
                 .frame(width: 34, height: 44)
+                .background(
+                    Group {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.storyPurple.opacity(0.12))
+                        }
+                    }
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func keyboardFormattingButton(
+        title: String,
+        accessibilityLabel: String,
+        isSelected: Bool,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        isStrikethrough: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(isItalic ? .system(size: 17, weight: .bold, design: .serif).italic() : .system(size: 17, weight: .bold, design: .serif))
+                .underline(isUnderlined)
+                .strikethrough(isStrikethrough)
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
+                .frame(width: 34, height: 44)
+                .background(
+                    Group {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.storyPurple.opacity(0.12))
+                        }
+                    }
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var keyboardPhotoButton: some View {
@@ -1920,7 +2174,7 @@ struct CreateEntryView: View {
         VStack(spacing: 0) {
             entrySwitchRow(
                 icon: "tray.and.arrow.down",
-                title: "Save Draft",
+                title: "Save Entry",
                 subtitle: "Save progress and come back later",
                 isOn: $savesDraft
             )

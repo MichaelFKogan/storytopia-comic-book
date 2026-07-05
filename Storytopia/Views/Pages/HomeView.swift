@@ -883,6 +883,8 @@ private struct ChapterCollectionCarouselView: UIViewRepresentable {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: Self.reuseIdentifier, for: indexPath)
             let imageName = parent.imageNames[indexPath.item]
             cell.backgroundColor = .clear
+            cell.contentView.backgroundColor = .clear
+            cell.isOpaque = false
             cell.contentConfiguration = UIHostingConfiguration {
                 ChapterCarouselCard(imageName: imageName, pageNumber: indexPath.item + 1, totalCount: parent.imageNames.count)
             }

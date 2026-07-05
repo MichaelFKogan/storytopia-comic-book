@@ -1,6 +1,18 @@
 import SwiftUI
 import UIKit
 
+enum NotebookTextFormattingCommand: Equatable {
+    case bold
+    case italic
+    case underline
+    case strikethrough
+}
+
+struct NotebookTextFormattingRequest: Equatable {
+    let id: Int
+    let command: NotebookTextFormattingCommand
+}
+
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
     static let bodyFontSize: CGFloat = 16
@@ -25,12 +37,17 @@ enum NotebookMetrics {
     }
 
     static var typingParagraphStyle: NSParagraphStyle {
+        typingParagraphStyle(alignment: .natural)
+    }
+
+    static func typingParagraphStyle(alignment: NSTextAlignment) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.minimumLineHeight = ruleSpacing
         style.maximumLineHeight = ruleSpacing
         style.lineSpacing = 0
         style.paragraphSpacing = 0
         style.lineBreakMode = .byWordWrapping
+        style.alignment = alignment
         return style
     }
 
@@ -92,11 +109,13 @@ enum NotebookMetrics {
         for style: NotebookTextStyle,
         usesTexturedPaperEffect: Bool = false
     ) -> [NSAttributedString.Key: Any] {
-        [
+        var attributes: [NSAttributedString.Key: Any] = [
             .font: uiBodyFont(for: style),
             .foregroundColor: usesTexturedPaperEffect ? UIColor.clear : style.uiColor,
             .paragraphStyle: typingParagraphStyle
         ]
+
+        return attributes
     }
 
     /// Vertical inset so placeholder text matches the text view's first-line position.
@@ -352,6 +371,38 @@ final class LinedTextView: UITextView {
         typingAttributes = attributes
     }
 
+    func applyFormattingCommand(_ command: NotebookTextFormattingCommand) {
+        let range = selectedRange
+        guard range.length > 0, range.location != NSNotFound else {
+            return
+        }
+
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        let fullRange = NSRange(location: 0, length: mutableText.length)
+        guard NSIntersectionRange(range, fullRange).length == range.length else {
+            return
+        }
+
+        switch command {
+        case .bold:
+            mutableText.toggleFontTrait(.traitBold, in: range)
+        case .italic:
+            mutableText.toggleFontTrait(.traitItalic, in: range)
+        case .underline:
+            mutableText.toggleIntegerStyle(.underlineStyle, in: range)
+        case .strikethrough:
+            mutableText.toggleIntegerStyle(.strikethroughStyle, in: range)
+        }
+
+        attributedText = mutableText
+        selectedRange = range
+        typingAttributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
+        setNeedsDisplay()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         setNeedsDisplay()
@@ -393,6 +444,7 @@ struct LinedTextEditor: UIViewRepresentable {
     @Binding var text: String
     var focusRequestID: Int = 0
     var blurRequestID: Int = 0
+    var formattingRequest: NotebookTextFormattingRequest? = nil
     var scrollsInternally: Bool = true
     var drawsRuledLines: Bool? = nil
     var minimumHeight: CGFloat = NotebookMetrics.minimumBodyHeight
@@ -468,6 +520,14 @@ struct LinedTextEditor: UIViewRepresentable {
                 textView.resignFirstResponder()
             }
         }
+
+        if let formattingRequest,
+           formattingRequest.id != coordinator.handledFormattingRequestID {
+            coordinator.handledFormattingRequestID = formattingRequest.id
+            DispatchQueue.main.async {
+                textView.applyFormattingCommand(formattingRequest.command)
+            }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: LinedTextView, context: Context) -> CGSize? {
@@ -491,6 +551,7 @@ struct LinedTextEditor: UIViewRepresentable {
         var isUpdatingFromTextView = false
         var handledFocusRequestID = 0
         var handledBlurRequestID = 0
+        var handledFormattingRequestID = 0
         var onTextChange: ((String) -> Void)?
 
         func textViewDidChange(_ textView: UITextView) {
@@ -506,15 +567,67 @@ struct LinedTextEditor: UIViewRepresentable {
             }
         }
 
-        func textViewDidEndEditing(_ textView: UITextView) {
-            if let linedTextView = textView as? LinedTextView, textView.markedTextRange == nil {
-                linedTextView.normalizeAttributesPreservingSelection()
-            }
-        }
-
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             scrollView.setNeedsDisplay()
         }
+    }
+}
+
+private extension NSMutableAttributedString {
+    func toggleFontTrait(_ trait: UIFontDescriptor.SymbolicTraits, in range: NSRange) {
+        let shouldAddTrait = !containsFontTrait(trait, in: range)
+
+        enumerateAttribute(.font, in: range) { value, subrange, _ in
+            let font = (value as? UIFont) ?? NotebookMetrics.bodyFont
+            var traits = font.fontDescriptor.symbolicTraits
+
+            if shouldAddTrait {
+                traits.insert(trait)
+            } else {
+                traits.remove(trait)
+            }
+
+            guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else {
+                return
+            }
+
+            addAttribute(.font, value: UIFont(descriptor: descriptor, size: font.pointSize), range: subrange)
+        }
+    }
+
+    func toggleIntegerStyle(_ key: NSAttributedString.Key, in range: NSRange) {
+        if containsAttribute(key, in: range) {
+            removeAttribute(key, range: range)
+        } else {
+            addAttribute(key, value: NSUnderlineStyle.single.rawValue, range: range)
+        }
+    }
+
+    private func containsFontTrait(_ trait: UIFontDescriptor.SymbolicTraits, in range: NSRange) -> Bool {
+        var containsTrait = true
+
+        enumerateAttribute(.font, in: range) { value, _, stop in
+            let font = (value as? UIFont) ?? NotebookMetrics.bodyFont
+            if !font.fontDescriptor.symbolicTraits.contains(trait) {
+                containsTrait = false
+                stop.pointee = true
+            }
+        }
+
+        return containsTrait
+    }
+
+    private func containsAttribute(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
+        var containsStyle = true
+
+        enumerateAttribute(key, in: range) { value, _, stop in
+            if value == nil {
+                containsStyle = false
+                stop.pointee = true
+            }
+        }
+
+        return containsStyle
     }
 }
 
@@ -650,6 +763,7 @@ struct NotebookEditorContent: View {
     @FocusState.Binding var isTitleFocused: Bool
     var editorFocusRequestID: Int
     var editorBlurRequestID: Int = 0
+    var formattingRequest: NotebookTextFormattingRequest? = nil
     var bodyPlaceholder: String
     var scrollsInternally: Bool = true
     var pageHeight: CGFloat?
@@ -728,6 +842,7 @@ struct NotebookEditorContent: View {
                 text: $entryText,
                 focusRequestID: editorFocusRequestID,
                 blurRequestID: editorBlurRequestID,
+                formattingRequest: formattingRequest,
                 scrollsInternally: scrollsInternally,
                 drawsRuledLines: false,
                 minimumHeight: bodyMinHeight,
