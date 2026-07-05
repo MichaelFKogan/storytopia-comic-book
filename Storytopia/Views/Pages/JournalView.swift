@@ -7,20 +7,14 @@ struct JournalView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
-    @State private var searchText = ""
-    @FocusState private var isSearchFocused: Bool
     @State private var showsPrototypeData = true
     @State private var chapters: [PrototypeChapter]
-    @State private var entries: [CreateEntryDraft]
     @State private var editMode: EditMode = .inactive
     @State private var journalBeingRenamed: PrototypeChapter?
     @State private var renamedJournalTitle = ""
+    @State private var journalsPendingDeletion: [PrototypeChapter] = []
     @State private var isCreateJournalAlertPresented = false
     @State private var newJournalTitle = ""
-    @State private var selectedJournalTab: JournalContentTab = .entries
-    @State private var selectedEntryLayout: JournalEntryLayout = .grid
-    @State private var selectedEntrySort: JournalEntrySort = .newestCreated
-    @State private var entriesPendingDeletion: [CreateEntryDraft] = []
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -30,7 +24,6 @@ struct JournalView: View {
         _selectedPage = selectedPage
         _isDraftSaved = isDraftSaved
         _activeDraftID = activeDraftID
-        _entries = State(initialValue: CreateEntryDraftStore.loadAll())
         _chapters = State(initialValue: DailyJournalData.allChapters())
     }
 
@@ -43,47 +36,22 @@ struct JournalView: View {
                     header
                         .padding(.horizontal, 16)
 
-                    journalTabSwitcher
-                        .padding(.horizontal, 16)
-
-                    if selectedJournalTab == .entries {
-                        searchField
-                            .padding(.horizontal, 16)
-
-                        entryControls
-                            .padding(.horizontal, 16)
-                    }
-
-                    if selectedJournalTab == .journals && showsPrototypeData {
-                        prototypeNotice
-                            .padding(.horizontal, 16)
-                    }
-
-                    if selectedJournalTab == .entries {
-                        if selectedEntryLayout == .list {
-                            entryList
-                        } else {
-                            entryGrid
-                        }
-                    } else {
-                        chapterList
-                    }
+                    chapterList
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
 
+                bottomJournalControls
             }
             .toolbar(.hidden, for: .navigationBar)
             .environment(\.editMode, $editMode)
         }
         .onAppear {
-            refreshEntries()
             chapters = DailyJournalData.allChapters()
         }
         .onChange(of: selectedPage) { newPage in
-            dismissSearchKeyboard()
             if newPage != .create {
-                refreshEntries()
+                chapters = DailyJournalData.allChapters()
             }
         }
         .preferredColorScheme(.light)
@@ -110,16 +78,16 @@ struct JournalView: View {
                 createJournal()
             }
         }
-        .alert(deleteEntryAlertTitle, isPresented: isDeleteEntryAlertPresented) {
+        .alert(deleteJournalAlertTitle, isPresented: isDeleteJournalAlertPresented) {
             Button("Cancel", role: .cancel) {
-                entriesPendingDeletion = []
+                journalsPendingDeletion = []
             }
 
             Button("Delete", role: .destructive) {
-                deletePendingEntries()
+                deletePendingJournals()
             }
         } message: {
-            Text(deleteEntryAlertMessage)
+            Text(deleteJournalAlertMessage)
         }
     }
 
@@ -134,314 +102,34 @@ struct JournalView: View {
             EditButton()
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Color.homeAccent)
+        }
+        .padding(.top, 12)
+    }
+
+    private var bottomJournalControls: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if showsPrototypeData {
+                prototypeNotice
+                    .padding(.horizontal, 16)
+                    .padding(.trailing, 76)
+            }
 
             Button {
                 handleCreateButtonTapped()
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 58, height: 58)
                     .background(Color.storyInk, in: Circle())
+                    .shadow(color: Color.storyInk.opacity(0.2), radius: 12, x: 0, y: 6)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(selectedJournalTab == .entries ? "Create a new journal entry" : "Create a new journal")
+            .accessibilityLabel("Create a new journal")
+            .padding(.trailing, 18)
         }
-        .padding(.top, 12)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissSearchKeyboard()
-            }
-        )
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.homeMutedText.opacity(0.76))
-
-            TextField("Search entries...", text: $searchText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color.storyInk)
-                .focused($isSearchFocused)
-                .submitLabel(.search)
-                .onSubmit {
-                    dismissSearchKeyboard()
-                }
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                    dismissSearchKeyboard()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.homeMutedText.opacity(0.5))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 39)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
-        )
-    }
-
-    private var journalTabSwitcher: some View {
-        HStack(spacing: 4) {
-            journalTabButton(.entries)
-            journalTabButton(.journals)
-        }
-        .padding(4)
-        .frame(height: 42)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
-        )
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissSearchKeyboard()
-            }
-        )
-    }
-
-    private func journalTabButton(_ tab: JournalContentTab) -> some View {
-        let isSelected = selectedJournalTab == tab
-
-        return Button {
-            dismissSearchKeyboard()
-            withAnimation(.easeInOut(duration: 0.18)) {
-                selectedJournalTab = tab
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: tab.systemImage)
-                    .font(.system(size: 13, weight: .bold))
-
-                Text(tab.title)
-                    .font(.system(size: 13, weight: .bold))
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.homeMutedText)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                Group {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.storyInk)
-                    }
-                }
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private var entryControls: some View {
-        HStack {
-            entrySortMenu
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                entryLayoutButton(.grid)
-                entryLayoutButton(.list)
-            }
-            .padding(4)
-            .frame(height: 34)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.homeBorder, lineWidth: 1)
-            )
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    dismissSearchKeyboard()
-                }
-            )
-        }
-    }
-
-    private var entrySortMenu: some View {
-        Menu {
-            ForEach(JournalEntrySort.allCases) { sort in
-                Button {
-                    dismissSearchKeyboard()
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        selectedEntrySort = sort
-                    }
-                } label: {
-                    Label(sort.title, systemImage: selectedEntrySort == sort ? "checkmark" : sort.systemImage)
-                }
-            }
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: selectedEntrySort.systemImage)
-                    .font(.system(size: 13, weight: .bold))
-
-                Text("Sort")
-                    .font(.system(size: 12, weight: .bold))
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.homeMutedText.opacity(0.66))
-            }
-            .foregroundStyle(Color.storyInk)
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.homeBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Sort entries")
-        .accessibilityValue(selectedEntrySort.title)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissSearchKeyboard()
-            }
-        )
-    }
-
-    private func entryLayoutButton(_ layout: JournalEntryLayout) -> some View {
-        let isSelected = selectedEntryLayout == layout
-
-        return Button {
-            dismissSearchKeyboard()
-            withAnimation(.easeInOut(duration: 0.18)) {
-                selectedEntryLayout = layout
-            }
-        } label: {
-            Image(systemName: layout.systemImage)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(isSelected ? Color.white : Color.homeMutedText)
-                .frame(width: 34, height: 26)
-                .background(
-                    Group {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color.storyInk)
-                        }
-                    }
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(layout.accessibilityLabel)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func dismissSearchKeyboard() {
-        isSearchFocused = false
-    }
-
-    private var isDeleteEntryAlertPresented: Binding<Bool> {
-        Binding(
-            get: { !entriesPendingDeletion.isEmpty },
-            set: { isPresented in
-                if !isPresented {
-                    entriesPendingDeletion = []
-                }
-            }
-        )
-    }
-
-    private var deleteEntryAlertTitle: String {
-        entriesPendingDeletion.count == 1 ? "Delete Entry?" : "Delete Entries?"
-    }
-
-    private var deleteEntryAlertMessage: String {
-        if let entry = entriesPendingDeletion.first, entriesPendingDeletion.count == 1 {
-            return "Are you sure you want to delete \"\(entryDisplayTitle(entry))\"? This can't be undone."
-        }
-
-        return "Are you sure you want to delete these entries? This can't be undone."
-    }
-
-    private func requestDeleteEntry(_ entry: CreateEntryDraft) {
-        entriesPendingDeletion = [entry]
-    }
-
-    private func requestDeleteEntries(_ entries: [CreateEntryDraft]) {
-        entriesPendingDeletion = entries
-    }
-
-    private func deletePendingEntries() {
-        let entriesToDelete = entriesPendingDeletion
-        entriesPendingDeletion = []
-        entriesToDelete.forEach(deleteEntry)
-    }
-
-    private func deleteEntry(_ entry: CreateEntryDraft) {
-        CreateEntryDraftStore.delete(id: entry.id)
-        entries.removeAll { $0.id == entry.id }
-        if activeDraftID == entry.id {
-            activeDraftID = nil
-        }
-        isDraftSaved = !entries.isEmpty
-    }
-
-    private func refreshEntries() {
-        entries = CreateEntryDraftStore.loadAll()
-        backfillEntryThumbnailsIfNeeded()
-        isDraftSaved = !entries.isEmpty
-    }
-
-    private var noEntries: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.badge.plus")
-                .font(.system(size: 20))
-                .foregroundStyle(Color.homeAccent.opacity(0.7))
-
-            Text("Entries you save while writing will appear here.")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.homeMutedText)
-        }
-        .padding(13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
-        )
-    }
-
-    private var noEntrySearchResults: some View {
-        Text("No entries match your search.")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Color.homeMutedText)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(Color.homeBorder, lineWidth: 1)
-            )
-    }
-
-    private func entryDisplayTitle(_ entry: CreateEntryDraft) -> String {
-        let trimmedTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle
-    }
-
-    private var filteredEntries: [CreateEntryDraft] {
-        let matchingEntries = entries.filter { entry in
-            searchText.isEmpty
-                || entryDisplayTitle(entry).localizedCaseInsensitiveContains(searchText)
-                || entry.text.localizedCaseInsensitiveContains(searchText)
-        }
-
-        return matchingEntries.sorted { first, second in
-            selectedEntrySort.areInIncreasingOrder(
-                first,
-                second,
-                titleProvider: entryDisplayTitle
-            )
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.bottom, 82)
     }
 
     private var prototypeNotice: some View {
@@ -484,20 +172,6 @@ struct JournalView: View {
                     } else {
                         journalRows
                     }
-                } header: {
-                    HStack(alignment: .lastTextBaseline) {
-                        Text("Your Journals")
-                            .font(.system(size: 19, weight: .bold, design: .serif))
-                            .foregroundStyle(Color.storyInk)
-                            .textCase(nil)
-
-                        Spacer()
-
-                        Text("\(chapters.count) \(chapters.count == 1 ? "journal" : "journals")")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.homeMutedText)
-                            .textCase(nil)
-                    }
                 }
             } else {
                 Section {
@@ -511,117 +185,7 @@ struct JournalView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 76)
-        }
-    }
-
-    private var entryList: some View {
-        List {
-            Section {
-                if filteredEntries.isEmpty {
-                    if entries.isEmpty {
-                        noEntries
-                    } else {
-                        noEntrySearchResults
-                    }
-                } else {
-                    entryRows
-                }
-            } header: {
-                HStack(alignment: .lastTextBaseline) {
-                    Text("Entries")
-                        .font(.system(size: 19, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
-                        .textCase(nil)
-
-                    Spacer()
-
-                    Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "entry" : "entries")")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.homeMutedText)
-                        .textCase(nil)
-                }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissSearchKeyboard()
-            }
-        )
-        .background(Color.homePageBackground)
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 76)
-        }
-    }
-
-    private var entryGrid: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                entrySectionHeader
-                    .padding(.horizontal, 16)
-
-                if filteredEntries.isEmpty {
-                    if entries.isEmpty {
-                        noEntries
-                    } else {
-                        noEntrySearchResults
-                    }
-                } else {
-                    LazyVGrid(columns: entryGridColumns, spacing: 14) {
-                        ForEach(filteredEntries) { entry in
-                            EntryGridPreviewCard(
-                                entry: entry,
-                                isEditing: editMode == .active,
-                                title: entryDisplayTitle(entry),
-                                onOpen: {
-                                    activeDraftID = entry.id
-                                    selectedPage = .create
-                                },
-                                onDelete: {
-                                    requestDeleteEntry(entry)
-                                }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-            }
-            .padding(.top, 4)
-            .padding(.horizontal, filteredEntries.isEmpty ? 16 : 0)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissSearchKeyboard()
-            }
-        )
-        .background(Color.homePageBackground)
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 76)
-        }
-    }
-
-    private var entryGridColumns: [GridItem] {
-        [
-            GridItem(.flexible(), spacing: 14),
-            GridItem(.flexible(), spacing: 14)
-        ]
-    }
-
-    private var entrySectionHeader: some View {
-        HStack(alignment: .lastTextBaseline) {
-            Text("Entries")
-                .font(.system(size: 19, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
-
-            Spacer()
-
-            Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "entry" : "entries")")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.homeMutedText)
+            Color.clear.frame(height: showsPrototypeData ? 170 : 150)
         }
     }
 
@@ -650,71 +214,6 @@ struct JournalView: View {
         }
         .onDelete(perform: deleteChapters)
         .onMove(perform: moveChapters)
-    }
-
-    private var entryRows: some View {
-        ForEach(filteredEntries) { entry in
-            Button {
-                activeDraftID = entry.id
-                selectedPage = .create
-            } label: {
-                EntryListRow(entry: entry)
-            }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(
-                top: 0,
-                leading: JournalChapterListMetrics.horizontalInset,
-                bottom: 0,
-                trailing: JournalChapterListMetrics.trailingInset
-            ))
-            .listRowBackground(Color.homePageBackground)
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                Button(role: .destructive) {
-                    requestDeleteEntry(entry)
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-        }
-        .onDelete(perform: deleteEntries)
-    }
-
-    private func deleteEntries(at offsets: IndexSet) {
-        requestDeleteEntries(offsets.map { filteredEntries[$0] })
-    }
-
-    private func backfillEntryThumbnailsIfNeeded() {
-        var didCreateThumbnail = false
-
-        for entry in entries where entry.thumbnail == nil {
-            guard
-                let thumbnail = DraftThumbnailRenderer.render(
-                    title: entry.title,
-                    text: entry.text,
-                    photos: entry.photos,
-                    fontChoiceRawValue: entry.fontChoiceRawValue,
-                    textColorIndex: entry.textColorIndex,
-                    textSize: entry.textSize,
-                    paperStyleRawValue: entry.paperStyleRawValue,
-                    paperColorIndex: entry.paperColorIndex,
-                    isBold: entry.isBold,
-                    isItalic: entry.isItalic,
-                    isUnderlined: entry.isUnderlined,
-                    isStrikethrough: entry.isStrikethrough,
-                    isHighlighted: entry.isHighlighted,
-                    textAlignmentRawValue: entry.textAlignmentRawValue
-                )
-            else {
-                continue
-            }
-
-            CreateEntryDraftStore.saveThumbnail(thumbnail, for: entry.id)
-            didCreateThumbnail = true
-        }
-
-        if didCreateThumbnail {
-            entries = CreateEntryDraftStore.loadAll()
-        }
     }
 
     private var isRenameAlertPresented: Binding<Bool> {
@@ -756,12 +255,7 @@ struct JournalView: View {
     }
 
     private func handleCreateButtonTapped() {
-        if selectedJournalTab == .entries {
-            activeDraftID = nil
-            selectedPage = .create
-        } else {
-            isCreateJournalAlertPresented = true
-        }
+        isCreateJournalAlertPresented = true
     }
 
     private func createJournal() {
@@ -784,23 +278,55 @@ struct JournalView: View {
         UserChapterStore.add(journal)
         chapters = DailyJournalData.allChapters()
         showsPrototypeData = true
-        selectedJournalTab = .journals
         newJournalTitle = ""
     }
 
     private func deleteChapters(at offsets: IndexSet) {
-        offsets
-            .map { chapters[$0] }
-            .forEach { chapter in
-                let isUserJournal = UserChapterStore.contains(title: chapter.title)
-                UserChapterStore.delete(title: chapter.title)
-                if !isUserJournal {
-                    DeletedSampleChapterStore.add(title: chapter.title)
-                }
-                StoryEntryStore.deleteAll(for: chapter.title)
-            }
+        requestDeleteJournals(offsets.map { chapters[$0] })
+    }
 
-        chapters.remove(atOffsets: offsets)
+    private var isDeleteJournalAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !journalsPendingDeletion.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    journalsPendingDeletion = []
+                }
+            }
+        )
+    }
+
+    private var deleteJournalAlertTitle: String {
+        journalsPendingDeletion.count == 1 ? "Delete Journal?" : "Delete Journals?"
+    }
+
+    private var deleteJournalAlertMessage: String {
+        if let journal = journalsPendingDeletion.first, journalsPendingDeletion.count == 1 {
+            return "Are you sure you want to delete \"\(journal.title)\"? This journal and its entries can't be recovered."
+        }
+
+        return "Are you sure you want to delete these journals? These journals and their entries can't be recovered."
+    }
+
+    private func requestDeleteJournals(_ journals: [PrototypeChapter]) {
+        journalsPendingDeletion = journals
+    }
+
+    private func deletePendingJournals() {
+        let journalsToDelete = journalsPendingDeletion
+        journalsPendingDeletion = []
+        journalsToDelete.forEach(deleteJournal)
+    }
+
+    private func deleteJournal(_ journal: PrototypeChapter) {
+        let isUserJournal = UserChapterStore.contains(title: journal.title)
+        UserChapterStore.delete(title: journal.title)
+        if !isUserJournal {
+            DeletedSampleChapterStore.add(title: journal.title)
+        }
+        StoryEntryStore.deleteAll(for: journal.title)
+
+        chapters.removeAll { $0.id == journal.id }
     }
 
     private func moveChapters(from source: IndexSet, to destination: Int) {
@@ -900,6 +426,9 @@ struct JournalView: View {
 
 struct DaybookView: View {
     @Binding var selectedPage: StoryPage
+    var embedsInNavigationStack = true
+    var showsBottomNavigation = true
+
     @State private var chapters = DailyJournalData.allChapters()
     @State private var selectedTab: DaybookTab = .entries
     @State private var comicPageIndex = 0
@@ -914,62 +443,18 @@ struct DaybookView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                Color.white
-                    .ignoresSafeArea()
-
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        pageHeader
-                        DaybookComicSummaryStrip(comicBook: comicBook) {
-                            isComicReaderPresented = true
-                        }
-                        tabSwitcher
-
-                        selectedTabContent
-                    }
-                    .padding(.top, 12)
-                    .padding(.bottom, scrollBottomPadding)
+        Group {
+            if embedsInNavigationStack {
+                NavigationStack {
+                    daybookContent
                 }
-                .modifier(DaybookScrollClipDisabledModifier())
-
-                VStack(spacing: 0) {
-                    if showsComicPreviewControls {
-                        DaybookComicPreviewControlSliders(
-                            horizontalPosition: $previewHorizontalPosition,
-                            zoom: $previewZoom,
-                            zoomRange: comicPreviewZoomRange,
-                            zoomCenterValue: comicPreviewZoomCenter
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-
-                    BottomNavigationBar(selectedPage: $selectedPage)
-                }
-            }
-            .navigationDestination(isPresented: $isShowingNewEntry) {
-                NewStorySheet(
-                    chapterTitle: todayJournalTitle,
-                    accentColor: Color.homeAccent,
-                    initialDate: DailyJournalData.journalDate(dayOffset: 0),
-                    collectionLabel: "Daily Journal",
-                    locksEntryDate: true
-                ) { entry in
-                    addEntryToToday(entry)
-                    selectedTab = .entries
-                }
-            }
-            .navigationDestination(isPresented: $isComicReaderPresented) {
-                DaybookComicReaderView(
-                    comicBook: comicBook,
-                    currentPageIndex: $comicPageIndex
-                )
+            } else {
+                daybookContent
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle(embedsInNavigationStack ? "" : "Daily")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(embedsInNavigationStack ? .hidden : .visible, for: .navigationBar)
         .onAppear {
             chapters = DailyJournalData.allChapters()
             comicPageIndex = clampedComicPageIndex(comicPageIndex)
@@ -999,6 +484,64 @@ struct DaybookView: View {
                     accentColor: Color.homeAccent
                 )
             }
+        }
+    }
+
+    private var daybookContent: some View {
+        ZStack(alignment: .bottom) {
+            Color.white
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    pageHeader
+                    DaybookComicSummaryStrip(comicBook: comicBook) {
+                        isComicReaderPresented = true
+                    }
+                    tabSwitcher
+
+                    selectedTabContent
+                }
+                .padding(.top, 12)
+                .padding(.bottom, scrollBottomPadding)
+            }
+            .modifier(DaybookScrollClipDisabledModifier())
+
+            if showsBottomNavigation {
+                VStack(spacing: 0) {
+                    if showsComicPreviewControls {
+                        DaybookComicPreviewControlSliders(
+                            horizontalPosition: $previewHorizontalPosition,
+                            zoom: $previewZoom,
+                            zoomRange: comicPreviewZoomRange,
+                            zoomCenterValue: comicPreviewZoomCenter
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    BottomNavigationBar(selectedPage: $selectedPage)
+                }
+            }
+        }
+        .navigationDestination(isPresented: $isShowingNewEntry) {
+            NewStorySheet(
+                chapterTitle: todayJournalTitle,
+                accentColor: Color.homeAccent,
+                initialDate: DailyJournalData.journalDate(dayOffset: 0),
+                collectionLabel: "Daily Journal",
+                locksEntryDate: true
+            ) { entry in
+                addEntryToToday(entry)
+                selectedTab = .entries
+            }
+        }
+        .navigationDestination(isPresented: $isComicReaderPresented) {
+            DaybookComicReaderView(
+                comicBook: comicBook,
+                currentPageIndex: $comicPageIndex
+            )
         }
     }
 
@@ -1088,7 +631,11 @@ struct DaybookView: View {
     }
 
     private var scrollBottomPadding: CGFloat {
-        showsComicPreviewControls ? 188 : 92
+        if !showsBottomNavigation {
+            return 24
+        }
+
+        return showsComicPreviewControls ? 188 : 92
     }
 
     private var comicPreviewZoomRange: ClosedRange<Double> {
@@ -3830,17 +3377,17 @@ private struct DailyJournalDaySummary: Identifiable {
     }
 }
 
-private struct EntriesView: View {
+struct EntriesView: View {
     @Binding var selectedPage: StoryPage
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
     @State private var entries: [CreateEntryDraft] = []
-    @State private var searchText = ""
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
     @State private var entriesPendingDeletion: [CreateEntryDraft] = []
+    @State private var selectedEntryLayout: JournalEntryLayout = .list
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3851,11 +3398,16 @@ private struct EntriesView: View {
                 header
                     .padding(.horizontal, 16)
 
-                entrySearchField
-                    .padding(.horizontal, 16)
-
-                entryList
+                if selectedEntryLayout == .list {
+                    entryList
+                } else {
+                    entryGrid
+                }
             }
+
+            BottomNavigationBar(selectedPage: $selectedPage)
+
+            bottomEntryControls
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -3914,11 +3466,68 @@ private struct EntriesView: View {
 
             Spacer()
 
-            Text("\(entries.count) \(entries.count == 1 ? "entry" : "entries")")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.homeMutedText)
+            entryLayoutSwitcher
         }
         .padding(.top, 12)
+    }
+
+    private var entryLayoutSwitcher: some View {
+        HStack(spacing: 4) {
+            entryLayoutButton(.grid)
+            entryLayoutButton(.list)
+        }
+        .padding(4)
+        .frame(height: 34)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
+    private func entryLayoutButton(_ layout: JournalEntryLayout) -> some View {
+        let isSelected = selectedEntryLayout == layout
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedEntryLayout = layout
+            }
+        } label: {
+            Image(systemName: layout.systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(isSelected ? Color.white : Color.homeMutedText)
+                .frame(width: 34, height: 26)
+                .background(
+                    Group {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.storyInk)
+                        }
+                    }
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(layout.accessibilityLabel)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var bottomEntryControls: some View {
+        Button {
+            activeDraftID = nil
+            selectedPage = .create
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 58, height: 58)
+                .background(Color.storyInk, in: Circle())
+                .shadow(color: Color.storyInk.opacity(0.2), radius: 12, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Create a new entry")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, 18)
+        .padding(.bottom, 82)
     }
 
     private var entryList: some View {
@@ -3932,25 +3541,14 @@ private struct EntriesView: View {
                 } else {
                     entryRows
                 }
-            } header: {
-                HStack(alignment: .lastTextBaseline) {
-                    Text("Your Entries")
-                        .font(.system(size: 19, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
-                        .textCase(nil)
-
-                    Spacer()
-
-                    Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "entry" : "entries")")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.homeMutedText)
-                        .textCase(nil)
-                }
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 150)
+        }
     }
 
     private var entryRows: some View {
@@ -3989,46 +3587,61 @@ private struct EntriesView: View {
         .onMove(perform: moveEntries)
     }
 
-    private var entrySearchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.homeMutedText.opacity(0.76))
-
-            TextField("Search entries...", text: $searchText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color.storyInk)
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.homeMutedText.opacity(0.5))
+    private var entryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if filteredEntries.isEmpty {
+                    emptyEntriesState
+                        .padding(.horizontal, 16)
+                } else {
+                    LazyVGrid(columns: entryGridColumns, spacing: 14) {
+                        ForEach(filteredEntries) { entry in
+                            EntryGridPreviewCard(
+                                entry: entry,
+                                isEditing: editMode == .active,
+                                title: entryDisplayTitle(entry),
+                                onOpen: {
+                                    activeDraftID = entry.id
+                                    selectedPage = .create
+                                },
+                                onDelete: {
+                                    requestDeleteEntry(entry)
+                                },
+                                onRename: {
+                                    beginRenaming(entry)
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.top, 4)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 39)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.homeBorder, lineWidth: 1)
-        )
+        .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 150)
+        }
+    }
+
+    private var entryGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 14),
+            GridItem(.flexible(), spacing: 14)
+        ]
     }
 
     private var emptyEntriesState: some View {
         VStack(spacing: 10) {
-            Image(systemName: searchText.isEmpty ? "doc.badge.plus" : "text.magnifyingglass")
+            Image(systemName: "doc.badge.plus")
                 .font(.system(size: 30))
                 .foregroundStyle(Color.homeAccent.opacity(0.65))
 
-            Text(searchText.isEmpty ? "No entries" : "No matching entries")
+            Text("No entries")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(Color.storyInk)
 
-            Text(searchText.isEmpty ? "Entries you save will appear here." : "Try another search.")
+            Text("Entries you save will appear here.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.homeMutedText)
         }
@@ -4042,12 +3655,7 @@ private struct EntriesView: View {
     }
 
     private var filteredEntries: [CreateEntryDraft] {
-        entries.filter { entry in
-            searchText.isEmpty
-                || entryDisplayTitle(entry).localizedCaseInsensitiveContains(searchText)
-                || entry.text.localizedCaseInsensitiveContains(searchText)
-                || entry.location.localizedCaseInsensitiveContains(searchText)
-        }
+        entries
     }
 
     private func deleteEntries(at offsets: IndexSet) {
@@ -4177,10 +3785,6 @@ private struct EntriesView: View {
     }
 
     private func moveEntries(from source: IndexSet, to destination: Int) {
-        guard searchText.isEmpty else {
-            return
-        }
-
         entries.move(fromOffsets: source, toOffset: destination)
     }
 
@@ -4294,6 +3898,7 @@ private struct EntryGridPreviewCard: View {
     let title: String
     let onOpen: () -> Void
     let onDelete: () -> Void
+    var onRename: (() -> Void)?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -4324,6 +3929,14 @@ private struct EntryGridPreviewCard: View {
             onOpen()
         }
         .contextMenu {
+            if let onRename {
+                Button {
+                    onRename()
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+            }
+
             Button(role: .destructive) {
                 onDelete()
             } label: {
@@ -4357,29 +3970,6 @@ private struct EntryGridPreviewCard: View {
     }
 }
 
-private enum JournalContentTab {
-    case entries
-    case journals
-
-    var title: String {
-        switch self {
-        case .entries:
-            return "Entries"
-        case .journals:
-            return "Journals"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .entries:
-            return "doc.text"
-        case .journals:
-            return "books.vertical"
-        }
-    }
-}
-
 private enum JournalEntryLayout {
     case grid
     case list
@@ -4403,88 +3993,6 @@ private enum JournalEntryLayout {
     }
 }
 
-private enum JournalEntrySort: CaseIterable, Hashable, Identifiable {
-    case newestCreated
-    case recentlyEdited
-    case entryDateNewest
-    case oldestCreated
-    case title
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .newestCreated:
-            return "Newest Created"
-        case .recentlyEdited:
-            return "Recently Edited"
-        case .entryDateNewest:
-            return "Entry Date"
-        case .oldestCreated:
-            return "Oldest Created"
-        case .title:
-            return "Title A-Z"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .newestCreated:
-            return "clock"
-        case .recentlyEdited:
-            return "pencil"
-        case .entryDateNewest:
-            return "calendar"
-        case .oldestCreated:
-            return "arrow.up.arrow.down"
-        case .title:
-            return "textformat"
-        }
-    }
-
-    func areInIncreasingOrder(
-        _ first: CreateEntryDraft,
-        _ second: CreateEntryDraft,
-        titleProvider: (CreateEntryDraft) -> String
-    ) -> Bool {
-        switch self {
-        case .newestCreated:
-            return compare(first, second, by: \.createdAt, descending: true)
-        case .recentlyEdited:
-            return compare(first, second, by: \.updatedAt, descending: true)
-        case .entryDateNewest:
-            return compare(first, second, by: \.date, descending: true)
-        case .oldestCreated:
-            return compare(first, second, by: \.createdAt, descending: false)
-        case .title:
-            let firstTitle = titleProvider(first)
-            let secondTitle = titleProvider(second)
-
-            if firstTitle.localizedCaseInsensitiveCompare(secondTitle) == .orderedSame {
-                return first.createdAt > second.createdAt
-            }
-
-            return firstTitle.localizedCaseInsensitiveCompare(secondTitle) == .orderedAscending
-        }
-    }
-
-    private func compare(
-        _ first: CreateEntryDraft,
-        _ second: CreateEntryDraft,
-        by keyPath: KeyPath<CreateEntryDraft, Date>,
-        descending: Bool
-    ) -> Bool {
-        let firstDate = first[keyPath: keyPath]
-        let secondDate = second[keyPath: keyPath]
-
-        if firstDate == secondDate {
-            return first.title.localizedCaseInsensitiveCompare(second.title) == .orderedAscending
-        }
-
-        return descending ? firstDate > secondDate : firstDate < secondDate
-    }
-}
-
 private enum JournalChapterListMetrics {
     static let rowHeight: CGFloat = 50
     static let horizontalInset: CGFloat = 16
@@ -4504,11 +4012,6 @@ private struct JournalChapterListRow: View {
                 width: JournalChapterListMetrics.coverWidth,
                 height: JournalChapterListMetrics.coverHeight
             )
-            .overlay {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
             .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
             VStack(alignment: .leading, spacing: 2) {

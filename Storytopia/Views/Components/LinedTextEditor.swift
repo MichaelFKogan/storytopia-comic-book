@@ -6,6 +6,7 @@ enum NotebookTextFormattingCommand: Equatable {
     case italic
     case underline
     case strikethrough
+    case bulletList
 }
 
 struct NotebookTextFormattingRequest: Equatable {
@@ -225,6 +226,8 @@ enum TexturedPaperTextEffect {
 }
 
 final class LinedTextView: UITextView {
+    private static let bulletPrefix = "• "
+
     var ruleSpacing: CGFloat = NotebookMetrics.ruleSpacing
     var notebookTextStyle: NotebookTextStyle = .default {
         didSet {
@@ -372,6 +375,11 @@ final class LinedTextView: UITextView {
     }
 
     func applyFormattingCommand(_ command: NotebookTextFormattingCommand) {
+        if command == .bulletList {
+            applyBulletToCurrentLine()
+            return
+        }
+
         let range = selectedRange
         guard range.length > 0, range.location != NSNotFound else {
             return
@@ -392,6 +400,8 @@ final class LinedTextView: UITextView {
             mutableText.toggleIntegerStyle(.underlineStyle, in: range)
         case .strikethrough:
             mutableText.toggleIntegerStyle(.strikethroughStyle, in: range)
+        case .bulletList:
+            break
         }
 
         attributedText = mutableText
@@ -401,6 +411,130 @@ final class LinedTextView: UITextView {
             usesTexturedPaperEffect: usesTexturedPaperEffect
         )
         setNeedsDisplay()
+    }
+
+    private func applyBulletToCurrentLine() {
+        let cursor = selectedRange.location
+        guard cursor != NSNotFound else {
+            return
+        }
+
+        let plain = text ?? ""
+        let nsPlain = plain as NSString
+        let lineRange = nsPlain.lineRange(for: NSRange(location: cursor, length: 0))
+        let lineText = nsPlain
+            .substring(with: lineRange)
+            .trimmingCharacters(in: .newlines)
+
+        if lineText.hasPrefix(Self.bulletPrefix) {
+            removeBulletFromLine(at: lineRange, cursor: cursor)
+        } else {
+            addBulletToLine(at: lineRange, cursor: cursor)
+        }
+    }
+
+    private func addBulletToLine(at lineRange: NSRange, cursor: Int) {
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        mutableText.insert(
+            NSAttributedString(string: Self.bulletPrefix, attributes: attributes),
+            at: lineRange.location
+        )
+
+        attributedText = mutableText
+        selectedRange = NSRange(
+            location: cursor >= lineRange.location ? cursor + Self.bulletPrefix.count : cursor,
+            length: 0
+        )
+        typingAttributes = attributes
+        notifyTextDidChange()
+        setNeedsDisplay()
+    }
+
+    private func removeBulletFromLine(at lineRange: NSRange, cursor: Int) {
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        mutableText.deleteCharacters(in: NSRange(location: lineRange.location, length: Self.bulletPrefix.count))
+
+        let newCursor: Int
+        if cursor >= lineRange.location + Self.bulletPrefix.count {
+            newCursor = cursor - Self.bulletPrefix.count
+        } else if cursor > lineRange.location {
+            newCursor = lineRange.location
+        } else {
+            newCursor = cursor
+        }
+
+        attributedText = mutableText
+        selectedRange = NSRange(location: newCursor, length: 0)
+        typingAttributes = attributes
+        notifyTextDidChange()
+        setNeedsDisplay()
+    }
+
+    func handleReturnKey(in range: NSRange) -> Bool {
+        guard range.location != NSNotFound else {
+            return true
+        }
+
+        let plain = text ?? ""
+        let nsPlain = plain as NSString
+        let lineRange = nsPlain.lineRange(for: NSRange(location: range.location, length: 0))
+        let lineText = nsPlain
+            .substring(with: lineRange)
+            .trimmingCharacters(in: .newlines)
+
+        guard lineText.hasPrefix(Self.bulletPrefix) else {
+            return true
+        }
+
+        let attributes = NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        let contentAfterBullet = String(lineText.dropFirst(Self.bulletPrefix.count))
+
+        if contentAfterBullet.trimmingCharacters(in: .whitespaces).isEmpty {
+            mutableText.deleteCharacters(in: NSRange(location: lineRange.location, length: Self.bulletPrefix.count))
+
+            var insertLocation = range.location
+            if insertLocation >= lineRange.location + Self.bulletPrefix.count {
+                insertLocation -= Self.bulletPrefix.count
+            } else if insertLocation > lineRange.location {
+                insertLocation = lineRange.location
+            }
+
+            mutableText.replaceCharacters(
+                in: NSRange(location: insertLocation, length: 0),
+                with: NSAttributedString(string: "\n", attributes: attributes)
+            )
+            attributedText = mutableText
+            selectedRange = NSRange(location: insertLocation + 1, length: 0)
+        } else {
+            let insertString = "\n" + Self.bulletPrefix
+            mutableText.replaceCharacters(
+                in: range,
+                with: NSAttributedString(string: insertString, attributes: attributes)
+            )
+            attributedText = mutableText
+            selectedRange = NSRange(location: range.location + insertString.count, length: 0)
+        }
+
+        typingAttributes = attributes
+        notifyTextDidChange()
+        setNeedsDisplay()
+        return false
+    }
+
+    private func notifyTextDidChange() {
+        delegate?.textViewDidChange?(self)
     }
 
     override func layoutSubviews() {
@@ -565,6 +699,18 @@ struct LinedTextEditor: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.isUpdatingFromTextView = false
             }
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText text: String
+        ) -> Bool {
+            guard text == "\n", let linedTextView = textView as? LinedTextView else {
+                return true
+            }
+
+            return linedTextView.handleReturnKey(in: range)
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {

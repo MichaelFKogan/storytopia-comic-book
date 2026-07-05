@@ -23,10 +23,10 @@ struct SectionTitle: View {
 
 struct CircleIconButton: View {
     let systemName: String
+    var action: () -> Void = {}
 
     var body: some View {
-        Button {
-        } label: {
+        Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Color.storyInk)
@@ -81,12 +81,12 @@ struct BottomNavigationBar: View {
                 selectedPage = .home
             }
             NavItem(
-                title: "Daily",
-                systemName: "calendar",
-                isSelected: selectedPage == .today,
+                title: "Entries",
+                systemName: selectedPage == .entries ? "doc.text.fill" : "doc.text",
+                isSelected: selectedPage == .entries,
                 selectedColor: .homeAccent
             ) {
-                selectedPage = .today
+                selectedPage = .entries
             }
             CreateNavItem(isSelected: selectedPage == .create, selectedColor: .homeAccent) {
                 withAnimation(.snappy(duration: 0.32)) {
@@ -111,8 +111,8 @@ struct BottomNavigationBar: View {
             }
         }
         .padding(.horizontal, 22)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.top, 10)
+        .padding(.bottom, 0)
         .background(Color.white)
         .overlay(
             Rectangle()
@@ -156,18 +156,15 @@ struct CreateNavItem: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: isSelected ? "plus.circle.fill" : "plus.circle")
-                    .font(.system(size: 24, weight: isSelected ? .bold : .regular))
-
-                Text("Create")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
-            }
-            .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            Image(systemName: "plus")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(selectedColor, in: Circle())
+                .shadow(color: selectedColor.opacity(0.28), radius: 7, y: 3)
         }
         .frame(maxWidth: .infinity)
+        .offset(y: -3)
+        .accessibilityLabel("Create")
     }
 }

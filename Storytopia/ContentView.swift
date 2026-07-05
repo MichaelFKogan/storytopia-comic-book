@@ -73,6 +73,14 @@ struct ContentView: View {
             ExploreView(selectedPage: pageSelection)
                 .transition(.identity)
                 .zIndex(0)
+        case .entries:
+            EntriesView(
+                selectedPage: pageSelection,
+                isDraftSaved: $isDraftSaved,
+                activeDraftID: $activeDraftID
+            )
+                .transition(.identity)
+                .zIndex(0)
         case .journal:
             JournalView(
                 selectedPage: pageSelection,
@@ -88,6 +96,12 @@ struct ContentView: View {
             )
             .transition(.identity)
             .zIndex(0)
+        case .settings:
+            NavigationStack {
+                SettingsView(selectedPage: pageSelection)
+            }
+                .transition(.identity)
+                .zIndex(0)
         case .create:
             EmptyView()
         }

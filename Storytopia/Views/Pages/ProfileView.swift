@@ -19,29 +19,32 @@ struct ProfileView: View {
     ]
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color.homePageBackground
-                .ignoresSafeArea()
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                Color.homePageBackground
+                    .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    profileSummary
-                    storyboardsSection
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, isSelecting ? 150 : 96)
-            }
-
-            VStack(spacing: 0) {
-                if isSelecting {
-                    selectionActionBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header
+                        profileSummary
+                        storyboardsSection
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, isSelecting ? 150 : 96)
                 }
 
-                BottomNavigationBar(selectedPage: $selectedPage)
+                VStack(spacing: 0) {
+                    if isSelecting {
+                        selectionActionBar
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    BottomNavigationBar(selectedPage: $selectedPage)
+                }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .fullScreenCover(
             isPresented: Binding(
@@ -96,7 +99,18 @@ struct ProfileView: View {
 
             Spacer()
 
-            CircleIconButton(systemName: "gearshape")
+            NavigationLink {
+                SettingsView(selectedPage: $selectedPage)
+                    .enableInteractivePopGesture()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Color.storyInk.opacity(0.65))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open settings")
         }
         .padding(.top, 2)
     }

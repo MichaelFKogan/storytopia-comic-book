@@ -593,6 +593,7 @@ struct CreateEntryView: View {
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
+    @State private var previewedStoryboardPhoto: UIImage?
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @GestureState private var exitDragOffset: CGFloat = 0
@@ -672,6 +673,23 @@ struct CreateEntryView: View {
                 setStoryboardPhoto(image)
             }
             .ignoresSafeArea()
+        }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { previewedStoryboardPhoto != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        previewedStoryboardPhoto = nil
+                    }
+                }
+            )
+        ) {
+            if let previewedStoryboardPhoto {
+                ReferencePhotoViewer(image: previewedStoryboardPhoto) {
+                    self.previewedStoryboardPhoto = nil
+                }
+                .presentationBackground(.clear)
+            }
         }
         .sheet(isPresented: $isShowingArtStyleGrid) {
             ArtStyleGridSheet(
@@ -1365,6 +1383,14 @@ struct CreateEntryView: View {
                 ) {
                     sendTextFormattingCommand(.strikethrough)
                 }
+
+                keyboardToolButton(
+                    systemName: "list.bullet",
+                    accessibilityLabel: "Bullet list",
+                    isSelected: false
+                ) {
+                    sendTextFormattingCommand(.bulletList)
+                }
             }
 
             Spacer(minLength: 0)
@@ -1785,9 +1811,16 @@ struct CreateEntryView: View {
     private var photoStripContent: some View {
         HStack(spacing: 9) {
             ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
-                StoryboardPhotoStripThumbnail(image: image) {
-                    removeStoryboardPhoto(at: index)
-                }
+                StoryboardPhotoStripThumbnail(
+                    image: image,
+                    removeAction: {
+                        removeStoryboardPhoto(at: index)
+                    },
+                    tapAction: {
+                        dismissKeyboard()
+                        previewedStoryboardPhoto = image
+                    }
+                )
                     .onDrag {
                         draggedStoryboardPhotoIndex = index
                         return NSItemProvider(object: String(index) as NSString)
@@ -3405,35 +3438,46 @@ struct ArtStyleGridOption: View {
 struct StoryboardPhotoStripThumbnail: View {
     let image: UIImage
     let removeAction: () -> Void
+    let tapAction: () -> Void
 
     private let size: CGFloat = 56
     private let bottomPadding: CGFloat = 12
+    private let overflow: CGFloat = 6
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(Color.white)
                 .frame(width: size, height: size + bottomPadding)
                 .shadow(color: .black.opacity(0.13), radius: 5, x: 0, y: 3)
+                .padding(.top, overflow)
+                .padding(.trailing, overflow)
 
             VStack(spacing: 0) {
-
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size - 10, height: size - 10)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .stroke(Color.storyInk.opacity(0.45), lineWidth: 0.8)
-                    )
-                    .padding(.top, 5)
+                Button {
+                    tapAction()
+                } label: {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size - 10, height: size - 10)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .stroke(Color.storyInk.opacity(0.45), lineWidth: 0.8)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View reference photo")
+                .padding(.top, 5)
 
                 Spacer(minLength: 0)
             }
             .frame(width: size, height: size + bottomPadding)
+            .padding(.top, overflow)
+            .padding(.trailing, overflow)
 
             Button {
                 removeAction()
@@ -3445,9 +3489,73 @@ struct StoryboardPhotoStripThumbnail: View {
                     .background(Color.black.opacity(0.58), in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(3)
+            .accessibilityLabel("Remove reference photo")
         }
-        .frame(width: size, height: size + bottomPadding)
+        .frame(width: size + overflow, height: size + bottomPadding + overflow)
+    }
+}
+
+struct ReferencePhotoViewer: View {
+    let image: UIImage
+    let closeAction: () -> Void
+
+    @State private var dragOffset: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 64)
+
+            Button {
+                closeAction()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.storyPurple.opacity(0.94), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close photo viewer")
+            .padding(.top, 14)
+            .padding(.trailing, 16)
+        }
+        .contentShape(Rectangle())
+        .offset(y: dragOffset)
+        .gesture(dismissalDragGesture)
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
+    }
+
+    private var dismissalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                dragOffset = max(value.translation.height, 0)
+            }
+            .onEnded { value in
+                let shouldDismiss = value.translation.height > 120 || value.predictedEndTranslation.height > 220
+
+                if shouldDismiss {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        dragOffset = UIScreen.main.bounds.height
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        closeAction()
+                    }
+                } else {
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.86)) {
+                        dragOffset = 0
+                    }
+                }
+            }
     }
 }
 

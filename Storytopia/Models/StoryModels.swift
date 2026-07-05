@@ -6,8 +6,10 @@ enum StoryPage {
     case today
     case explore
     case create
+    case entries
     case journal
     case profile
+    case settings
 }
 
 enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
