@@ -272,6 +272,84 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum CreateKeyboardFormattingMode: String, CaseIterable, Identifiable {
+    case font
+    case textType
+    case color
+    case textSize
+
+    var id: String { rawValue }
+}
+
+private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
+    case body
+    case heading1
+    case heading2
+    case heading3
+    case heading4
+    case heading5
+    case heading6
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .body:
+            "Body"
+        case .heading1:
+            "Heading 1"
+        case .heading2:
+            "Heading 2"
+        case .heading3:
+            "Heading 3"
+        case .heading4:
+            "Heading 4"
+        case .heading5:
+            "Heading 5"
+        case .heading6:
+            "Heading 6"
+        }
+    }
+
+    var textRunStyle: NotebookTextRunStyle {
+        switch self {
+        case .body:
+            .body
+        case .heading1:
+            .heading1
+        case .heading2:
+            .heading2
+        case .heading3:
+            .heading3
+        case .heading4:
+            .heading4
+        case .heading5:
+            .heading5
+        case .heading6:
+            .heading6
+        }
+    }
+
+    var sampleSize: CGFloat {
+        switch self {
+        case .body:
+            15
+        case .heading1:
+            22
+        case .heading2:
+            19
+        case .heading3:
+            17
+        case .heading4:
+            16
+        case .heading5:
+            15
+        case .heading6:
+            14
+        }
+    }
+}
+
 private enum CreateFontChoice: String, CaseIterable, Identifiable {
     case sans
     case serif
@@ -757,6 +835,10 @@ struct CreateEntryView: View {
     @State private var editorFocusRequestID = 0
     @State private var editorBlurRequestID = 0
     @State private var isKeyboardVisible = false
+    @State private var isKeyboardFormattingToolbarVisible = false
+    @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
+    @State private var lastKeyboardHeight: CGFloat = 300
+    @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
 
     private func dismissKeyboard() {
         isTitleFocused = false
@@ -803,6 +885,16 @@ struct CreateEntryView: View {
 
     private var selectedPageBackgroundColor: Color {
         selectedPaperStyleChoice.showsPaperColorOptions ? selectedPaperColor : .homePageBackground
+    }
+
+    private var selectedKeyboardTextColor: Color {
+        CreateFormattingPalette.textColors[
+            min(max(selectedTextColorIndex, 0), CreateFormattingPalette.textColors.count - 1)
+        ].color
+    }
+
+    private var keyboardReplacementPanelHeight: CGFloat {
+        max(260, lastKeyboardHeight)
     }
 
     private var selectedPaperSurfaceColor: Color {
@@ -1081,7 +1173,7 @@ struct CreateEntryView: View {
         }
         .background(selectedPaperSurfaceColor)
         .overlay(alignment: .bottomTrailing) {
-            if !isKeyboardVisible {
+            if !isKeyboardVisible && activeKeyboardFormattingMode == nil {
                 editorFloatingToolStack
                     .padding(.trailing, 31)
                     .padding(.bottom, editorFloatingToolBottomPadding)
@@ -1099,10 +1191,15 @@ struct CreateEntryView: View {
         .toolbar(isFullScreenEditorVisible ? .hidden : .visible, for: .navigationBar)
         .toolbarBackground(usesPaperImageBackground ? .hidden : .visible, for: .navigationBar)
         .toolbarBackground(selectedPageBackgroundColor, for: .navigationBar)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             KeyboardCornerRadiusRemover.removeKeyboardCornerRadius()
+            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                lastKeyboardHeight = keyboardFrame.height
+            }
             withAnimation(.snappy(duration: 0.22)) {
                 isKeyboardVisible = true
+                isKeyboardFormattingToolbarVisible = false
+                activeKeyboardFormattingMode = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
@@ -1258,34 +1355,47 @@ struct CreateEntryView: View {
                 .foregroundColor(Color.storyGray.opacity(0.46))
         }
 
-        if showsComposeFlowControls {
+        if showsToolbarSaveButton {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    saveDraftAndExit()
+                    performToolbarSave()
                 } label: {
                     Text("Save")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
+                        .foregroundStyle(toolbarSaveButtonColor)
                 }
                 .buttonStyle(.plain)
+                .disabled(!canUseToolbarSaveButton)
             }
             .hideSharedBackgroundIfAvailable()
         }
+    }
 
-        if presentation.savesDirectlyToJournal {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    saveDirectJournalEntryAndExit()
-                } label: {
-                    Text("Save")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.storyPurple)
-                }
-                .buttonStyle(.plain)
-                .disabled(!hasDraftContent)
-                .opacity(hasDraftContent ? 1 : 0.42)
-            }
-            .hideSharedBackgroundIfAvailable()
+    private var showsToolbarSaveButton: Bool {
+        showsComposeFlowControls
+            || presentation.isEditDraft
+            || presentation.savesDirectlyToJournal
+    }
+
+    private var canUseToolbarSaveButton: Bool {
+        if presentation.isEditDraft {
+            return hasUnsavedDraftChanges
+        }
+
+        return hasDraftContent
+    }
+
+    private var toolbarSaveButtonColor: Color {
+        canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
+    }
+
+    private func performToolbarSave() {
+        if presentation.isEditDraft {
+            saveEditedDraftChanges()
+        } else if presentation.savesDirectlyToJournal {
+            saveDirectJournalEntryAndExit()
+        } else {
+            saveDraftAndExit()
         }
     }
 
@@ -1349,6 +1459,18 @@ struct CreateEntryView: View {
         saveDraftAndExit(forceSave: false)
     }
 
+    private func saveEditedDraftChanges() {
+        dismissKeyboard()
+
+        guard let savedDraftID = makePendingDraftSave(forceSave: true).flatMap(persistDraftSave) else {
+            return
+        }
+
+        activeDraftID = savedDraftID
+        loadedDraftSnapshot = currentDraftSnapshot(id: savedDraftID)
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
     private func saveFromExitConfirmation() {
         if presentation.savesDirectlyToJournal {
             saveDirectJournalEntryAndExit()
@@ -1403,7 +1525,8 @@ struct CreateEntryView: View {
         )
     }
 
-    private func persistDraftSave(_ pendingSave: PendingCreateEntryDraftSave) {
+    @discardableResult
+    private func persistDraftSave(_ pendingSave: PendingCreateEntryDraftSave) -> UUID? {
         let draftThumbnail = DraftThumbnailRenderer.render(
             title: pendingSave.title,
             text: pendingSave.text,
@@ -1415,7 +1538,7 @@ struct CreateEntryView: View {
             paperColorIndex: pendingSave.paperColorIndex
         )
 
-        _ = CreateEntryDraftStore.save(
+        return CreateEntryDraftStore.save(
             id: pendingSave.id,
             title: pendingSave.title,
             text: pendingSave.text,
@@ -1586,7 +1709,7 @@ struct CreateEntryView: View {
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Group {
-                    if isKeyboardVisible {
+                    if isKeyboardVisible || isKeyboardFormattingToolbarVisible || activeKeyboardFormattingMode != nil {
                         entryDraftKeyboardBar
                     } else {
                         entryDraftBottomBar
@@ -1595,6 +1718,8 @@ struct CreateEntryView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
+            .animation(.snappy(duration: 0.22), value: isKeyboardFormattingToolbarVisible)
+            .animation(.snappy(duration: 0.22), value: activeKeyboardFormattingMode)
             .animation(.snappy(duration: 0.22), value: hasStoryboardPhotos)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1633,6 +1758,27 @@ struct CreateEntryView: View {
     }
 
     private var entryDraftKeyboardBar: some View {
+        VStack(spacing: 0) {
+            if isKeyboardFormattingToolbarVisible || activeKeyboardFormattingMode != nil {
+                formattingKeyboardToolbar
+            } else {
+                normalKeyboardToolbar
+            }
+
+            if activeKeyboardFormattingMode != nil {
+                keyboardFormattingPanel
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.homePageBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.storyBorder.opacity(0.45))
+                .frame(height: 0.5)
+        }
+    }
+
+    private var normalKeyboardToolbar: some View {
         HStack(spacing: 8) {
             keyboardPhotoButton
 
@@ -1644,53 +1790,12 @@ struct CreateEntryView: View {
                     accessibilityLabel: "Font options",
                     isSelected: false
                 ) {
-                    openFontOptions()
+                    showKeyboardFormattingToolbar()
                 }
 
                 keyboardToolbarDivider
 
-                keyboardFormattingButton(
-                    title: "B",
-                    accessibilityLabel: "Bold",
-                    isSelected: false
-                ) {
-                    sendTextFormattingCommand(.bold)
-                }
-
-                keyboardFormattingButton(
-                    title: "I",
-                    accessibilityLabel: "Italic",
-                    isSelected: false,
-                    isItalic: true
-                ) {
-                    sendTextFormattingCommand(.italic)
-                }
-
-                keyboardFormattingButton(
-                    title: "U",
-                    accessibilityLabel: "Underline",
-                    isSelected: false,
-                    isUnderlined: true
-                ) {
-                    sendTextFormattingCommand(.underline)
-                }
-
-                keyboardFormattingButton(
-                    title: "S",
-                    accessibilityLabel: "Strikethrough",
-                    isSelected: false,
-                    isStrikethrough: true
-                ) {
-                    sendTextFormattingCommand(.strikethrough)
-                }
-
-                keyboardToolButton(
-                    systemName: "list.bullet",
-                    accessibilityLabel: "Bullet list",
-                    isSelected: false
-                ) {
-                    sendTextFormattingCommand(.bulletList)
-                }
+                keyboardInlineStyleButtons
             }
 
             Spacer(minLength: 0)
@@ -1704,12 +1809,88 @@ struct CreateEntryView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity)
-        .background(Color.homePageBackground)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.storyBorder.opacity(0.45))
-                .frame(height: 0.5)
+    }
+
+    private var formattingKeyboardToolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                Button {
+                    closeKeyboardFormattingToolbar()
+                } label: {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.86))
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to keyboard")
+
+                keyboardPanelChip(
+                    title: selectedFontChoice.title,
+                    mode: .font,
+                    width: 112
+                )
+
+                keyboardPanelChip(
+                    title: selectedKeyboardTextType.title,
+                    mode: .textType,
+                    width: 104
+                )
+
+                keyboardColorButton
+
+                keyboardTextSizeButton
+            }
+            .padding(.horizontal, 12)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var keyboardInlineStyleButtons: some View {
+        HStack(spacing: 1) {
+            keyboardFormattingButton(
+                title: "B",
+                accessibilityLabel: "Bold",
+                isSelected: false
+            ) {
+                sendTextFormattingCommand(.bold)
+            }
+
+            keyboardFormattingButton(
+                title: "I",
+                accessibilityLabel: "Italic",
+                isSelected: false,
+                isItalic: true
+            ) {
+                sendTextFormattingCommand(.italic)
+            }
+
+            keyboardFormattingButton(
+                title: "U",
+                accessibilityLabel: "Underline",
+                isSelected: false,
+                isUnderlined: true
+            ) {
+                sendTextFormattingCommand(.underline)
+            }
+
+            keyboardFormattingButton(
+                title: "S",
+                accessibilityLabel: "Strikethrough",
+                isSelected: false,
+                isStrikethrough: true
+            ) {
+                sendTextFormattingCommand(.strikethrough)
+            }
+
+            keyboardToolButton(
+                systemName: "list.bullet",
+                accessibilityLabel: "Bullet list",
+                isSelected: false
+            ) {
+                sendTextFormattingCommand(.bulletList)
+            }
         }
     }
 
@@ -1722,9 +1903,313 @@ struct CreateEntryView: View {
         )
     }
 
+    private func showKeyboardFormattingToolbar() {
+        withAnimation(.snappy(duration: 0.22)) {
+            isKeyboardFormattingToolbarVisible = true
+            activeKeyboardFormattingMode = nil
+        }
+    }
+
+    private func showKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
+        isTitleFocused = false
+        isKeyboardFormattingToolbarVisible = true
+        activeKeyboardFormattingMode = mode
+        dismissKeyboard()
+    }
+
+    private func closeKeyboardFormattingToolbar() {
+        withAnimation(.snappy(duration: 0.22)) {
+            isKeyboardFormattingToolbarVisible = false
+            activeKeyboardFormattingMode = nil
+        }
+        isTitleFocused = false
+        editorFocusRequestID += 1
+    }
+
+    private func keyboardPanelChip(
+        title: String,
+        mode: CreateKeyboardFormattingMode,
+        width: CGFloat
+    ) -> some View {
+        Button {
+            showKeyboardFormattingPanel(mode)
+        } label: {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.9))
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
+                .frame(width: width, height: 39)
+                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(activeKeyboardFormattingMode == mode ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: activeKeyboardFormattingMode == mode ? 1.8 : 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(activeKeyboardFormattingMode == mode ? .isSelected : [])
+    }
+
+    private var keyboardColorButton: some View {
+        Button {
+            showKeyboardFormattingPanel(.color)
+        } label: {
+            keyboardColorCircleChip
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Text color")
+        .accessibilityAddTraits(activeKeyboardFormattingMode == .color ? .isSelected : [])
+    }
+
+    private var keyboardTextSizeButton: some View {
+        Button {
+            showKeyboardFormattingPanel(.textSize)
+        } label: {
+            keyboardSizeChip
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Text size")
+        .accessibilityAddTraits(activeKeyboardFormattingMode == .textSize ? .isSelected : [])
+    }
+
+    private var keyboardColorCircleChip: some View {
+        Circle()
+            .fill(selectedKeyboardTextColor)
+            .frame(width: 21, height: 21)
+            .overlay(
+                Circle()
+                    .stroke(Color.storyInk.opacity(0.16), lineWidth: 1)
+            )
+            .frame(width: 39, height: 39)
+            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(activeKeyboardFormattingMode == .color ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: activeKeyboardFormattingMode == .color ? 1.8 : 1)
+            )
+    }
+
+    private var keyboardSizeChip: some View {
+        Text("Size")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Color.storyInk.opacity(0.9))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: 50, height: 39)
+            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(activeKeyboardFormattingMode == .textSize ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: activeKeyboardFormattingMode == .textSize ? 1.8 : 1)
+            )
+    }
+
+    @ViewBuilder
+    private var keyboardFormattingPanel: some View {
+        switch activeKeyboardFormattingMode {
+        case .font:
+            keyboardFontPanel
+        case .textType:
+            keyboardTextTypePanel
+        case .color:
+            keyboardColorPanel
+        case .textSize:
+            keyboardTextSizePanel
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private var keyboardFontPanel: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVGrid(columns: keyboardPanelColumns, spacing: 12) {
+                ForEach(CreateFontChoice.allCases) { font in
+                    Button {
+                        selectedFontChoice = font
+                    } label: {
+                        keyboardPanelTile(isSelected: selectedFontChoice == font) {
+                            Text(font.title)
+                                .font(font.swiftUIBodyFont(size: 16))
+                                .foregroundStyle(Color.storyInk)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(font.title)
+                    .accessibilityAddTraits(selectedFontChoice == font ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 22)
+        }
+        .frame(height: keyboardReplacementPanelHeight)
+    }
+
+    private var keyboardTextTypePanel: some View {
+        LazyVGrid(columns: keyboardPanelColumns, spacing: 12) {
+            ForEach(CreateKeyboardTextType.allCases) { textType in
+                Button {
+                    selectedKeyboardTextType = textType
+                    sendTextFormattingCommand(.textStyle(textType.textRunStyle))
+                } label: {
+                    keyboardPanelTile(isSelected: selectedKeyboardTextType == textType) {
+                        Text(textType.title)
+                            .font(selectedFontChoice.swiftUIBodyFont(size: textType.sampleSize))
+                            .foregroundStyle(Color.storyInk)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(textType.title)
+                .accessibilityAddTraits(selectedKeyboardTextType == textType ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 24)
+        .frame(height: keyboardReplacementPanelHeight, alignment: .top)
+    }
+
+    private var keyboardColorPanel: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                keyboardPanelSectionTitle("Text color")
+
+                LazyVGrid(columns: keyboardColorColumns, spacing: 14) {
+                    ForEach(CreateFormattingPalette.textColors.indices, id: \.self) { index in
+                        keyboardColorSwatch(
+                            color: CreateFormattingPalette.textColors[index].color,
+                            isSelected: selectedTextColorIndex == index
+                        ) {
+                            selectedTextColorIndex = index
+                        }
+                    }
+                }
+
+                if selectedPaperStyleChoice.showsPaperColorOptions {
+                    keyboardPanelSectionTitle("Background color")
+
+                    LazyVGrid(columns: keyboardColorColumns, spacing: 14) {
+                        ForEach(CreateFormattingPalette.paperColors.indices, id: \.self) { index in
+                            keyboardColorSwatch(
+                                color: CreateFormattingPalette.paperColors[index],
+                                isSelected: selectedPaperColorIndex == index
+                            ) {
+                                selectedPaperColorIndex = index
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+        }
+        .frame(height: keyboardReplacementPanelHeight)
+    }
+
+    private var keyboardTextSizePanel: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            keyboardPanelSectionTitle("Text size")
+
+            HStack(spacing: 14) {
+                Text("A")
+                    .font(selectedFontChoice.swiftUIFont(size: 17, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.72))
+
+                Slider(value: $previewTextSize, in: 0...1)
+                    .tint(Color.storyPurple)
+
+                Text("A")
+                    .font(selectedFontChoice.swiftUIFont(size: 31, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.82))
+            }
+
+            Text("The little story found its voice.")
+                .font(selectedFontChoice.swiftUIBodyFont(size: CGFloat(14 + previewTextSize * 8)))
+                .foregroundStyle(selectedKeyboardTextColor)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
+                .padding(16)
+                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.storyBorder.opacity(0.46), lineWidth: 1)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 18)
+        .padding(.bottom, 24)
+        .frame(height: keyboardReplacementPanelHeight, alignment: .top)
+    }
+
+    private var keyboardPanelColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
+    }
+
+    private var keyboardColorColumns: [GridItem] {
+        [
+            GridItem(.adaptive(minimum: 58), spacing: 13)
+        ]
+    }
+
+    private func keyboardPanelTile<Content: View>(
+        isSelected: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(.horizontal, 16)
+            .frame(height: 62)
+            .frame(maxWidth: .infinity)
+            .background(isSelected ? Color.storyPurple.opacity(0.12) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: isSelected ? 1.8 : 1)
+            )
+    }
+
+    private func keyboardPanelSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(Color.storyInk.opacity(0.48))
+    }
+
+    private func keyboardColorSwatch(
+        color: Color,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.72))
+                .frame(width: 58, height: 58)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(color)
+                        .padding(10)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: isSelected ? 1.8 : 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private var keyboardToolbarDivider: some View {
         Rectangle()
-            .fill(Color.storyInk.opacity(0.14))
+            .fill(Color.storyInk.opacity(0.26))
             .frame(width: 0.5, height: 24)
             .padding(.horizontal, 4)
     }

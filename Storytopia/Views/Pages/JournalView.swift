@@ -3412,13 +3412,6 @@ struct EntriesView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.homeAccent)
-            }
-        }
         .environment(\.editMode, $editMode)
         .onAppear(perform: refreshEntries)
         .onChange(of: selectedPage) { newPage in
@@ -3464,6 +3457,10 @@ struct EntriesView: View {
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
+
+            EditButton()
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
 
             entryLayoutSwitcher
 

@@ -4,6 +4,7 @@ import UIKit
 private extension NSAttributedString.Key {
     static let notebookBold = NSAttributedString.Key("StorytopiaNotebookBold")
     static let notebookItalic = NSAttributedString.Key("StorytopiaNotebookItalic")
+    static let notebookTextStyle = NSAttributedString.Key("StorytopiaNotebookTextStyle")
 }
 
 enum NotebookTextFormattingCommand: Equatable {
@@ -12,6 +13,40 @@ enum NotebookTextFormattingCommand: Equatable {
     case underline
     case strikethrough
     case bulletList
+    case textStyle(NotebookTextRunStyle)
+}
+
+enum NotebookTextRunStyle: String, Codable, Equatable, CaseIterable {
+    case body
+    case heading1
+    case heading2
+    case heading3
+    case heading4
+    case heading5
+    case heading6
+
+    var fontScale: CGFloat {
+        switch self {
+        case .body:
+            1
+        case .heading1:
+            1.86
+        case .heading2:
+            1.66
+        case .heading3:
+            1.48
+        case .heading4:
+            1.32
+        case .heading5:
+            1.18
+        case .heading6:
+            1.08
+        }
+    }
+
+    var usesHeadingWeight: Bool {
+        self != .body
+    }
 }
 
 struct NotebookTextFormattingRun: Codable, Equatable {
@@ -21,6 +56,25 @@ struct NotebookTextFormattingRun: Codable, Equatable {
     var isItalic: Bool
     var isUnderlined: Bool
     var isStrikethrough: Bool
+    var textStyleRawValue: String?
+
+    init(
+        location: Int,
+        length: Int,
+        isBold: Bool,
+        isItalic: Bool,
+        isUnderlined: Bool,
+        isStrikethrough: Bool,
+        textStyleRawValue: String? = nil
+    ) {
+        self.location = location
+        self.length = length
+        self.isBold = isBold
+        self.isItalic = isItalic
+        self.isUnderlined = isUnderlined
+        self.isStrikethrough = isStrikethrough
+        self.textStyleRawValue = textStyleRawValue
+    }
 }
 
 struct NotebookRichTextDocument: Codable, Equatable {
@@ -41,17 +95,19 @@ struct NotebookRichTextDocument: Codable, Equatable {
         ) { attributes, range, _ in
             let font = attributes[.font] as? UIFont
             let traits = font?.fontDescriptor.symbolicTraits ?? []
-            let isBold = (attributes[.notebookBold] as? Bool) ?? traits.contains(.traitBold)
+            let isBold = (attributes[.notebookBold] as? Bool) ?? false
             let isItalic = (attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic)
             let isUnderlined = (attributes[.underlineStyle] as? Int ?? 0) != 0
             let isStrikethrough = (attributes[.strikethroughStyle] as? Int ?? 0) != 0
+            let textStyleRawValue = attributes[.notebookTextStyle] as? String
             let run = NotebookTextFormattingRun(
                 location: range.location,
                 length: range.length,
                 isBold: isBold,
                 isItalic: isItalic,
                 isUnderlined: isUnderlined,
-                isStrikethrough: isStrikethrough
+                isStrikethrough: isStrikethrough,
+                textStyleRawValue: textStyleRawValue
             )
 
             if run.hasFormatting {
@@ -98,7 +154,8 @@ struct NotebookRichTextDocument: Codable, Equatable {
                 isBold: run.isBold,
                 isItalic: run.isItalic,
                 isUnderlined: run.isUnderlined,
-                isStrikethrough: run.isStrikethrough
+                isStrikethrough: run.isStrikethrough,
+                textStyleRawValue: run.textStyleRawValue
             )
         }
 
@@ -123,6 +180,14 @@ struct NotebookRichTextDocument: Codable, Equatable {
             let safeRange = NSIntersectionRange(range, fullRange)
             guard safeRange.length > 0 else {
                 continue
+            }
+
+            if let runStyle = run.textRunStyle {
+                attributedText.setNotebookTextRunStyle(
+                    runStyle,
+                    textStyle: textStyle,
+                    in: safeRange
+                )
             }
 
             if run.isBold {
@@ -163,8 +228,12 @@ struct NotebookRichTextDocument: Codable, Equatable {
 }
 
 private extension NotebookTextFormattingRun {
+    var textRunStyle: NotebookTextRunStyle? {
+        textStyleRawValue.flatMap(NotebookTextRunStyle.init(rawValue:))
+    }
+
     var hasFormatting: Bool {
-        isBold || isItalic || isUnderlined || isStrikethrough
+        isBold || isItalic || isUnderlined || isStrikethrough || textStyleRawValue != nil
     }
 }
 
@@ -641,6 +710,12 @@ final class LinedTextView: UITextView {
             mutableText.toggleIntegerStyle(.strikethroughStyle, in: range)
         case .bulletList:
             break
+        case .textStyle(let textRunStyle):
+            mutableText.setNotebookTextRunStyle(
+                textRunStyle,
+                textStyle: notebookTextStyle,
+                in: range
+            )
         }
 
         attributedText = mutableText
@@ -790,7 +865,7 @@ final class LinedTextView: UITextView {
             isTypingBold.toggle()
         case .italic:
             isTypingItalic.toggle()
-        case .underline, .strikethrough, .bulletList:
+        case .underline, .strikethrough, .bulletList, .textStyle:
             return
         }
 
@@ -1037,6 +1112,34 @@ struct LinedTextEditor: UIViewRepresentable {
 }
 
 private extension NSMutableAttributedString {
+    func setNotebookTextRunStyle(
+        _ runStyle: NotebookTextRunStyle,
+        textStyle: NotebookTextStyle,
+        in range: NSRange
+    ) {
+        enumerateAttributes(in: range) { attributes, subrange, _ in
+            let traits = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits ?? []
+            let isBold = (attributes[.notebookBold] as? Bool) ?? false
+            let isItalic = (attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic)
+            let font = notebookFont(
+                textStyle: textStyle,
+                runStyle: runStyle,
+                isBold: isBold,
+                isItalic: isItalic
+            )
+
+            addAttribute(.font, value: font, range: subrange)
+
+            if runStyle == .body {
+                removeAttribute(.notebookTextStyle, range: subrange)
+            } else {
+                addAttribute(.notebookTextStyle, value: runStyle.rawValue, range: subrange)
+            }
+
+            applySyntheticBoldIfNeeded(isBold: isBold || runStyle.usesHeadingWeight, textStyle: textStyle, range: subrange)
+        }
+    }
+
     func setNotebookFontStyle(
         isBold: Bool?,
         isItalic: Bool?,
@@ -1045,10 +1148,13 @@ private extension NSMutableAttributedString {
     ) {
         enumerateAttributes(in: range) { attributes, subrange, _ in
             let traits = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits ?? []
-            let resolvedBold = isBold ?? ((attributes[.notebookBold] as? Bool) ?? traits.contains(.traitBold))
+            let resolvedBold = isBold ?? ((attributes[.notebookBold] as? Bool) ?? false)
             let resolvedItalic = isItalic ?? ((attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic))
-            let font = NotebookMetrics.uiBodyFont(
-                for: textStyle,
+            let runStyle = (attributes[.notebookTextStyle] as? String)
+                .flatMap(NotebookTextRunStyle.init(rawValue:)) ?? .body
+            let font = notebookFont(
+                textStyle: textStyle,
+                runStyle: runStyle,
                 isBold: resolvedBold,
                 isItalic: resolvedItalic
             )
@@ -1056,8 +1162,24 @@ private extension NSMutableAttributedString {
             addAttribute(.font, value: font, range: subrange)
             setBooleanAttribute(.notebookBold, isEnabled: resolvedBold, range: subrange)
             setBooleanAttribute(.notebookItalic, isEnabled: resolvedItalic, range: subrange)
-            applySyntheticBoldIfNeeded(isBold: resolvedBold, textStyle: textStyle, range: subrange)
+            applySyntheticBoldIfNeeded(isBold: resolvedBold || runStyle.usesHeadingWeight, textStyle: textStyle, range: subrange)
         }
+    }
+
+    private func notebookFont(
+        textStyle: NotebookTextStyle,
+        runStyle: NotebookTextRunStyle,
+        isBold: Bool,
+        isItalic: Bool
+    ) -> UIFont {
+        var adjustedStyle = textStyle
+        adjustedStyle.bodyFontSize = textStyle.bodyFontSize * runStyle.fontScale
+
+        return NotebookMetrics.uiBodyFont(
+            for: adjustedStyle,
+            isBold: isBold || runStyle.usesHeadingWeight,
+            isItalic: isItalic
+        )
     }
 
     func toggleIntegerStyle(_ key: NSAttributedString.Key, in range: NSRange) {
