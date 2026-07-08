@@ -1194,12 +1194,17 @@ struct CreateEntryView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             KeyboardCornerRadiusRemover.removeKeyboardCornerRadius()
             if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                lastKeyboardHeight = keyboardFrame.height
+                let keyboardHeight = keyboardFrame.height
+                if keyboardHeight > 120 {
+                    lastKeyboardHeight = keyboardHeight
+                }
             }
             withAnimation(.snappy(duration: 0.22)) {
                 isKeyboardVisible = true
-                isKeyboardFormattingToolbarVisible = false
-                activeKeyboardFormattingMode = nil
+                if !isKeyboardFormattingToolbarVisible && activeKeyboardFormattingMode == nil {
+                    isKeyboardFormattingToolbarVisible = false
+                    activeKeyboardFormattingMode = nil
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
@@ -1697,6 +1702,7 @@ struct CreateEntryView: View {
                         showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
                         leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
+                        suppressesBodyKeyboard: activeKeyboardFormattingMode != nil,
                         usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
@@ -1914,7 +1920,7 @@ struct CreateEntryView: View {
         isTitleFocused = false
         isKeyboardFormattingToolbarVisible = true
         activeKeyboardFormattingMode = mode
-        dismissKeyboard()
+        editorFocusRequestID += 1
     }
 
     private func closeKeyboardFormattingToolbar() {

@@ -539,13 +539,20 @@ final class LinedTextView: UITextView {
             applyScrollBehavior()
         }
     }
+    var suppressesSystemKeyboard = false {
+        didSet {
+            applyKeyboardInputView()
+        }
+    }
     var usesTexturedPaperEffect = false {
         didSet {
             applyTextStyle()
         }
     }
+    private let suppressedKeyboardInputView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 1))
     private var isTypingBold = false
     private var isTypingItalic = false
+    private var typingTextRunStyle: NotebookTextRunStyle = .body
     private var storedRichTextDocument = NotebookRichTextDocument(text: "")
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -567,6 +574,7 @@ final class LinedTextView: UITextView {
         showsHorizontalScrollIndicator = false
         keyboardDismissMode = .interactive
         applyScrollBehavior()
+        applyKeyboardInputView()
     }
 
     private func applyTextContainerInset() {
@@ -598,6 +606,14 @@ final class LinedTextView: UITextView {
         isScrollEnabled = scrollsInternally
         alwaysBounceVertical = scrollsInternally
         showsVerticalScrollIndicator = scrollsInternally
+    }
+
+    private func applyKeyboardInputView() {
+        inputView = suppressesSystemKeyboard ? suppressedKeyboardInputView : nil
+
+        if isFirstResponder {
+            reloadInputViews()
+        }
     }
 
     override var intrinsicContentSize: CGSize {
@@ -673,6 +689,11 @@ final class LinedTextView: UITextView {
             return
         }
 
+        if case .textStyle(let textRunStyle) = command {
+            applyTextRunStyleToCurrentParagraph(textRunStyle)
+            return
+        }
+
         let range = selectedRange
         guard range.length > 0, range.location != NSNotFound else {
             toggleTypingFormatting(command)
@@ -710,12 +731,8 @@ final class LinedTextView: UITextView {
             mutableText.toggleIntegerStyle(.strikethroughStyle, in: range)
         case .bulletList:
             break
-        case .textStyle(let textRunStyle):
-            mutableText.setNotebookTextRunStyle(
-                textRunStyle,
-                textStyle: notebookTextStyle,
-                in: range
-            )
+        case .textStyle:
+            break
         }
 
         attributedText = mutableText
@@ -728,6 +745,73 @@ final class LinedTextView: UITextView {
 
     func richTextDocument() -> NotebookRichTextDocument {
         storedRichTextDocument.normalized(for: text ?? "")
+    }
+
+    private func applyTextRunStyleToCurrentParagraph(_ textRunStyle: NotebookTextRunStyle) {
+        let range = selectedRange
+        guard range.location != NSNotFound else {
+            return
+        }
+
+        let plain = text ?? ""
+        let nsPlain = plain as NSString
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        let fullRange = NSRange(location: 0, length: mutableText.length)
+        guard fullRange.length > 0 else {
+            return
+        }
+
+        let paragraphRange = selectedParagraphRange(in: nsPlain, selectedRange: range)
+        let stylingRange = paragraphRangeWithoutTrailingNewlines(paragraphRange, in: nsPlain)
+        guard stylingRange.length > 0,
+              NSIntersectionRange(stylingRange, fullRange).length == stylingRange.length else {
+            return
+        }
+
+        mutableText.setNotebookTextRunStyle(
+            textRunStyle,
+            textStyle: notebookTextStyle,
+            in: stylingRange
+        )
+
+        attributedText = mutableText
+        updateStoredRichTextDocument()
+        selectedRange = range
+        typingTextRunStyle = textRunStyle
+        refreshTypingAttributes()
+        notifyTextDidChange()
+        setNeedsDisplay()
+    }
+
+    private func selectedParagraphRange(in plainText: NSString, selectedRange: NSRange) -> NSRange {
+        let textLength = plainText.length
+        let safeLocation = min(max(selectedRange.location, 0), textLength)
+        let startRange = plainText.lineRange(for: NSRange(location: safeLocation, length: 0))
+
+        guard selectedRange.length > 0 else {
+            return startRange
+        }
+
+        let selectionEnd = min(safeLocation + selectedRange.length, textLength)
+        let lastSelectedLocation = max(safeLocation, selectionEnd - 1)
+        let endRange = plainText.lineRange(for: NSRange(location: lastSelectedLocation, length: 0))
+        return NSUnionRange(startRange, endRange)
+    }
+
+    private func paragraphRangeWithoutTrailingNewlines(_ range: NSRange, in plainText: NSString) -> NSRange {
+        var length = min(range.length, plainText.length - range.location)
+
+        while length > 0 {
+            let character = plainText.character(at: range.location + length - 1)
+            guard let scalar = UnicodeScalar(Int(character)),
+                  CharacterSet.newlines.contains(scalar) else {
+                break
+            }
+
+            length -= 1
+        }
+
+        return NSRange(location: range.location, length: length)
     }
 
     private func applyBulletToCurrentLine() {
@@ -873,16 +957,76 @@ final class LinedTextView: UITextView {
     }
 
     private func currentTypingAttributes() -> [NSAttributedString.Key: Any] {
-        NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
+        var adjustedStyle = notebookTextStyle
+        adjustedStyle.bodyFontSize = notebookTextStyle.bodyFontSize * typingTextRunStyle.fontScale
+
+        var attributes = NotebookMetrics.typingAttributes(
+            for: adjustedStyle,
             usesTexturedPaperEffect: usesTexturedPaperEffect,
             isBold: isTypingBold,
             isItalic: isTypingItalic
         )
+
+        if typingTextRunStyle != .body {
+            attributes[.notebookTextStyle] = typingTextRunStyle.rawValue
+            attributes[.font] = NotebookMetrics.uiBodyFont(
+                for: adjustedStyle,
+                isBold: isTypingBold || typingTextRunStyle.usesHeadingWeight,
+                isItalic: isTypingItalic
+            )
+
+            if !isTypingBold, NotebookMetrics.shouldUseSyntheticBold(for: adjustedStyle) {
+                attributes[.strokeWidth] = -2
+            }
+        }
+
+        return attributes
     }
 
     private func refreshTypingAttributes() {
         typingAttributes = currentTypingAttributes()
+    }
+
+    func refreshTypingAttributesFromSelection() {
+        guard let attributedText, attributedText.length > 0 else {
+            typingTextRunStyle = .body
+            isTypingBold = false
+            isTypingItalic = false
+            refreshTypingAttributes()
+            return
+        }
+
+        let textLength = attributedText.length
+        let clampedLocation = min(max(selectedRange.location, 0), textLength)
+        let attributeLocation: Int
+
+        if selectedRange.length > 0 {
+            attributeLocation = min(clampedLocation, textLength - 1)
+        } else if clampedLocation > 0,
+                  (clampedLocation == textLength || isNewlineCharacter(at: clampedLocation, in: attributedText.string as NSString)) {
+            attributeLocation = clampedLocation - 1
+        } else if clampedLocation < textLength {
+            attributeLocation = clampedLocation
+        } else {
+            attributeLocation = textLength - 1
+        }
+
+        let attributes = attributedText.attributes(at: attributeLocation, effectiveRange: nil)
+        let traits = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits ?? []
+        typingTextRunStyle = (attributes[.notebookTextStyle] as? String)
+            .flatMap(NotebookTextRunStyle.init(rawValue:)) ?? .body
+        isTypingBold = (attributes[.notebookBold] as? Bool) ?? false
+        isTypingItalic = (attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic)
+        refreshTypingAttributes()
+    }
+
+    private func isNewlineCharacter(at location: Int, in plainText: NSString) -> Bool {
+        guard location < plainText.length,
+              let scalar = UnicodeScalar(Int(plainText.character(at: location))) else {
+            return false
+        }
+
+        return CharacterSet.newlines.contains(scalar)
     }
 
     override func layoutSubviews() {
@@ -934,6 +1078,7 @@ struct LinedTextEditor: UIViewRepresentable {
     var tintUIColor: UIColor = .systemBlue
     var textStyle: NotebookTextStyle = .default
     var textLeadingInset = NotebookMetrics.textLeadingInset
+    var suppressesSystemKeyboard = false
     var usesTexturedPaperEffect = false
 
     private var shouldDrawRuledLines: Bool {
@@ -952,6 +1097,7 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.tintColor = tintUIColor
         textView.notebookTextStyle = textStyle
         textView.textLeadingInset = textLeadingInset
+        textView.suppressesSystemKeyboard = suppressesSystemKeyboard
         textView.usesTexturedPaperEffect = usesTexturedPaperEffect
         textView.setNotebookText(text, richText: richText?.wrappedValue)
         context.coordinator.currentRichTextDocument = textView.richTextDocument()
@@ -996,6 +1142,10 @@ struct LinedTextEditor: UIViewRepresentable {
 
         if textView.textLeadingInset != textLeadingInset {
             textView.textLeadingInset = textLeadingInset
+        }
+
+        if textView.suppressesSystemKeyboard != suppressesSystemKeyboard {
+            textView.suppressesSystemKeyboard = suppressesSystemKeyboard
         }
 
         let didChangeTexturedPaperEffect = textView.usesTexturedPaperEffect != usesTexturedPaperEffect
@@ -1107,6 +1257,14 @@ struct LinedTextEditor: UIViewRepresentable {
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             scrollView.setNeedsDisplay()
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard let linedTextView = textView as? LinedTextView else {
+                return
+            }
+
+            linedTextView.refreshTypingAttributesFromSelection()
         }
     }
 }
@@ -1414,6 +1572,7 @@ struct NotebookEditorContent: View {
     var showsTitleRule = true
     var leadingContentPadding = NotebookMetrics.marginLeading
     var leadingTextPadding = NotebookMetrics.textLeadingInset
+    var suppressesBodyKeyboard = false
     var usesTexturedPaperEffect = false
     var onBodyTap: (() -> Void)? = nil
     var onTitleSubmit: () -> Void
@@ -1492,6 +1651,7 @@ struct NotebookEditorContent: View {
                 minimumHeight: bodyMinHeight,
                 textStyle: textStyle,
                 textLeadingInset: leadingTextPadding,
+                suppressesSystemKeyboard: suppressesBodyKeyboard,
                 usesTexturedPaperEffect: usesTexturedPaperEffect
             )
             .overlay(alignment: .topLeading) {
