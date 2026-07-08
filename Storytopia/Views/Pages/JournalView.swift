@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 struct JournalView: View {
@@ -41,7 +42,7 @@ struct JournalView: View {
 
                 BottomNavigationBar(selectedPage: $selectedPage)
 
-                bottomJournalControls
+                bottomPrototypeNotice
             }
             .toolbar(.hidden, for: .navigationBar)
             .environment(\.editMode, $editMode)
@@ -102,34 +103,33 @@ struct JournalView: View {
             EditButton()
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Color.homeAccent)
+
+            journalCreateButton
         }
         .padding(.top, 12)
     }
 
-    private var bottomJournalControls: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if showsPrototypeData {
-                prototypeNotice
-                    .padding(.horizontal, 16)
-                    .padding(.trailing, 76)
-            }
-
-            Button {
-                handleCreateButtonTapped()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 58, height: 58)
-                    .background(Color.storyInk, in: Circle())
-                    .shadow(color: Color.storyInk.opacity(0.2), radius: 12, x: 0, y: 6)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Create a new journal")
-            .padding(.trailing, 18)
+    private var journalCreateButton: some View {
+        Button {
+            handleCreateButtonTapped()
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+                .frame(width: 34, height: 34)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.bottom, 82)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Create a new journal")
+    }
+
+    @ViewBuilder
+    private var bottomPrototypeNotice: some View {
+        if showsPrototypeData {
+            prototypeNotice
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 82)
+        }
     }
 
     private var prototypeNotice: some View {
@@ -345,7 +345,6 @@ struct JournalView: View {
             }
 
             chapters[chapterIndex].entries.insert(entry, at: 0)
-            StoryEntryStore.add(entry, to: chapter.title)
         }
     }
 
@@ -3097,7 +3096,10 @@ enum DailyJournalData {
 
     private static func chapterWithStoredEntries(_ chapter: PrototypeChapter) -> PrototypeChapter {
         var chapter = chapter
-        chapter.entries = StoryEntryStore.load(for: chapter.title) + chapter.entries
+        let visibleSampleEntries = chapter.entries.filter {
+            !DeletedSampleEntryStore.contains($0, in: chapter.title)
+        }
+        chapter.entries = StoryEntryStore.load(for: chapter.title) + visibleSampleEntries
         return chapter
     }
 }
@@ -3333,7 +3335,6 @@ private struct AllJournalEntriesSection: View {
             }
 
             chapters[chapterIndex].entries.insert(entry, at: 0)
-            StoryEntryStore.add(entry, to: chapter.title)
         }
     }
 }
@@ -3406,8 +3407,6 @@ struct EntriesView: View {
             }
 
             BottomNavigationBar(selectedPage: $selectedPage)
-
-            bottomEntryControls
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -3467,6 +3466,8 @@ struct EntriesView: View {
             Spacer()
 
             entryLayoutSwitcher
+
+            entryCreateButton
         }
         .padding(.top, 12)
     }
@@ -3511,23 +3512,18 @@ struct EntriesView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var bottomEntryControls: some View {
+    private var entryCreateButton: some View {
         Button {
             activeDraftID = nil
             selectedPage = .create
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 58, height: 58)
-                .background(Color.storyInk, in: Circle())
-                .shadow(color: Color.storyInk.opacity(0.2), radius: 12, x: 0, y: 6)
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .frame(width: 34, height: 34)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Create a new entry")
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 18)
-        .padding(.bottom, 82)
     }
 
     private var entryList: some View {
@@ -3547,7 +3543,7 @@ struct EntriesView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 150)
+            Color.clear.frame(height: 104)
         }
     }
 
@@ -3620,7 +3616,7 @@ struct EntriesView: View {
         }
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 150)
+            Color.clear.frame(height: 104)
         }
     }
 
@@ -3786,6 +3782,7 @@ struct EntriesView: View {
 
     private func moveEntries(from source: IndexSet, to destination: Int) {
         entries.move(fromOffsets: source, toOffset: destination)
+        CreateEntryDraftStore.saveOrder(entries.map(\.id))
     }
 
     private func refreshEntries() {
@@ -4169,6 +4166,14 @@ private struct PrototypeChapterDetailView: View {
     @State private var selectedSection = "Media"
     @State private var isShowingNewStory = false
     @State private var selectedMediaIndex: Int?
+    @State private var draftEntryText = ""
+    @State private var draftStoryTitle = ""
+    @State private var draftStoryboardPhotos: [UIImage?] = Array(repeating: nil, count: 5)
+    @State private var isDraftSaved = false
+    @State private var activeDraftID: UUID?
+    @State private var generatedStoryboards: [GeneratedStoryboard] = []
+    @State private var editMode: EditMode = .inactive
+    @State private var draggingEntryID: UUID?
 
     private let sections = ["Entries", "Media"]
 
@@ -4229,7 +4234,11 @@ private struct PrototypeChapterDetailView: View {
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
         .tint(Color.homeAccent)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                EditButton()
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.homeAccent)
+
                 Button {
                     isShowingNewStory = true
                 } label: {
@@ -4239,21 +4248,42 @@ private struct PrototypeChapterDetailView: View {
                 .accessibilityLabel(presentation == .dailyJournal ? "Create a new journal entry" : "Create a new story")
             }
         }
+        .environment(\.editMode, $editMode)
         .navigationDestination(isPresented: $isShowingNewStory) {
-            NewStorySheet(
-                chapterTitle: chapter.title,
-                accentColor: Color.homeAccent,
-                initialDate: entryDate,
-                collectionLabel: presentation == .dailyJournal ? "Daily Journal" : "Chapter",
-                locksEntryDate: presentation == .dailyJournal
-            ) { entry in
-                chapter.entries.insert(entry, at: 0)
-                selectedSection = "Entries"
-                onCreateStory(entry)
-            }
+            CreateEntryView(
+                presentation: .composeInJournal(
+                    title: chapter.title,
+                    initialDate: entryDate,
+                    locksEntryDate: presentation == .dailyJournal
+                ),
+                entryText: $draftEntryText,
+                storyTitle: $draftStoryTitle,
+                storyboardPhotos: $draftStoryboardPhotos,
+                isDraftSaved: $isDraftSaved,
+                activeDraftID: $activeDraftID,
+                selectedPage: Binding(
+                    get: { .journal },
+                    set: { _ in }
+                ),
+                generatedStoryboards: $generatedStoryboards,
+                dismissCreate: {
+                    isShowingNewStory = false
+                },
+                onJournalEntryCreated: { _, entry in
+                    chapter.entries.insert(entry, at: 0)
+                    selectedSection = "Entries"
+                    onCreateStory(entry)
+                }
+            )
         }
         .onChange(of: isShowingNewStory) { isShowing in
             onNewEntryPresentationChange(isShowing)
+        }
+        .onChange(of: selectedSection) { newSection in
+            if newSection != "Entries" {
+                editMode = .inactive
+                draggingEntryID = nil
+            }
         }
         .fullScreenCover(
             isPresented: Binding(
@@ -4478,28 +4508,7 @@ private struct PrototypeChapterDetailView: View {
             } else {
                 LazyVStack(spacing: 14) {
                     ForEach(Array(chapter.entries.enumerated()), id: \.element.id) { index, entry in
-                        NavigationLink {
-                            PrototypeEntryDetailView(
-                                entry: entry,
-                                chapter: chapter,
-                                title: presentation == .dailyJournal ? "Journal Entry" : "Story"
-                            )
-                        } label: {
-                            PrototypeEntryRow(
-                                entry: detailDisplayEntry(for: entry, entryIndex: index),
-                                accentColor: Color.homeAccent,
-                                thumbnailSize: detailEntryThumbnailSize
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.homeBorder, lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+                        editableEntryRow(entry, at: index)
                     }
                 }
             }
@@ -4517,6 +4526,71 @@ private struct PrototypeChapterDetailView: View {
             }
         }
         .shadow(color: .black.opacity(chapter.entries.isEmpty ? 0.06 : 0), radius: 12, y: 4)
+    }
+
+    private func editableEntryRow(_ entry: PrototypeEntry, at index: Int) -> some View {
+        HStack(spacing: editMode == .active ? 10 : 0) {
+            if editMode == .active {
+                Button {
+                    deleteEntry(entry)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(Color.red)
+                        .frame(width: 30, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(entry.title)")
+            }
+
+            NavigationLink {
+                PrototypeEntryDetailView(
+                    entry: entry,
+                    chapter: chapter,
+                    title: presentation == .dailyJournal ? "Journal Entry" : "Story"
+                )
+            } label: {
+                PrototypeEntryRow(
+                    entry: detailDisplayEntry(for: entry, entryIndex: index),
+                    accentColor: Color.homeAccent,
+                    thumbnailSize: detailEntryThumbnailSize
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(editMode == .active)
+
+            if editMode == .active {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.72))
+                    .frame(width: 30, height: 44)
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        draggingEntryID = entry.id
+                        return NSItemProvider(object: entry.id.uuidString as NSString)
+                    }
+                    .accessibilityLabel("Reorder \(entry.title)")
+            }
+        }
+        .padding(.leading, editMode == .active ? 8 : 0)
+        .padding(.trailing, editMode == .active ? 8 : 0)
+        .frame(maxWidth: .infinity)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+        .onDrop(
+            of: [UTType.text],
+            delegate: PrototypeEntryReorderDropDelegate(
+                targetEntry: entry,
+                entries: $chapter.entries,
+                draggingEntryID: $draggingEntryID,
+                onReorder: persistEntryOrder
+            )
+        )
     }
 
     private var detailEntryThumbnailSize: CGFloat {
@@ -4540,6 +4614,17 @@ private struct PrototypeChapterDetailView: View {
         (0..<count).map { offset in
             regularSetImageNames[(startIndex + offset) % regularSetImageNames.count]
         }
+    }
+
+    private func deleteEntry(_ entry: PrototypeEntry) {
+        chapter.entries.removeAll { $0.id == entry.id }
+        StoryEntryStore.delete(entry, from: chapter.title)
+        DeletedSampleEntryStore.add(entry, in: chapter.title)
+        persistEntryOrder()
+    }
+
+    private func persistEntryOrder() {
+        StoryEntryStore.saveStoredOrder(from: chapter.entries, for: chapter.title)
     }
 
     private var entryCountText: String {
@@ -4592,6 +4677,42 @@ private struct PrototypeChapterDetailView: View {
     }
 }
 
+private struct PrototypeEntryReorderDropDelegate: DropDelegate {
+    let targetEntry: PrototypeEntry
+    @Binding var entries: [PrototypeEntry]
+    @Binding var draggingEntryID: UUID?
+    let onReorder: () -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard
+            let draggingEntryID,
+            draggingEntryID != targetEntry.id,
+            let fromIndex = entries.firstIndex(where: { $0.id == draggingEntryID }),
+            let toIndex = entries.firstIndex(where: { $0.id == targetEntry.id })
+        else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            entries.move(
+                fromOffsets: IndexSet(integer: fromIndex),
+                toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
+            )
+        }
+        onReorder()
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingEntryID = nil
+        onReorder()
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+}
+
 private struct NewStorySheet: View {
     let chapterTitle: String
     let accentColor: Color
@@ -4602,6 +4723,7 @@ private struct NewStorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var bodyText = ""
+    @State private var bodyRichText: NotebookRichTextDocument?
     @State private var location = ""
     @State private var storyDate: Date
     @State private var isPrivateEntry = false
@@ -4659,7 +4781,11 @@ private struct NewStorySheet: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $isShowingExpandedEditor) {
-            ExpandedEntryEditor(entryText: $bodyText, storyTitle: $title)
+            ExpandedEntryEditor(
+                entryText: $bodyText,
+                entryRichText: $bodyRichText,
+                storyTitle: $title
+            )
         }
         .background(newStoryBackground)
         .preferredColorScheme(.light)
@@ -4733,6 +4859,7 @@ private struct NewStorySheet: View {
                     NotebookEditorContent(
                         storyTitle: $title,
                         entryText: $bodyText,
+                        entryRichText: $bodyRichText,
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         bodyPlaceholder: "Start writing...",
@@ -4944,18 +5071,30 @@ private struct NewStorySheet: View {
         timeFormatter.timeStyle = .short
 
         let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRichText = currentBodyRichText()?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         onCreate(
             PrototypeEntry(
                 weekday: weekdayFormatter.string(from: storyDate).uppercased(),
                 day: dayFormatter.string(from: storyDate),
                 title: trimmedTitle,
                 body: trimmedBody,
+                richText: trimmedRichText,
                 time: timeFormatter.string(from: storyDate),
                 location: trimmedLocation.isEmpty ? nil : trimmedLocation,
                 imageNames: []
             )
         )
         dismiss()
+    }
+
+    private func currentBodyRichText() -> NotebookRichTextDocument? {
+        guard !bodyText.isEmpty else {
+            return nil
+        }
+
+        return (bodyRichText ?? NotebookRichTextDocument(text: bodyText))
+            .normalized(for: bodyText)
     }
 }
 
@@ -5159,8 +5298,7 @@ private struct PrototypeEntryDetailView: View {
                     .foregroundStyle(Color.storyGold)
             }
 
-            Text(entry.body)
-                .font(.system(size: 17, weight: .regular, design: .serif))
+            Text(entryDisplayBody)
                 .lineSpacing(7)
                 .foregroundStyle(Color.storyInk.opacity(0.88))
                 .fixedSize(horizontal: false, vertical: true)
@@ -5197,6 +5335,11 @@ private struct PrototypeEntryDetailView: View {
                 .stroke(Color.homeBorder, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
+    }
+
+    private var entryDisplayBody: AttributedString {
+        let richText = entry.richText?.normalized(for: entry.body) ?? NotebookRichTextDocument(text: entry.body)
+        return AttributedString(richText.attributedString(textStyle: .default))
     }
 
     private var entryDetails: some View {
@@ -6086,15 +6229,61 @@ private enum DeletedSampleChapterStore {
     }
 }
 
+private enum DeletedSampleEntryStore {
+    private static let storageKey = "StorytopiaDeletedSampleEntries"
+
+    static func contains(_ entry: PrototypeEntry, in chapterTitle: String) -> Bool {
+        keys.contains(key(for: entry, in: chapterTitle))
+    }
+
+    static func add(_ entry: PrototypeEntry, in chapterTitle: String) {
+        var updatedKeys = keys
+        updatedKeys.insert(key(for: entry, in: chapterTitle))
+        UserDefaults.standard.set(Array(updatedKeys), forKey: storageKey)
+    }
+
+    private static func key(for entry: PrototypeEntry, in chapterTitle: String) -> String {
+        [
+            chapterTitle,
+            entry.weekday,
+            entry.day,
+            entry.title,
+            entry.body,
+            entry.time,
+            entry.location ?? ""
+        ].joined(separator: "\u{1F}")
+    }
+
+    private static var keys: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: storageKey) ?? [])
+    }
+}
+
 enum StoryEntryStore {
     private struct Record: Codable {
+        let id: UUID?
         let chapterTitle: String
         let weekday: String
         let day: String
         let title: String
         let body: String
+        let richText: NotebookRichTextDocument?
         let time: String
         let location: String?
+
+        func matches(_ entry: PrototypeEntry) -> Bool {
+            if id == entry.id {
+                return true
+            }
+
+            return id == nil
+                && weekday == entry.weekday
+                && day == entry.day
+                && title == entry.title
+                && body == entry.body
+                && time == entry.time
+                && location == entry.location
+        }
     }
 
     private static let storageKey = "StorytopiaChapterStories"
@@ -6104,10 +6293,12 @@ enum StoryEntryStore {
             .filter { $0.chapterTitle == chapterTitle }
             .map { record in
                 PrototypeEntry(
+                    id: record.id ?? UUID(),
                     weekday: record.weekday,
                     day: record.day,
                     title: record.title,
                     body: record.body,
+                    richText: record.richText,
                     time: record.time,
                     location: record.location,
                     imageNames: []
@@ -6117,16 +6308,69 @@ enum StoryEntryStore {
 
     static func add(_ entry: PrototypeEntry, to chapterTitle: String) {
         let newRecord = Record(
+            id: entry.id,
             chapterTitle: chapterTitle,
             weekday: entry.weekday,
             day: entry.day,
             title: entry.title,
             body: entry.body,
+            richText: entry.richText,
             time: entry.time,
             location: entry.location
         )
 
         guard let data = try? JSONEncoder().encode([newRecord] + records) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func delete(_ entry: PrototypeEntry, from chapterTitle: String) {
+        var didDelete = false
+        let remainingRecords = records.filter { record in
+            guard record.chapterTitle == chapterTitle else {
+                return true
+            }
+
+            if record.id == entry.id {
+                didDelete = true
+                return false
+            }
+
+            if record.id == nil, !didDelete, record.matches(entry) {
+                didDelete = true
+                return false
+            }
+
+            return true
+        }
+
+        guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func saveStoredOrder(from entries: [PrototypeEntry], for chapterTitle: String) {
+        let allRecords = records
+        let chapterRecords = allRecords.filter { $0.chapterTitle == chapterTitle }
+        guard !chapterRecords.isEmpty else {
+            return
+        }
+
+        var remainingChapterRecords = chapterRecords
+        let reorderedChapterRecords = entries.compactMap { entry -> Record? in
+            guard let recordIndex = remainingChapterRecords.firstIndex(where: { $0.matches(entry) }) else {
+                return nil
+            }
+
+            return remainingChapterRecords.remove(at: recordIndex)
+        } + remainingChapterRecords
+
+        let otherRecords = allRecords.filter { $0.chapterTitle != chapterTitle }
+        guard let data = try? JSONEncoder().encode(reorderedChapterRecords + otherRecords) else {
             return
         }
 
@@ -6149,11 +6393,13 @@ enum StoryEntryStore {
             }
 
             return Record(
+                id: record.id,
                 chapterTitle: newTitle,
                 weekday: record.weekday,
                 day: record.day,
                 title: record.title,
                 body: record.body,
+                richText: record.richText,
                 time: record.time,
                 location: record.location
             )
@@ -6179,21 +6425,46 @@ enum StoryEntryStore {
 }
 
 struct PrototypeEntry: Identifiable {
-    let id = UUID()
+    let id: UUID
     let weekday: String
     let day: String
     let title: String
     let body: String
+    let richText: NotebookRichTextDocument?
     let time: String
     let location: String?
     let imageNames: [String]
 
+    init(
+        id: UUID = UUID(),
+        weekday: String,
+        day: String,
+        title: String,
+        body: String,
+        richText: NotebookRichTextDocument? = nil,
+        time: String,
+        location: String?,
+        imageNames: [String]
+    ) {
+        self.id = id
+        self.weekday = weekday
+        self.day = day
+        self.title = title
+        self.body = body
+        self.richText = richText?.normalized(for: body)
+        self.time = time
+        self.location = location
+        self.imageNames = imageNames
+    }
+
     func copy(imageNames: [String]) -> PrototypeEntry {
         PrototypeEntry(
+            id: id,
             weekday: weekday,
             day: day,
             title: title,
             body: body,
+            richText: richText,
             time: time,
             location: location,
             imageNames: imageNames

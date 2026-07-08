@@ -3,6 +3,123 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum CreateEntryPresentation {
+    case compose
+    case composeInJournal(title: String, initialDate: Date, locksEntryDate: Bool)
+    case editDraft
+
+    var showsNextButton: Bool {
+        if case .compose = self {
+            return true
+        }
+
+        return false
+    }
+
+    var showsEntryOptionsFlow: Bool {
+        if case .compose = self {
+            return true
+        }
+
+        return false
+    }
+
+    var savesDirectlyToJournal: Bool {
+        if case .composeInJournal = self {
+            return true
+        }
+
+        return false
+    }
+
+    var isEditDraft: Bool {
+        if case .editDraft = self {
+            return true
+        }
+
+        return false
+    }
+
+    var directJournalTitle: String? {
+        if case .composeInJournal(let title, _, _) = self {
+            return title
+        }
+
+        return nil
+    }
+
+    var directJournalInitialDate: Date? {
+        if case .composeInJournal(_, let initialDate, _) = self {
+            return initialDate
+        }
+
+        return nil
+    }
+
+    var editorToolbarTitle: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "Write Entry"
+        case .editDraft:
+            return "Edit Entry"
+        }
+    }
+
+    var closeButtonSystemName: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "xmark"
+        case .editDraft:
+            return "chevron.left"
+        }
+    }
+
+    var closeButtonAccessibilityLabel: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "Close"
+        case .editDraft:
+            return "Back"
+        }
+    }
+
+    var exitConfirmationTitle: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "Save this entry?"
+        case .editDraft:
+            return "Save changes?"
+        }
+    }
+
+    var exitConfirmationMessage: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "You've started an entry. Would you like to save it before leaving?"
+        case .editDraft:
+            return "You've made changes to this entry. Would you like to save them before leaving?"
+        }
+    }
+
+    var exitConfirmationSaveButtonTitle: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "Save Entry"
+        case .editDraft:
+            return "Save Changes"
+        }
+    }
+
+    var exitConfirmationDiscardButtonTitle: String {
+        switch self {
+        case .compose, .composeInJournal:
+            return "Discard"
+        case .editDraft:
+            return "Discard Changes"
+        }
+    }
+}
+
 private enum CreateEntryDestination {
     case daily
     case custom
@@ -12,6 +129,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let id: UUID
     let title: String
     let text: String
+    let richText: NotebookRichTextDocument?
     let photoIDs: [ObjectIdentifier]
     let artStyle: String
     let location: String
@@ -28,6 +146,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         id: UUID,
         title: String,
         text: String,
+        richText: NotebookRichTextDocument?,
         photos: [UIImage],
         artStyle: String,
         location: String,
@@ -43,6 +162,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.id = id
         self.title = title
         self.text = text
+        self.richText = richText?.normalized(for: text)
         self.photoIDs = photos.map { ObjectIdentifier($0) }
         self.artStyle = artStyle
         self.location = location
@@ -55,6 +175,24 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.paperStyleRawValue = paperStyleRawValue
         self.paperColorIndex = paperColorIndex
     }
+}
+
+private struct PendingCreateEntryDraftSave {
+    let id: UUID?
+    let title: String
+    let text: String
+    let richText: NotebookRichTextDocument?
+    let photos: [UIImage]
+    let artStyle: String
+    let location: String
+    let date: Date
+    let savesDraft: Bool
+    let isPrivate: Bool
+    let fontChoiceRawValue: String
+    let textColorIndex: Int
+    let textSize: Double
+    let paperStyleRawValue: String
+    let paperColorIndex: Int
 }
 
 private enum CreateTextAlignmentChoice: String, CaseIterable, Identifiable {
@@ -222,6 +360,10 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
         }
     }
 
+    var boldFontName: String? {
+        nil
+    }
+
     var usesVariableWeight: Bool {
         switch self {
         case .nunito, .lora, .crimsonPro, .caveat:
@@ -233,23 +375,34 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var bodyWeight: Font.Weight {
         switch self {
-        case .nunito, .lora, .caveat:
-            .bold
-        case .crimsonPro:
-            .semibold
+        case .nunito, .lora, .crimsonPro:
+            .regular
+        case .caveat:
+            .medium
         case .patrickHand, .gloriaHallelujah, .permanentMarker, .specialElite:
             .regular
         default:
-            .medium
+            .regular
         }
     }
 
     /// Direct wght-axis values for variable fonts that need tuning beyond `bodyWeight`.
     var bodyWght: CGFloat? {
         switch self {
-        case .nunito:
-            700
         case .caveat:
+            500
+        default:
+            nil
+        }
+    }
+
+    var bodyBoldWeight: Font.Weight {
+        .bold
+    }
+
+    var bodyBoldWght: CGFloat? {
+        switch self {
+        case .nunito, .lora, .crimsonPro, .caveat:
             700
         default:
             nil
@@ -552,6 +705,7 @@ private struct DraftPageThumbnail: View {
 
 struct CreateEntryView: View {
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
+    let presentation: CreateEntryPresentation
 
     @Binding var entryText: String
     @Binding var storyTitle: String
@@ -561,6 +715,7 @@ struct CreateEntryView: View {
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
     let dismissCreate: () -> Void
+    var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
 
     @State private var selectedArtStyle = "Anime"
     private let previewLayout = StoryboardLayoutOption.fiveClassic
@@ -581,6 +736,7 @@ struct CreateEntryView: View {
     @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .collegeRuled
     @State private var selectedTextColorIndex = 0
     @State private var selectedPaperColorIndex = 0
+    @State private var entryRichText: NotebookRichTextDocument?
     @State private var previewTextSize: Double = 0.36
     @State private var textFormattingRequestID = 0
     @State private var textFormattingRequest: NotebookTextFormattingRequest?
@@ -609,6 +765,10 @@ struct CreateEntryView: View {
     }
 
     private func showEntryOptionsPage() {
+        guard presentation.showsEntryOptionsFlow else {
+            return
+        }
+
         dismissKeyboard()
         isShowingEntryOptionsPage = true
     }
@@ -622,8 +782,11 @@ struct CreateEntryView: View {
             swiftUIDesign: selectedFontChoice.design,
             uiKitDesign: selectedFontChoice.uiKitDesign,
             customFontName: selectedFontChoice.fontName,
+            customFontBoldName: selectedFontChoice.boldFontName,
             customFontWeight: selectedFontChoice.bodyWeight,
             customFontWght: selectedFontChoice.bodyWght,
+            customFontBoldWeight: selectedFontChoice.bodyBoldWeight,
+            customFontBoldWght: selectedFontChoice.bodyBoldWght,
             customFontUsesVariableWeight: selectedFontChoice.usesVariableWeight,
             customFontSizeScale: selectedFontChoice.bodySizeScale,
             bodyFontSize: CGFloat(14 + previewTextSize * 8),
@@ -648,6 +811,10 @@ struct CreateEntryView: View {
 
     private var usesPaperImageBackground: Bool {
         selectedPaperStyleChoice.backgroundImageName != nil
+    }
+
+    private var showsComposeFlowControls: Bool {
+        presentation.showsNextButton && activeDraftID == nil
     }
 
     var body: some View {
@@ -748,19 +915,19 @@ struct CreateEntryView: View {
             Button("Cancel", role: .cancel) {
             }
         }
-        .alert("Save this entry?", isPresented: $isShowingExitConfirmation) {
-            Button("Save Entry") {
-                saveDraftAndExit()
+        .alert(presentation.exitConfirmationTitle, isPresented: $isShowingExitConfirmation) {
+            Button(presentation.exitConfirmationSaveButtonTitle) {
+                saveFromExitConfirmation()
             }
 
-            Button("Discard", role: .destructive) {
+            Button(presentation.exitConfirmationDiscardButtonTitle, role: .destructive) {
                 discardDraftAndExit()
             }
 
             Button("Cancel", role: .cancel) {
             }
         } message: {
-            Text("You’ve started an entry. Would you like to save it before leaving?")
+            Text(presentation.exitConfirmationMessage)
         }
         .alert(
             "Storyboard generation failed",
@@ -810,8 +977,37 @@ struct CreateEntryView: View {
             }
         }
         .onAppear {
+            configureDirectJournalEntryIfNeeded()
             loadSavedDraftIfNeeded()
         }
+        .onChange(of: activeDraftID) { newDraftID in
+            handleActiveDraftChange(newDraftID)
+        }
+    }
+
+    private func configureDirectJournalEntryIfNeeded() {
+        guard let initialDate = presentation.directJournalInitialDate, !hasDraftContent else {
+            return
+        }
+
+        storyDate = initialDate
+    }
+
+    private func handleActiveDraftChange(_ draftID: UUID?) {
+        guard selectedPage == .create else {
+            return
+        }
+
+        dismissKeyboard()
+        isFullScreenEditorVisible = false
+        isShowingEntryOptionsPage = false
+
+        guard draftID != nil else {
+            clearEditor()
+            return
+        }
+
+        loadSavedDraftIfNeeded()
     }
 
     private func startStoryboardGeneration() {
@@ -894,7 +1090,10 @@ struct CreateEntryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !isFullScreenEditorVisible {
-                createToolbarItems(title: "Write Entry", showsCloseButton: true)
+                createToolbarItems(
+                    title: presentation.editorToolbarTitle,
+                    showsCloseButton: true
+                )
             }
         }
         .toolbar(isFullScreenEditorVisible ? .hidden : .visible, for: .navigationBar)
@@ -950,6 +1149,7 @@ struct CreateEntryView: View {
                     NotebookEditorContent(
                         storyTitle: $storyTitle,
                         entryText: $entryText,
+                        entryRichText: $entryRichText,
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         editorBlurRequestID: editorBlurRequestID,
@@ -1040,14 +1240,14 @@ struct CreateEntryView: View {
                 Button {
                     requestExit()
                 } label: {
-                    Image(systemName: "xmark")
+                    Image(systemName: presentation.closeButtonSystemName)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.72))
                         .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close")
+                .accessibilityLabel(presentation.closeButtonAccessibilityLabel)
             }
             .hideSharedBackgroundIfAvailable()
         }
@@ -1058,17 +1258,35 @@ struct CreateEntryView: View {
                 .foregroundColor(Color.storyGray.opacity(0.46))
         }
 
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                saveDraftAndExit()
-            } label: {
-                Text("Save")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
+        if showsComposeFlowControls {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    saveDraftAndExit()
+                } label: {
+                    Text("Save")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .hideSharedBackgroundIfAvailable()
         }
-        .hideSharedBackgroundIfAvailable()
+
+        if presentation.savesDirectlyToJournal {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    saveDirectJournalEntryAndExit()
+                } label: {
+                    Text("Save")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasDraftContent)
+                .opacity(hasDraftContent ? 1 : 0.42)
+            }
+            .hideSharedBackgroundIfAvailable()
+        }
     }
 
     private var hasDraftContent: Bool {
@@ -1128,49 +1346,101 @@ struct CreateEntryView: View {
     }
 
     private func saveDraftAndExit() {
+        saveDraftAndExit(forceSave: false)
+    }
+
+    private func saveFromExitConfirmation() {
+        if presentation.savesDirectlyToJournal {
+            saveDirectJournalEntryAndExit()
+            return
+        }
+
+        saveDraftAndExit(forceSave: presentation.isEditDraft)
+    }
+
+    private func saveDraftAndExit(forceSave: Bool) {
         dismissKeyboard()
 
-        if hasDraftContent {
-            let draftPhotos = storyboardPhotos.compactMap { $0 }
-            let draftThumbnail = DraftThumbnailRenderer.render(
-                title: storyTitle,
-                text: entryText,
-                photos: draftPhotos,
-                fontChoiceRawValue: selectedFontChoice.rawValue,
-                textColorIndex: selectedTextColorIndex,
-                textSize: previewTextSize,
-                paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-                paperColorIndex: selectedPaperColorIndex
-            )
-
-            _ = CreateEntryDraftStore.save(
-                id: activeDraftID,
-                title: storyTitle,
-                text: entryText,
-                photos: draftPhotos,
-                artStyle: selectedArtStyle,
-                location: storyLocation,
-                date: storyDate,
-                savesDraft: savesDraft,
-                isPrivate: isPrivateEntry,
-                fontChoiceRawValue: selectedFontChoice.rawValue,
-                textColorIndex: selectedTextColorIndex,
-                textSize: previewTextSize,
-                paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-                paperColorIndex: selectedPaperColorIndex,
-                thumbnail: draftThumbnail
-            )
+        let pendingSave = makePendingDraftSave(forceSave: forceSave)
+        if let pendingSave {
+            persistDraftSave(pendingSave)
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         }
 
-        clearEditor()
-        activeDraftID = nil
         withAnimation(.snappy(duration: 0.32)) {
             dismissCreate()
         }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            if selectedPage != .create {
+                clearEditor()
+                activeDraftID = nil
+            }
+        }
+    }
+
+    private func makePendingDraftSave(forceSave: Bool) -> PendingCreateEntryDraftSave? {
+        guard hasDraftContent || forceSave else {
+            return nil
+        }
+
+        return PendingCreateEntryDraftSave(
+            id: activeDraftID,
+            title: storyTitle,
+            text: entryText,
+            richText: currentEntryRichText(),
+            photos: storyboardPhotos.compactMap { $0 },
+            artStyle: selectedArtStyle,
+            location: storyLocation,
+            date: storyDate,
+            savesDraft: savesDraft,
+            isPrivate: isPrivateEntry,
+            fontChoiceRawValue: selectedFontChoice.rawValue,
+            textColorIndex: selectedTextColorIndex,
+            textSize: previewTextSize,
+            paperStyleRawValue: selectedPaperStyleChoice.rawValue,
+            paperColorIndex: selectedPaperColorIndex
+        )
+    }
+
+    private func persistDraftSave(_ pendingSave: PendingCreateEntryDraftSave) {
+        let draftThumbnail = DraftThumbnailRenderer.render(
+            title: pendingSave.title,
+            text: pendingSave.text,
+            photos: pendingSave.photos,
+            fontChoiceRawValue: pendingSave.fontChoiceRawValue,
+            textColorIndex: pendingSave.textColorIndex,
+            textSize: pendingSave.textSize,
+            paperStyleRawValue: pendingSave.paperStyleRawValue,
+            paperColorIndex: pendingSave.paperColorIndex
+        )
+
+        _ = CreateEntryDraftStore.save(
+            id: pendingSave.id,
+            title: pendingSave.title,
+            text: pendingSave.text,
+            richText: pendingSave.richText,
+            photos: pendingSave.photos,
+            artStyle: pendingSave.artStyle,
+            location: pendingSave.location,
+            date: pendingSave.date,
+            savesDraft: pendingSave.savesDraft,
+            isPrivate: pendingSave.isPrivate,
+            fontChoiceRawValue: pendingSave.fontChoiceRawValue,
+            textColorIndex: pendingSave.textColorIndex,
+            textSize: pendingSave.textSize,
+            paperStyleRawValue: pendingSave.paperStyleRawValue,
+            paperColorIndex: pendingSave.paperColorIndex,
+            thumbnail: draftThumbnail
+        )
     }
 
     private func discardDraftAndExit() {
+        if case .editDraft = presentation {
+            closeEditorWithoutSaving()
+            return
+        }
+
         clearEditor()
         if let activeDraftID {
             CreateEntryDraftStore.delete(id: activeDraftID)
@@ -1185,6 +1455,7 @@ struct CreateEntryView: View {
     private func clearEditor() {
         storyTitle = ""
         entryText = ""
+        entryRichText = nil
         storyboardPhotos = Array(repeating: nil, count: 5)
         selectedArtStyle = "Anime"
         storyLocation = ""
@@ -1215,6 +1486,7 @@ struct CreateEntryView: View {
 
         storyTitle = draft.title
         entryText = draft.text
+        entryRichText = draft.richText?.normalized(for: draft.text)
         let photos = Array(draft.photos.prefix(5))
         storyboardPhotos = photos.map(Optional.some)
             + Array(repeating: nil, count: max(0, 5 - photos.count))
@@ -1231,11 +1503,21 @@ struct CreateEntryView: View {
         loadedDraftSnapshot = currentDraftSnapshot(id: draft.id)
     }
 
+    private func currentEntryRichText() -> NotebookRichTextDocument? {
+        guard !entryText.isEmpty else {
+            return nil
+        }
+
+        return (entryRichText ?? NotebookRichTextDocument(text: entryText))
+            .normalized(for: entryText)
+    }
+
     private func currentDraftSnapshot(id: UUID) -> LoadedCreateEntryDraftSnapshot {
         LoadedCreateEntryDraftSnapshot(
             id: id,
             title: storyTitle,
             text: entryText,
+            richText: currentEntryRichText(),
             photos: storyboardPhotos.compactMap { $0 },
             artStyle: selectedArtStyle,
             location: storyLocation,
@@ -1280,6 +1562,7 @@ struct CreateEntryView: View {
                     NotebookEditorContent(
                         storyTitle: $storyTitle,
                         entryText: $entryText,
+                        entryRichText: $entryRichText,
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         editorBlurRequestID: editorBlurRequestID,
@@ -1330,13 +1613,20 @@ struct CreateEntryView: View {
             return 68
         }
 
-        return hasStoryboardPhotos ? 232 : 196
+        var padding: CGFloat = hasStoryboardPhotos ? 232 : 196
+        if !showsComposeFlowControls {
+            padding -= 66
+        }
+        return padding
     }
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 14) {
             photoStripSection
-            nextEntryOptionsButton
+
+            if showsComposeFlowControls {
+                nextEntryOptionsButton
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 24)
@@ -1349,6 +1639,16 @@ struct CreateEntryView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 1) {
+                keyboardFormattingButton(
+                    title: "Aa",
+                    accessibilityLabel: "Font options",
+                    isSelected: false
+                ) {
+                    openFontOptions()
+                }
+
+                keyboardToolbarDivider
+
                 keyboardFormattingButton(
                     title: "B",
                     accessibilityLabel: "Bold",
@@ -1420,6 +1720,13 @@ struct CreateEntryView: View {
             id: textFormattingRequestID,
             command: command
         )
+    }
+
+    private var keyboardToolbarDivider: some View {
+        Rectangle()
+            .fill(Color.storyInk.opacity(0.14))
+            .frame(width: 0.5, height: 24)
+            .padding(.horizontal, 4)
     }
 
     private func keyboardToolButton(
@@ -1494,40 +1801,24 @@ struct CreateEntryView: View {
 
     private var editorFloatingToolStack: some View {
         VStack(spacing: 10) {
-            expandEditorButton
-
-            if !isFullScreenEditorVisible {
-                fontEditorButton
-                paperStyleButton
-            }
+            fontStyleButton
+            paperStyleButton
         }
     }
 
-    private var expandEditorButton: some View {
-        Button {
-            dismissKeyboard()
-            withAnimation(.snappy(duration: 0.22)) {
-                isFullScreenEditorVisible.toggle()
-            }
-        } label: {
-            editorFloatingToolIcon {
-                Image(systemName: isFullScreenEditorVisible ? "arrow.down.right.and.arrow.up.left" : "viewfinder")
-                    .font(.system(size: 17, weight: .semibold))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isFullScreenEditorVisible ? "Show Create controls" : "Show full screen editor")
+    private func openFontOptions() {
+        dismissKeyboard()
+        selectedFormattingTab = .fontStyle
+        isShowingFormattingSheet = true
     }
 
-    private var fontEditorButton: some View {
+    private var fontStyleButton: some View {
         Button {
-            dismissKeyboard()
-            selectedFormattingTab = .fontStyle
-            isShowingFormattingSheet = true
+            openFontOptions()
         } label: {
             editorFloatingToolIcon {
-                Text("Aa")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
+                Image(systemName: "textformat")
+                    .font(.system(size: 18, weight: .semibold))
             }
         }
         .buttonStyle(.plain)
@@ -1593,6 +1884,10 @@ struct CreateEntryView: View {
     }
 
     private var selectedEntryJournalTitle: String? {
+        if let directJournalTitle = presentation.directJournalTitle {
+            return directJournalTitle
+        }
+
         switch entryDestination {
         case .daily:
             return DailyJournalData.allChapters().first?.title
@@ -1622,17 +1917,34 @@ struct CreateEntryView: View {
         timeFormatter.timeStyle = .short
 
         let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRichText = currentEntryRichText()?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let entry = PrototypeEntry(
             weekday: weekdayFormatter.string(from: storyDate).uppercased(),
             day: dayFormatter.string(from: storyDate),
             title: trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle,
             body: trimmedBody,
+            richText: trimmedRichText,
             time: timeFormatter.string(from: storyDate),
             location: trimmedLocation.isEmpty ? nil : trimmedLocation,
             imageNames: []
         )
 
         StoryEntryStore.add(entry, to: journalTitle)
+        onJournalEntryCreated(journalTitle, entry)
+    }
+
+    private func saveDirectJournalEntryAndExit() {
+        guard let journalTitle = presentation.directJournalTitle, hasDraftContent else {
+            return
+        }
+
+        dismissKeyboard()
+        addCurrentEntry(to: journalTitle)
+        clearEditor()
+        activeDraftID = nil
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+        dismissCreate()
     }
 
     private var journalDestinationCard: some View {
@@ -2750,6 +3062,7 @@ private enum KeyboardCornerRadiusRemover {
 
 struct ExpandedEntryEditor: View {
     @Binding var entryText: String
+    var entryRichText: Binding<NotebookRichTextDocument?>? = nil
     @Binding var storyTitle: String
     var textStyle: NotebookTextStyle = .default
     var paperColor: Color = .homePageBackground
@@ -2764,11 +3077,13 @@ struct ExpandedEntryEditor: View {
 
     init(
         entryText: Binding<String>,
+        entryRichText: Binding<NotebookRichTextDocument?>? = nil,
         storyTitle: Binding<String>,
         textStyle: NotebookTextStyle = .default,
         paperColor: Color = .homePageBackground
     ) {
         self._entryText = entryText
+        self.entryRichText = entryRichText
         self._storyTitle = storyTitle
         self.textStyle = textStyle
         self.paperColor = paperColor
@@ -2776,12 +3091,14 @@ struct ExpandedEntryEditor: View {
 
     fileprivate init(
         entryText: Binding<String>,
+        entryRichText: Binding<NotebookRichTextDocument?>? = nil,
         storyTitle: Binding<String>,
         textStyle: NotebookTextStyle = .default,
         paperColor: Color = .homePageBackground,
         paperStyle: CreatePaperStyleChoice
     ) {
         self._entryText = entryText
+        self.entryRichText = entryRichText
         self._storyTitle = storyTitle
         self.textStyle = textStyle
         self.paperColor = paperColor
@@ -2809,6 +3126,7 @@ struct ExpandedEntryEditor: View {
                     NotebookEditorContent(
                         storyTitle: $storyTitle,
                         entryText: $entryText,
+                        entryRichText: entryRichText,
                         isTitleFocused: $isTitleFocused,
                         editorFocusRequestID: editorFocusRequestID,
                         bodyPlaceholder: "Start writing...",

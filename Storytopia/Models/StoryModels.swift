@@ -138,6 +138,7 @@ struct CreateEntryDraft: Identifiable {
     let id: UUID
     let title: String
     let text: String
+    let richText: NotebookRichTextDocument?
     let photos: [UIImage]
     let artStyle: String
     let location: String
@@ -158,6 +159,7 @@ struct CreateEntryDraft: Identifiable {
     let thumbnail: UIImage?
     let createdAt: Date
     let updatedAt: Date
+    let displayOrder: Int?
 }
 
 enum CreateEntryDraftStore {
@@ -179,7 +181,7 @@ enum CreateEntryDraftStore {
 
         return draftURLs
             .compactMap(loadDraft(at:))
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted(by: sortDrafts)
     }
 
     static func load(id: UUID) -> CreateEntryDraft? {
@@ -192,6 +194,7 @@ enum CreateEntryDraftStore {
         id: UUID?,
         title: String,
         text: String,
+        richText: NotebookRichTextDocument? = nil,
         photos: [UIImage],
         artStyle: String,
         location: String,
@@ -225,7 +228,7 @@ enum CreateEntryDraftStore {
 
             var photoFileNames: [String] = []
             for (index, photo) in photos.enumerated() {
-                guard let data = photo.jpegData(compressionQuality: 0.88) else {
+                guard let data = photo.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
                     continue
                 }
 
@@ -238,7 +241,7 @@ enum CreateEntryDraftStore {
             }
 
             let thumbnailToSave = thumbnail ?? existingDraft?.thumbnail
-            if let thumbnailData = thumbnailToSave?.jpegData(compressionQuality: 0.86) {
+            if let thumbnailData = thumbnailToSave?.storytopiaPreparedJPEGData(compressionQuality: 0.86) {
                 try thumbnailData.write(
                     to: draftDirectory.appendingPathComponent(thumbnailFileName),
                     options: [.atomic]
@@ -250,6 +253,7 @@ enum CreateEntryDraftStore {
                 id: draftID,
                 title: title,
                 text: text,
+                richText: richText,
                 photoFileNames: photoFileNames,
                 artStyle: artStyle,
                 location: location,
@@ -268,7 +272,8 @@ enum CreateEntryDraftStore {
                 isHighlighted: isHighlighted,
                 textAlignmentRawValue: textAlignmentRawValue,
                 createdAt: existingDraft?.createdAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                displayOrder: existingDraft?.displayOrder ?? defaultDisplayOrder(for: now)
             )
             let metadataData = try JSONEncoder().encode(metadata)
             try metadataData.write(
@@ -287,7 +292,7 @@ enum CreateEntryDraftStore {
     }
 
     static func saveThumbnail(_ thumbnail: UIImage, for id: UUID) {
-        guard let thumbnailData = thumbnail.jpegData(compressionQuality: 0.86) else {
+        guard let thumbnailData = thumbnail.storytopiaPreparedJPEGData(compressionQuality: 0.86) else {
             return
         }
 
@@ -295,6 +300,26 @@ enum CreateEntryDraftStore {
             to: directory(for: id).appendingPathComponent(thumbnailFileName),
             options: [.atomic]
         )
+    }
+
+    static func saveOrder(_ orderedIDs: [UUID]) {
+        for (displayOrder, id) in orderedIDs.enumerated() {
+            let metadataURL = directory(for: id).appendingPathComponent(metadataFileName)
+            guard
+                let data = try? Data(contentsOf: metadataURL),
+                var metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
+            else {
+                continue
+            }
+
+            metadata.displayOrder = displayOrder
+
+            guard let metadataData = try? JSONEncoder().encode(metadata) else {
+                continue
+            }
+
+            try? metadataData.write(to: metadataURL, options: [.atomic])
+        }
     }
 
     private static func loadDraft(at draftDirectory: URL) -> CreateEntryDraft? {
@@ -321,6 +346,7 @@ enum CreateEntryDraftStore {
             id: metadata.id ?? UUID(),
             title: metadata.title,
             text: metadata.text,
+            richText: metadata.richText,
             photos: photos,
             artStyle: metadata.artStyle ?? "Anime",
             location: metadata.location ?? "",
@@ -340,8 +366,26 @@ enum CreateEntryDraftStore {
             textAlignmentRawValue: metadata.textAlignmentRawValue ?? "leading",
             thumbnail: thumbnail,
             createdAt: metadata.createdAt ?? Date(),
-            updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date()
+            updatedAt: metadata.updatedAt ?? metadata.createdAt ?? Date(),
+            displayOrder: metadata.displayOrder
         )
+    }
+
+    private static func sortDrafts(_ lhs: CreateEntryDraft, _ rhs: CreateEntryDraft) -> Bool {
+        switch (lhs.displayOrder, rhs.displayOrder) {
+        case let (lhsOrder?, rhsOrder?) where lhsOrder != rhsOrder:
+            return lhsOrder < rhsOrder
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    private static func defaultDisplayOrder(for date: Date) -> Int {
+        -Int(date.timeIntervalSinceReferenceDate * 1000)
     }
 
     private static func migrateLegacyDraftIfNeeded() {
@@ -356,6 +400,7 @@ enum CreateEntryDraftStore {
             id: nil,
             title: legacyDraft.title,
             text: legacyDraft.text,
+            richText: legacyDraft.richText,
             photos: legacyDraft.photos,
             artStyle: legacyDraft.artStyle,
             location: legacyDraft.location,
@@ -393,28 +438,30 @@ enum CreateEntryDraftStore {
 }
 
 private struct CreateEntryDraftMetadata: Codable {
-    let id: UUID?
-    let title: String
-    let text: String
-    let photoFileNames: [String]
-    let artStyle: String?
-    let location: String?
-    let date: Date?
-    let savesDraft: Bool?
-    let isPrivate: Bool?
-    let fontChoiceRawValue: String?
-    let textColorIndex: Int?
-    let textSize: Double?
-    let paperStyleRawValue: String?
-    let paperColorIndex: Int?
-    let isBold: Bool?
-    let isItalic: Bool?
-    let isUnderlined: Bool?
-    let isStrikethrough: Bool?
-    let isHighlighted: Bool?
-    let textAlignmentRawValue: String?
-    let createdAt: Date?
-    let updatedAt: Date?
+    var id: UUID?
+    var title: String
+    var text: String
+    var richText: NotebookRichTextDocument?
+    var photoFileNames: [String]
+    var artStyle: String?
+    var location: String?
+    var date: Date?
+    var savesDraft: Bool?
+    var isPrivate: Bool?
+    var fontChoiceRawValue: String?
+    var textColorIndex: Int?
+    var textSize: Double?
+    var paperStyleRawValue: String?
+    var paperColorIndex: Int?
+    var isBold: Bool?
+    var isItalic: Bool?
+    var isUnderlined: Bool?
+    var isStrikethrough: Bool?
+    var isHighlighted: Bool?
+    var textAlignmentRawValue: String?
+    var createdAt: Date?
+    var updatedAt: Date?
+    var displayOrder: Int?
 }
 
 enum GeneratedStoryboardStore {
@@ -498,7 +545,7 @@ enum GeneratedStoryboardStore {
         let imageFileName = "\(id.uuidString).jpg"
         let imageURL = imagesDirectory.appendingPathComponent(imageFileName)
 
-        guard let imageData = image.jpegData(compressionQuality: 0.9) else {
+        guard let imageData = image.storytopiaPreparedJPEGData(compressionQuality: 0.9) else {
             throw StoryboardGenerationError.invalidRequest
         }
 

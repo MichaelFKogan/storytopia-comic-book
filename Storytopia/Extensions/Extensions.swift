@@ -123,20 +123,24 @@ extension Data {
 extension UIImage {
     func storytopiaPreparedJPEGData(maxDimension: CGFloat = 2048, compressionQuality: CGFloat = 0.82) -> Data? {
         let longestSide = max(size.width, size.height)
-        guard longestSide > maxDimension else {
-            return jpegData(compressionQuality: compressionQuality)
-        }
+        let resizeScale = longestSide > maxDimension ? maxDimension / longestSide : 1
+        let targetSize = CGSize(width: size.width * resizeScale, height: size.height * resizeScale)
+        let rendererScale = resizeScale == 1 ? scale : 1
 
-        let scale = maxDimension / longestSide
-        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let flattened = storytopiaOpaqueImage(size: targetSize, scale: rendererScale)
+        return flattened.jpegData(compressionQuality: compressionQuality)
+    }
+
+    private func storytopiaOpaqueImage(size targetSize: CGSize, scale rendererScale: CGFloat) -> UIImage {
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
+        format.opaque = true
+        format.scale = rendererScale
 
-        let resized = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            UIColor.white.setFill()
+            UIBezierPath(rect: CGRect(origin: .zero, size: targetSize)).fill()
             draw(in: CGRect(origin: .zero, size: targetSize))
         }
-
-        return resized.jpegData(compressionQuality: compressionQuality)
     }
 }
 

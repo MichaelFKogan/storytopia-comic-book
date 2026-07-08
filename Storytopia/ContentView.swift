@@ -107,8 +107,17 @@ struct ContentView: View {
         }
     }
 
+    private var createEntryPresentation: CreateEntryPresentation {
+        if pageBehindCreate == .entries, activeDraftID != nil {
+            return .editDraft
+        }
+
+        return .compose
+    }
+
     private var createPage: some View {
         CreateEntryView(
+            presentation: createEntryPresentation,
             entryText: $entryText,
             storyTitle: $draftStoryTitle,
             storyboardPhotos: $draftStoryboardPhotos,

@@ -1,12 +1,171 @@
 import SwiftUI
 import UIKit
 
+private extension NSAttributedString.Key {
+    static let notebookBold = NSAttributedString.Key("StorytopiaNotebookBold")
+    static let notebookItalic = NSAttributedString.Key("StorytopiaNotebookItalic")
+}
+
 enum NotebookTextFormattingCommand: Equatable {
     case bold
     case italic
     case underline
     case strikethrough
     case bulletList
+}
+
+struct NotebookTextFormattingRun: Codable, Equatable {
+    var location: Int
+    var length: Int
+    var isBold: Bool
+    var isItalic: Bool
+    var isUnderlined: Bool
+    var isStrikethrough: Bool
+}
+
+struct NotebookRichTextDocument: Codable, Equatable {
+    var text: String
+    var formattingRuns: [NotebookTextFormattingRun]
+
+    init(text: String, formattingRuns: [NotebookTextFormattingRun] = []) {
+        self.text = text
+        self.formattingRuns = formattingRuns
+    }
+
+    init(attributedString: NSAttributedString) {
+        text = attributedString.string
+        var runs: [NotebookTextFormattingRun] = []
+
+        attributedString.enumerateAttributes(
+            in: NSRange(location: 0, length: attributedString.length)
+        ) { attributes, range, _ in
+            let font = attributes[.font] as? UIFont
+            let traits = font?.fontDescriptor.symbolicTraits ?? []
+            let isBold = (attributes[.notebookBold] as? Bool) ?? traits.contains(.traitBold)
+            let isItalic = (attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic)
+            let isUnderlined = (attributes[.underlineStyle] as? Int ?? 0) != 0
+            let isStrikethrough = (attributes[.strikethroughStyle] as? Int ?? 0) != 0
+            let run = NotebookTextFormattingRun(
+                location: range.location,
+                length: range.length,
+                isBold: isBold,
+                isItalic: isItalic,
+                isUnderlined: isUnderlined,
+                isStrikethrough: isStrikethrough
+            )
+
+            if run.hasFormatting {
+                runs.append(run)
+            }
+        }
+
+        formattingRuns = runs
+    }
+
+    func normalized(for plainText: String) -> NotebookRichTextDocument {
+        text == plainText ? self : NotebookRichTextDocument(text: plainText)
+    }
+
+    func trimmingCharacters(in characterSet: CharacterSet) -> NotebookRichTextDocument {
+        let nsText = text as NSString
+        var lowerBound = 0
+        var upperBound = nsText.length
+
+        while lowerBound < upperBound,
+              let scalar = UnicodeScalar(Int(nsText.character(at: lowerBound))),
+              characterSet.contains(scalar) {
+            lowerBound += 1
+        }
+
+        while upperBound > lowerBound,
+              let scalar = UnicodeScalar(Int(nsText.character(at: upperBound - 1))),
+              characterSet.contains(scalar) {
+            upperBound -= 1
+        }
+
+        let keptRange = NSRange(location: lowerBound, length: upperBound - lowerBound)
+        let trimmedText = nsText.substring(with: keptRange)
+        let trimmedRuns = formattingRuns.compactMap { run -> NotebookTextFormattingRun? in
+            let runRange = NSRange(location: run.location, length: run.length)
+            let intersection = NSIntersectionRange(runRange, keptRange)
+            guard intersection.length > 0 else {
+                return nil
+            }
+
+            return NotebookTextFormattingRun(
+                location: intersection.location - lowerBound,
+                length: intersection.length,
+                isBold: run.isBold,
+                isItalic: run.isItalic,
+                isUnderlined: run.isUnderlined,
+                isStrikethrough: run.isStrikethrough
+            )
+        }
+
+        return NotebookRichTextDocument(text: trimmedText, formattingRuns: trimmedRuns)
+    }
+
+    func attributedString(
+        textStyle: NotebookTextStyle,
+        usesTexturedPaperEffect: Bool = false
+    ) -> NSAttributedString {
+        let attributedText = NSMutableAttributedString(
+            string: text,
+            attributes: NotebookMetrics.typingAttributes(
+                for: textStyle,
+                usesTexturedPaperEffect: usesTexturedPaperEffect
+            )
+        )
+        let fullRange = NSRange(location: 0, length: attributedText.length)
+
+        for run in formattingRuns {
+            let range = NSRange(location: run.location, length: run.length)
+            let safeRange = NSIntersectionRange(range, fullRange)
+            guard safeRange.length > 0 else {
+                continue
+            }
+
+            if run.isBold {
+                attributedText.setNotebookFontStyle(
+                    isBold: true,
+                    isItalic: run.isItalic,
+                    textStyle: textStyle,
+                    in: safeRange
+                )
+            } else if run.isItalic {
+                attributedText.setNotebookFontStyle(
+                    isBold: false,
+                    isItalic: true,
+                    textStyle: textStyle,
+                    in: safeRange
+                )
+            }
+
+            if run.isUnderlined {
+                attributedText.addAttribute(
+                    .underlineStyle,
+                    value: NSUnderlineStyle.single.rawValue,
+                    range: safeRange
+                )
+            }
+
+            if run.isStrikethrough {
+                attributedText.addAttribute(
+                    .strikethroughStyle,
+                    value: NSUnderlineStyle.single.rawValue,
+                    range: safeRange
+                )
+            }
+        }
+
+        return attributedText
+    }
+}
+
+private extension NotebookTextFormattingRun {
+    var hasFormatting: Bool {
+        isBold || isItalic || isUnderlined || isStrikethrough
+    }
 }
 
 struct NotebookTextFormattingRequest: Equatable {
@@ -59,11 +218,11 @@ enum NotebookMetrics {
     static func titleFont(for style: NotebookTextStyle) -> Font {
         if let customFontName = style.customFontName {
             return VariableFont.font(
-                name: customFontName,
+                name: style.customFontBoldName ?? customFontName,
                 size: style.titleFontSize,
-                weight: .bold,
+                weight: style.customFontBoldWeight,
                 usesWeightAxis: style.customFontUsesVariableWeight,
-                wghtOverride: style.customFontWght.map { max($0, 700) }
+                wghtOverride: style.customFontBoldWght ?? style.customFontWght.map { max($0, 700) }
             )
         }
 
@@ -85,22 +244,48 @@ enum NotebookMetrics {
     }
 
     static func uiBodyFont(for style: NotebookTextStyle) -> UIFont {
+        uiBodyFont(for: style, isBold: false, isItalic: false)
+    }
+
+    static func uiBodyFont(
+        for style: NotebookTextStyle,
+        isBold: Bool,
+        isItalic: Bool
+    ) -> UIFont {
         if let customFontName = style.customFontName,
            let customFont = VariableFont.uiFont(
-               name: customFontName,
+               name: isBold ? style.customFontBoldName ?? customFontName : customFontName,
                size: style.scaledBodyFontSize,
-               weight: style.customFontWeight,
+               weight: isBold ? style.customFontBoldWeight : style.customFontWeight,
                usesWeightAxis: style.customFontUsesVariableWeight,
-               wghtOverride: style.customFontWght
+               wghtOverride: isBold ? style.customFontBoldWght : style.customFontWght
            ) {
-            return customFont
+            return resolvedItalicFont(customFont, isItalic: isItalic)
         }
 
-        let baseFont = UIFont.systemFont(ofSize: style.bodyFontSize, weight: .medium)
-        guard
-            let descriptor = baseFont.fontDescriptor.withDesign(style.uiKitDesign)
-        else {
+        let baseFont = UIFont.systemFont(
+            ofSize: style.bodyFontSize,
+            weight: isBold ? .bold : .regular
+        )
+        guard var descriptor = baseFont.fontDescriptor.withDesign(style.uiKitDesign) else {
             return baseFont
+        }
+
+        var traits = descriptor.symbolicTraits
+        if isBold {
+            traits.insert(.traitBold)
+        } else {
+            traits.remove(.traitBold)
+        }
+
+        if isItalic {
+            traits.insert(.traitItalic)
+        } else {
+            traits.remove(.traitItalic)
+        }
+
+        if let styledDescriptor = descriptor.withSymbolicTraits(traits) {
+            descriptor = styledDescriptor
         }
 
         return UIFont(descriptor: descriptor, size: style.bodyFontSize)
@@ -108,15 +293,51 @@ enum NotebookMetrics {
 
     static func typingAttributes(
         for style: NotebookTextStyle,
-        usesTexturedPaperEffect: Bool = false
+        usesTexturedPaperEffect: Bool = false,
+        isBold: Bool = false,
+        isItalic: Bool = false
     ) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: uiBodyFont(for: style),
+            .font: uiBodyFont(for: style, isBold: isBold, isItalic: isItalic),
             .foregroundColor: usesTexturedPaperEffect ? UIColor.clear : style.uiColor,
             .paragraphStyle: typingParagraphStyle
         ]
 
+        if isBold {
+            attributes[.notebookBold] = true
+
+            if shouldUseSyntheticBold(for: style) {
+                attributes[.strokeWidth] = -2
+            }
+        }
+
+        if isItalic {
+            attributes[.notebookItalic] = true
+        }
+
         return attributes
+    }
+
+    static func shouldUseSyntheticBold(for style: NotebookTextStyle) -> Bool {
+        style.customFontName != nil &&
+            !style.customFontUsesVariableWeight &&
+            style.customFontBoldName == nil &&
+            style.customFontAllowsSyntheticBold
+    }
+
+    private static func resolvedItalicFont(_ font: UIFont, isItalic: Bool) -> UIFont {
+        guard isItalic else {
+            return font
+        }
+
+        var traits = font.fontDescriptor.symbolicTraits
+        traits.insert(.traitItalic)
+
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else {
+            return font
+        }
+
+        return UIFont(descriptor: descriptor, size: font.pointSize)
     }
 
     /// Vertical inset so placeholder text matches the text view's first-line position.
@@ -161,9 +382,13 @@ struct NotebookTextStyle: Equatable {
     var swiftUIDesign: Font.Design = .serif
     var uiKitDesign: UIFontDescriptor.SystemDesign = .serif
     var customFontName: String?
+    var customFontBoldName: String?
     var customFontWeight: Font.Weight = .regular
     var customFontWght: CGFloat?
+    var customFontBoldWeight: Font.Weight = .bold
+    var customFontBoldWght: CGFloat?
     var customFontUsesVariableWeight: Bool = false
+    var customFontAllowsSyntheticBold: Bool = true
     var customFontSizeScale: CGFloat = 1
     var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
     var color: Color = Color(NotebookMetrics.bodyTextUIColor)
@@ -250,6 +475,9 @@ final class LinedTextView: UITextView {
             applyTextStyle()
         }
     }
+    private var isTypingBold = false
+    private var isTypingItalic = false
+    private var storedRichTextDocument = NotebookRichTextDocument(text: "")
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -282,24 +510,18 @@ final class LinedTextView: UITextView {
     }
 
     private func applyTextStyle() {
-        let attributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
-        typingAttributes = attributes
+        let document = storedRichTextDocument.normalized(for: text ?? "")
+        storedRichTextDocument = document
+        let selectedRange = selectedRange
         font = NotebookMetrics.uiBodyFont(for: notebookTextStyle)
         textColor = usesTexturedPaperEffect ? .clear : notebookTextStyle.uiColor
-        layer.compositingFilter = nil
-
-        guard let text, !text.isEmpty else {
-            setNeedsDisplay()
-            return
-        }
-
-        let selectedRange = selectedRange
-        attributedText = NSAttributedString(string: text, attributes: attributes)
+        attributedText = document.attributedString(
+            textStyle: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
         self.selectedRange = selectedRange
-        typingAttributes = attributes
+        refreshTypingAttributes()
+        layer.compositingFilter = nil
         setNeedsDisplay()
     }
 
@@ -339,24 +561,25 @@ final class LinedTextView: UITextView {
         invalidateIntrinsicContentSize()
     }
 
-    func setNotebookText(_ string: String) {
-        let attributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
+    func setNotebookText(_ string: String, richText: NotebookRichTextDocument? = nil) {
+        let document = richText?.normalized(for: string) ?? NotebookRichTextDocument(text: string)
+        storedRichTextDocument = document
 
         if string.isEmpty {
             text = ""
-            typingAttributes = attributes
-            setNeedsDisplay()
+            refreshTypingAttributes()
+            refreshLayoutAfterContentChange()
             return
         }
 
         let selectedRange = selectedRange
-        attributedText = NSAttributedString(string: string, attributes: attributes)
+        attributedText = document.attributedString(
+            textStyle: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect
+        )
         self.selectedRange = selectedRange
-        typingAttributes = attributes
-        setNeedsDisplay()
+        refreshTypingAttributes()
+        refreshLayoutAfterContentChange()
     }
 
     func normalizeAttributesPreservingSelection() {
@@ -370,8 +593,9 @@ final class LinedTextView: UITextView {
             usesTexturedPaperEffect: usesTexturedPaperEffect
         )
         attributedText = NSAttributedString(string: text, attributes: attributes)
+        updateStoredRichTextDocument()
         self.selectedRange = selectedRange
-        typingAttributes = attributes
+        refreshTypingAttributes()
     }
 
     func applyFormattingCommand(_ command: NotebookTextFormattingCommand) {
@@ -382,6 +606,7 @@ final class LinedTextView: UITextView {
 
         let range = selectedRange
         guard range.length > 0, range.location != NSNotFound else {
+            toggleTypingFormatting(command)
             return
         }
 
@@ -393,9 +618,23 @@ final class LinedTextView: UITextView {
 
         switch command {
         case .bold:
-            mutableText.toggleFontTrait(.traitBold, in: range)
+            let shouldAddBold = !mutableText.containsNotebookStyle(.notebookBold, in: range)
+            mutableText.setNotebookFontStyle(
+                isBold: shouldAddBold,
+                isItalic: nil,
+                textStyle: notebookTextStyle,
+                in: range
+            )
+            isTypingBold = shouldAddBold
         case .italic:
-            mutableText.toggleFontTrait(.traitItalic, in: range)
+            let shouldAddItalic = !mutableText.containsNotebookStyle(.notebookItalic, in: range)
+            mutableText.setNotebookFontStyle(
+                isBold: nil,
+                isItalic: shouldAddItalic,
+                textStyle: notebookTextStyle,
+                in: range
+            )
+            isTypingItalic = shouldAddItalic
         case .underline:
             mutableText.toggleIntegerStyle(.underlineStyle, in: range)
         case .strikethrough:
@@ -405,12 +644,15 @@ final class LinedTextView: UITextView {
         }
 
         attributedText = mutableText
+        updateStoredRichTextDocument()
         selectedRange = range
-        typingAttributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
+        refreshTypingAttributes()
+        notifyTextDidChange()
         setNeedsDisplay()
+    }
+
+    func richTextDocument() -> NotebookRichTextDocument {
+        storedRichTextDocument.normalized(for: text ?? "")
     }
 
     private func applyBulletToCurrentLine() {
@@ -434,10 +676,7 @@ final class LinedTextView: UITextView {
     }
 
     private func addBulletToLine(at lineRange: NSRange, cursor: Int) {
-        let attributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
+        let attributes = currentTypingAttributes()
         let mutableText = NSMutableAttributedString(attributedString: attributedText)
         mutableText.insert(
             NSAttributedString(string: Self.bulletPrefix, attributes: attributes),
@@ -445,6 +684,7 @@ final class LinedTextView: UITextView {
         )
 
         attributedText = mutableText
+        updateStoredRichTextDocument()
         selectedRange = NSRange(
             location: cursor >= lineRange.location ? cursor + Self.bulletPrefix.count : cursor,
             length: 0
@@ -455,10 +695,7 @@ final class LinedTextView: UITextView {
     }
 
     private func removeBulletFromLine(at lineRange: NSRange, cursor: Int) {
-        let attributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
+        let attributes = currentTypingAttributes()
         let mutableText = NSMutableAttributedString(attributedString: attributedText)
         mutableText.deleteCharacters(in: NSRange(location: lineRange.location, length: Self.bulletPrefix.count))
 
@@ -472,6 +709,7 @@ final class LinedTextView: UITextView {
         }
 
         attributedText = mutableText
+        updateStoredRichTextDocument()
         selectedRange = NSRange(location: newCursor, length: 0)
         typingAttributes = attributes
         notifyTextDidChange()
@@ -494,10 +732,7 @@ final class LinedTextView: UITextView {
             return true
         }
 
-        let attributes = NotebookMetrics.typingAttributes(
-            for: notebookTextStyle,
-            usesTexturedPaperEffect: usesTexturedPaperEffect
-        )
+        let attributes = currentTypingAttributes()
         let mutableText = NSMutableAttributedString(attributedString: attributedText)
         let contentAfterBullet = String(lineText.dropFirst(Self.bulletPrefix.count))
 
@@ -516,6 +751,7 @@ final class LinedTextView: UITextView {
                 with: NSAttributedString(string: "\n", attributes: attributes)
             )
             attributedText = mutableText
+            updateStoredRichTextDocument()
             selectedRange = NSRange(location: insertLocation + 1, length: 0)
         } else {
             let insertString = "\n" + Self.bulletPrefix
@@ -524,6 +760,7 @@ final class LinedTextView: UITextView {
                 with: NSAttributedString(string: insertString, attributes: attributes)
             )
             attributedText = mutableText
+            updateStoredRichTextDocument()
             selectedRange = NSRange(location: range.location + insertString.count, length: 0)
         }
 
@@ -535,6 +772,42 @@ final class LinedTextView: UITextView {
 
     private func notifyTextDidChange() {
         delegate?.textViewDidChange?(self)
+    }
+
+    func refreshStoredRichTextDocumentFromTextStorage() {
+        updateStoredRichTextDocument()
+    }
+
+    private func updateStoredRichTextDocument() {
+        storedRichTextDocument = NotebookRichTextDocument(
+            attributedString: attributedText ?? NSAttributedString(string: text ?? "")
+        )
+    }
+
+    private func toggleTypingFormatting(_ command: NotebookTextFormattingCommand) {
+        switch command {
+        case .bold:
+            isTypingBold.toggle()
+        case .italic:
+            isTypingItalic.toggle()
+        case .underline, .strikethrough, .bulletList:
+            return
+        }
+
+        refreshTypingAttributes()
+    }
+
+    private func currentTypingAttributes() -> [NSAttributedString.Key: Any] {
+        NotebookMetrics.typingAttributes(
+            for: notebookTextStyle,
+            usesTexturedPaperEffect: usesTexturedPaperEffect,
+            isBold: isTypingBold,
+            isItalic: isTypingItalic
+        )
+    }
+
+    private func refreshTypingAttributes() {
+        typingAttributes = currentTypingAttributes()
     }
 
     override func layoutSubviews() {
@@ -576,6 +849,7 @@ final class LinedTextView: UITextView {
 
 struct LinedTextEditor: UIViewRepresentable {
     @Binding var text: String
+    var richText: Binding<NotebookRichTextDocument?>? = nil
     var focusRequestID: Int = 0
     var blurRequestID: Int = 0
     var formattingRequest: NotebookTextFormattingRequest? = nil
@@ -604,9 +878,15 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.notebookTextStyle = textStyle
         textView.textLeadingInset = textLeadingInset
         textView.usesTexturedPaperEffect = usesTexturedPaperEffect
-        textView.setNotebookText(text)
+        textView.setNotebookText(text, richText: richText?.wrappedValue)
+        context.coordinator.currentRichTextDocument = textView.richTextDocument()
         context.coordinator.onTextChange = { newText in
             text = newText
+        }
+        context.coordinator.onRichTextChange = { newRichText in
+            context.coordinator.currentRichTextDocument = newRichText
+            context.coordinator.isWaitingForRichTextBindingSync = true
+            richText?.wrappedValue = newRichText
         }
         return textView
     }
@@ -615,6 +895,15 @@ struct LinedTextEditor: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.onTextChange = { newText in
             text = newText
+        }
+        coordinator.onRichTextChange = { newRichText in
+            coordinator.currentRichTextDocument = newRichText
+            coordinator.isWaitingForRichTextBindingSync = true
+            richText?.wrappedValue = newRichText
+        }
+
+        if richText?.wrappedValue?.normalized(for: text) == coordinator.currentRichTextDocument {
+            coordinator.isWaitingForRichTextBindingSync = false
         }
 
         if textView.scrollsInternally != scrollsInternally {
@@ -625,7 +914,8 @@ struct LinedTextEditor: UIViewRepresentable {
             textView.drawsRuledLines = shouldDrawRuledLines
         }
 
-        if textView.notebookTextStyle != textStyle {
+        let didChangeTextStyle = textView.notebookTextStyle != textStyle
+        if didChangeTextStyle {
             textView.notebookTextStyle = textStyle
         }
 
@@ -633,12 +923,32 @@ struct LinedTextEditor: UIViewRepresentable {
             textView.textLeadingInset = textLeadingInset
         }
 
-        if textView.usesTexturedPaperEffect != usesTexturedPaperEffect {
+        let didChangeTexturedPaperEffect = textView.usesTexturedPaperEffect != usesTexturedPaperEffect
+        if didChangeTexturedPaperEffect {
             textView.usesTexturedPaperEffect = usesTexturedPaperEffect
         }
 
-        if !coordinator.isUpdatingFromTextView, textView.text != text {
-            textView.setNotebookText(text)
+        if !coordinator.isUpdatingFromTextView {
+            if textView.text != text {
+                textView.setNotebookText(text, richText: richText?.wrappedValue)
+                coordinator.currentRichTextDocument = textView.richTextDocument()
+            } else if !didChangeTextStyle,
+                      !didChangeTexturedPaperEffect,
+                      let richText = richText?.wrappedValue,
+                      !coordinator.isWaitingForRichTextBindingSync,
+                      richText.normalized(for: text) != textView.richTextDocument() {
+                textView.setNotebookText(text, richText: richText)
+                coordinator.currentRichTextDocument = textView.richTextDocument()
+            }
+        }
+
+        if didChangeTextStyle || didChangeTexturedPaperEffect {
+            let refreshedRichText = textView.richTextDocument()
+            coordinator.currentRichTextDocument = refreshedRichText
+            coordinator.isWaitingForRichTextBindingSync = true
+            DispatchQueue.main.async {
+                richText?.wrappedValue = refreshedRichText
+            }
         }
 
         if focusRequestID != coordinator.handledFocusRequestID {
@@ -686,11 +996,18 @@ struct LinedTextEditor: UIViewRepresentable {
         var handledFocusRequestID = 0
         var handledBlurRequestID = 0
         var handledFormattingRequestID = 0
+        var currentRichTextDocument: NotebookRichTextDocument?
+        var isWaitingForRichTextBindingSync = false
         var onTextChange: ((String) -> Void)?
+        var onRichTextChange: ((NotebookRichTextDocument) -> Void)?
 
         func textViewDidChange(_ textView: UITextView) {
             isUpdatingFromTextView = true
             onTextChange?(textView.text)
+            if let linedTextView = textView as? LinedTextView {
+                linedTextView.refreshStoredRichTextDocumentFromTextStorage()
+                onRichTextChange?(linedTextView.richTextDocument())
+            }
 
             if let linedTextView = textView as? LinedTextView {
                 linedTextView.refreshLayoutAfterContentChange()
@@ -720,24 +1037,26 @@ struct LinedTextEditor: UIViewRepresentable {
 }
 
 private extension NSMutableAttributedString {
-    func toggleFontTrait(_ trait: UIFontDescriptor.SymbolicTraits, in range: NSRange) {
-        let shouldAddTrait = !containsFontTrait(trait, in: range)
+    func setNotebookFontStyle(
+        isBold: Bool?,
+        isItalic: Bool?,
+        textStyle: NotebookTextStyle,
+        in range: NSRange
+    ) {
+        enumerateAttributes(in: range) { attributes, subrange, _ in
+            let traits = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits ?? []
+            let resolvedBold = isBold ?? ((attributes[.notebookBold] as? Bool) ?? traits.contains(.traitBold))
+            let resolvedItalic = isItalic ?? ((attributes[.notebookItalic] as? Bool) ?? traits.contains(.traitItalic))
+            let font = NotebookMetrics.uiBodyFont(
+                for: textStyle,
+                isBold: resolvedBold,
+                isItalic: resolvedItalic
+            )
 
-        enumerateAttribute(.font, in: range) { value, subrange, _ in
-            let font = (value as? UIFont) ?? NotebookMetrics.bodyFont
-            var traits = font.fontDescriptor.symbolicTraits
-
-            if shouldAddTrait {
-                traits.insert(trait)
-            } else {
-                traits.remove(trait)
-            }
-
-            guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else {
-                return
-            }
-
-            addAttribute(.font, value: UIFont(descriptor: descriptor, size: font.pointSize), range: subrange)
+            addAttribute(.font, value: font, range: subrange)
+            setBooleanAttribute(.notebookBold, isEnabled: resolvedBold, range: subrange)
+            setBooleanAttribute(.notebookItalic, isEnabled: resolvedItalic, range: subrange)
+            applySyntheticBoldIfNeeded(isBold: resolvedBold, textStyle: textStyle, range: subrange)
         }
     }
 
@@ -749,18 +1068,31 @@ private extension NSMutableAttributedString {
         }
     }
 
-    private func containsFontTrait(_ trait: UIFontDescriptor.SymbolicTraits, in range: NSRange) -> Bool {
-        var containsTrait = true
+    func containsNotebookStyle(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
+        var containsStyle = true
 
-        enumerateAttribute(.font, in: range) { value, _, stop in
-            let font = (value as? UIFont) ?? NotebookMetrics.bodyFont
-            if !font.fontDescriptor.symbolicTraits.contains(trait) {
-                containsTrait = false
+        enumerateAttributes(in: range) { attributes, _, stop in
+            let explicitValue = attributes[key] as? Bool
+            let hasFallbackTrait: Bool
+            if explicitValue == nil, let font = attributes[.font] as? UIFont {
+                if key == .notebookBold {
+                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+                } else if key == .notebookItalic {
+                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+                } else {
+                    hasFallbackTrait = false
+                }
+            } else {
+                hasFallbackTrait = false
+            }
+
+            if explicitValue != true && !hasFallbackTrait {
+                containsStyle = false
                 stop.pointee = true
             }
         }
 
-        return containsTrait
+        return containsStyle
     }
 
     private func containsAttribute(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
@@ -775,10 +1107,40 @@ private extension NSMutableAttributedString {
 
         return containsStyle
     }
+
+    private func setBooleanAttribute(
+        _ key: NSAttributedString.Key,
+        isEnabled: Bool,
+        range: NSRange
+    ) {
+        if isEnabled {
+            addAttribute(key, value: true, range: range)
+        } else {
+            removeAttribute(key, range: range)
+        }
+    }
+
+    private func applySyntheticBoldIfNeeded(
+        isBold: Bool,
+        textStyle: NotebookTextStyle,
+        range: NSRange
+    ) {
+        guard isBold else {
+            removeAttribute(.strokeWidth, range: range)
+            return
+        }
+
+        addAttribute(.strokeWidth, value: -2, range: range)
+    }
 }
 
 private final class TexturedPaperBodyTextView: UIView {
     var text = "" {
+        didSet {
+            updateTextStorage()
+        }
+    }
+    var richText: NotebookRichTextDocument? {
         didSet {
             updateTextStorage()
         }
@@ -852,8 +1214,14 @@ private final class TexturedPaperBodyTextView: UIView {
     }
 
     private func updateTextStorage() {
-        let attributes = NotebookMetrics.typingAttributes(for: textStyle)
-        textStorage.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+        let attributedText = richText?
+            .normalized(for: text)
+            .attributedString(textStyle: textStyle)
+            ?? NSAttributedString(
+                string: text,
+                attributes: NotebookMetrics.typingAttributes(for: textStyle)
+            )
+        textStorage.setAttributedString(attributedText)
         setNeedsLayout()
         setNeedsDisplay()
     }
@@ -877,12 +1245,14 @@ private final class TexturedPaperBodyTextView: UIView {
 
 private struct TexturedPaperBodyTextOverlay: UIViewRepresentable {
     let text: String
+    let richText: NotebookRichTextDocument?
     let textStyle: NotebookTextStyle
     let textLeadingInset: CGFloat
 
     func makeUIView(context: Context) -> TexturedPaperBodyTextView {
         let view = TexturedPaperBodyTextView()
         view.text = text
+        view.richText = richText
         view.textStyle = textStyle
         view.textLeadingInset = textLeadingInset
         return view
@@ -891,6 +1261,10 @@ private struct TexturedPaperBodyTextOverlay: UIViewRepresentable {
     func updateUIView(_ view: TexturedPaperBodyTextView, context: Context) {
         if view.text != text {
             view.text = text
+        }
+
+        if view.richText != richText {
+            view.richText = richText
         }
 
         if view.textStyle != textStyle {
@@ -906,6 +1280,7 @@ private struct TexturedPaperBodyTextOverlay: UIViewRepresentable {
 struct NotebookEditorContent: View {
     @Binding var storyTitle: String
     @Binding var entryText: String
+    var entryRichText: Binding<NotebookRichTextDocument?>? = nil
     @FocusState.Binding var isTitleFocused: Bool
     var editorFocusRequestID: Int
     var editorBlurRequestID: Int = 0
@@ -986,6 +1361,7 @@ struct NotebookEditorContent: View {
         let editor = ZStack(alignment: .topLeading) {
             LinedTextEditor(
                 text: $entryText,
+                richText: entryRichText,
                 focusRequestID: editorFocusRequestID,
                 blurRequestID: editorBlurRequestID,
                 formattingRequest: formattingRequest,
@@ -1000,6 +1376,7 @@ struct NotebookEditorContent: View {
                 if usesTexturedPaperEffect && !entryText.isEmpty {
                     TexturedPaperBodyTextOverlay(
                         text: entryText,
+                        richText: entryRichText?.wrappedValue,
                         textStyle: textStyle,
                         textLeadingInset: leadingTextPadding
                     )
