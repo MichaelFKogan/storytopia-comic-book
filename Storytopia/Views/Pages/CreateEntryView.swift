@@ -272,14 +272,7 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
     }
 }
 
-private enum CreateKeyboardFormattingMode: String, CaseIterable, Identifiable {
-    case font
-    case textType
-    case color
-    case textSize
-
-    var id: String { rawValue }
-}
+private typealias CreateKeyboardFormattingMode = NotebookKeyboardFormattingMode
 
 private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
     case body
@@ -835,6 +828,7 @@ struct CreateEntryView: View {
     @State private var editorFocusRequestID = 0
     @State private var editorBlurRequestID = 0
     @State private var isKeyboardVisible = false
+    @State private var isBodyEditorEditing = false
     @State private var isKeyboardFormattingToolbarVisible = false
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
@@ -843,6 +837,8 @@ struct CreateEntryView: View {
 
     private func dismissKeyboard() {
         isTitleFocused = false
+        resetKeyboardFormattingState()
+        isBodyEditorEditing = false
         editorBlurRequestID += 1
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
@@ -892,10 +888,6 @@ struct CreateEntryView: View {
         CreateFormattingPalette.textColors[
             min(max(selectedTextColorIndex, 0), CreateFormattingPalette.textColors.count - 1)
         ].color
-    }
-
-    private var keyboardReplacementPanelHeight: CGFloat {
-        max(260, lastKeyboardHeight)
     }
 
     private var selectedPaperSurfaceColor: Color {
@@ -1174,7 +1166,10 @@ struct CreateEntryView: View {
         }
         .background(selectedPaperSurfaceColor)
         .overlay(alignment: .bottomTrailing) {
-            if !isKeyboardVisible && activeKeyboardFormattingMode == nil {
+            if !isKeyboardVisible
+                && !isBodyEditorEditing
+                && activeKeyboardFormattingMode == nil
+                && !isKeyboardFormattingToolbarVisible {
                 editorFloatingToolStack
                     .padding(.trailing, 31)
                     .padding(.bottom, editorFloatingToolBottomPadding)
@@ -1202,10 +1197,6 @@ struct CreateEntryView: View {
             }
             withAnimation(.snappy(duration: 0.22)) {
                 isKeyboardVisible = true
-                if !isKeyboardFormattingToolbarVisible && activeKeyboardFormattingMode == nil {
-                    isKeyboardFormattingToolbarVisible = false
-                    activeKeyboardFormattingMode = nil
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
@@ -1704,9 +1695,19 @@ struct CreateEntryView: View {
                         showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
                         leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
-                        suppressesBodyKeyboard: activeKeyboardFormattingMode != nil,
+                        showsKeyboardAccessory: true,
+                        keyboardInputMode: draftKeyboardInputMode,
+                        keyboardAccessoryContent: AnyView(entryDraftKeyboardAccessory),
+                        keyboardPanelContent: AnyView(keyboardFormattingPanelContent),
                         usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                         onSelectionStateChange: updateEditorSelectionState,
+                        onEditingEnded: {
+                            isBodyEditorEditing = false
+                            resetKeyboardFormattingState()
+                        },
+                        onEditingBegan: {
+                            isBodyEditorEditing = true
+                        },
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -1717,21 +1718,26 @@ struct CreateEntryView: View {
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Group {
-                    if isKeyboardVisible || isKeyboardFormattingToolbarVisible || activeKeyboardFormattingMode != nil {
-                        entryDraftKeyboardBar
-                    } else {
-                        entryDraftBottomBar
-                    }
+                if !isKeyboardVisible
+                    && !isBodyEditorEditing
+                    && activeKeyboardFormattingMode == nil
+                    && !isKeyboardFormattingToolbarVisible {
+                    entryDraftBottomBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .animation(.snappy(duration: 0.22), value: isKeyboardVisible)
-            .animation(.snappy(duration: 0.22), value: isKeyboardFormattingToolbarVisible)
             .animation(.snappy(duration: 0.22), value: activeKeyboardFormattingMode)
             .animation(.snappy(duration: 0.22), value: hasStoryboardPhotos)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var draftKeyboardInputMode: NotebookEditorInputMode {
+        if let activeKeyboardFormattingMode {
+            return .formattingPanel(activeKeyboardFormattingMode)
+        }
+        return .systemKeyboard
     }
 
     private func editorScrollContentHeight(for visibleHeight: CGFloat) -> CGFloat {
@@ -1766,24 +1772,34 @@ struct CreateEntryView: View {
         .padding(.bottom, 24)
     }
 
-    private var entryDraftKeyboardBar: some View {
-        VStack(spacing: 0) {
+    private var entryDraftKeyboardAccessory: some View {
+        Group {
             if isKeyboardFormattingToolbarVisible || activeKeyboardFormattingMode != nil {
                 formattingKeyboardToolbar
             } else {
                 normalKeyboardToolbar
             }
-
-            if activeKeyboardFormattingMode != nil {
-                keyboardFormattingPanel
-            }
         }
         .frame(maxWidth: .infinity)
+        .frame(height: NotebookAnyViewInputHost.toolbarHeight)
         .background(Color.homePageBackground)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.storyBorder.opacity(0.45))
                 .frame(height: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private var keyboardFormattingPanelContent: some View {
+        if activeKeyboardFormattingMode != nil {
+            keyboardFormattingPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+                .background(Color.homePageBackground)
+        } else {
+            Color.clear
         }
     }
 
@@ -1821,38 +1837,41 @@ struct CreateEntryView: View {
     }
 
     private var formattingKeyboardToolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                Button {
-                    closeKeyboardFormattingToolbar()
-                } label: {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(Color.storyInk.opacity(0.86))
-                        .frame(width: 36, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back to keyboard")
-
-                keyboardPanelChip(
-                    title: selectedFontChoice.title,
-                    mode: .font,
-                    width: 112
-                )
-
-                keyboardPanelChip(
-                    title: selectedKeyboardTextType.title,
-                    mode: .textType,
-                    width: 104
-                )
-
-                keyboardColorButton
-
-                keyboardTextSizeButton
+        HStack(spacing: 8) {
+            Button {
+                closeKeyboardFormattingToolbar()
+            } label: {
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Color.storyInk.opacity(0.86))
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to keyboard")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    keyboardPanelChip(
+                        title: selectedFontChoice.title,
+                        mode: .font,
+                        width: 112
+                    )
+
+                    keyboardPanelChip(
+                        title: selectedKeyboardTextType.title,
+                        mode: .textType,
+                        width: 104
+                    )
+
+                    keyboardColorButton
+
+                    keyboardTextSizeButton
+                }
+                .padding(.trailing, 12)
+            }
         }
+        .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
 
@@ -1935,26 +1954,24 @@ struct CreateEntryView: View {
     }
 
     private func showKeyboardFormattingToolbar() {
-        withAnimation(.snappy(duration: 0.22)) {
-            isKeyboardFormattingToolbarVisible = true
-            activeKeyboardFormattingMode = nil
-        }
+        isKeyboardFormattingToolbarVisible = true
+        activeKeyboardFormattingMode = nil
     }
 
     private func showKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
         isTitleFocused = false
         isKeyboardFormattingToolbarVisible = true
         activeKeyboardFormattingMode = mode
-        editorFocusRequestID += 1
     }
 
     private func closeKeyboardFormattingToolbar() {
-        withAnimation(.snappy(duration: 0.22)) {
-            isKeyboardFormattingToolbarVisible = false
-            activeKeyboardFormattingMode = nil
-        }
-        isTitleFocused = false
-        editorFocusRequestID += 1
+        isKeyboardFormattingToolbarVisible = false
+        activeKeyboardFormattingMode = nil
+    }
+
+    private func resetKeyboardFormattingState() {
+        isKeyboardFormattingToolbarVisible = false
+        activeKeyboardFormattingMode = nil
     }
 
     private func keyboardPanelChip(
@@ -2072,37 +2089,39 @@ struct CreateEntryView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 30)
         }
-        .frame(height: keyboardReplacementPanelHeight)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var keyboardTextTypePanel: some View {
-        LazyVGrid(columns: keyboardPanelColumns, spacing: 12) {
-            ForEach(CreateKeyboardTextType.allCases) { textType in
-                Button {
-                    selectedKeyboardTextType = textType
-                    sendTextFormattingCommand(.textStyle(textType.textRunStyle))
-                } label: {
-                    keyboardPanelTile(isSelected: selectedKeyboardTextType == textType) {
-                        Text(textType.title)
-                            .font(selectedFontChoice.swiftUIBodyFont(size: textType.sampleSize))
-                            .foregroundStyle(Color.storyInk)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView(showsIndicators: false) {
+            LazyVGrid(columns: keyboardPanelColumns, spacing: 12) {
+                ForEach(CreateKeyboardTextType.allCases) { textType in
+                    Button {
+                        selectedKeyboardTextType = textType
+                        sendTextFormattingCommand(.textStyle(textType.textRunStyle))
+                    } label: {
+                        keyboardPanelTile(isSelected: selectedKeyboardTextType == textType) {
+                            Text(textType.title)
+                                .font(selectedFontChoice.swiftUIBodyFont(size: textType.sampleSize))
+                                .foregroundStyle(Color.storyInk)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(textType.title)
+                    .accessibilityAddTraits(selectedKeyboardTextType == textType ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(textType.title)
-                .accessibilityAddTraits(selectedKeyboardTextType == textType ? .isSelected : [])
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 30)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 24)
-        .frame(height: keyboardReplacementPanelHeight, alignment: .top)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var keyboardColorPanel: some View {
@@ -2137,10 +2156,10 @@ struct CreateEntryView: View {
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 30)
         }
-        .frame(height: keyboardReplacementPanelHeight)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var keyboardTextSizePanel: some View {
@@ -2176,9 +2195,9 @@ struct CreateEntryView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 18)
-        .padding(.top, 18)
-        .padding(.bottom, 24)
-        .frame(height: keyboardReplacementPanelHeight, alignment: .top)
+        .padding(.top, 22)
+        .padding(.bottom, 30)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var keyboardPanelColumns: [GridItem] {
@@ -2350,7 +2369,7 @@ struct CreateEntryView: View {
             isShowingFormattingSheet = true
         } label: {
             editorFloatingToolIcon {
-                Image(systemName: "doc")
+                Image(systemName: "doc.text")
                     .font(.system(size: 18, weight: .semibold))
             }
         }

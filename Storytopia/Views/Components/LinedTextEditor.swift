@@ -548,17 +548,32 @@ final class LinedTextView: UITextView {
             applyScrollBehavior()
         }
     }
-    var suppressesSystemKeyboard = false {
-        didSet {
-            applyKeyboardInputView()
-        }
-    }
     var usesTexturedPaperEffect = false {
         didSet {
             applyTextStyle()
         }
     }
-    private let suppressedKeyboardInputView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 1))
+    var keyboardInputMode: NotebookEditorInputMode = .systemKeyboard {
+        didSet {
+            guard oldValue != keyboardInputMode else {
+                return
+            }
+            applyInputViews(reloadIfNeeded: true)
+        }
+    }
+    var showsKeyboardAccessory = false {
+        didSet {
+            guard oldValue != showsKeyboardAccessory else {
+                return
+            }
+            applyInputViews(reloadIfNeeded: true)
+        }
+    }
+    var onEditingEnded: (() -> Void)?
+
+    private let toolbarHost = NotebookAnyViewInputHost(fixedHeight: NotebookAnyViewInputHost.toolbarHeight)
+    private let panelHost = NotebookAnyViewInputHost(fixedHeight: nil)
+    private lazy var panelInputView = NotebookInputPanelView(contentHost: panelHost)
     private var isTypingBold = false
     private var isTypingItalic = false
     private var typingTextRunStyle: NotebookTextRunStyle = .body
@@ -583,7 +598,32 @@ final class LinedTextView: UITextView {
         showsHorizontalScrollIndicator = false
         keyboardDismissMode = .interactive
         applyScrollBehavior()
-        applyKeyboardInputView()
+        applyInputViews(reloadIfNeeded: false)
+    }
+
+    func setKeyboardAccessoryContent(_ view: AnyView) {
+        toolbarHost.setRootView(view)
+    }
+
+    func setKeyboardPanelContent(_ view: AnyView) {
+        panelHost.setRootView(view)
+    }
+
+    private func applyInputViews(reloadIfNeeded: Bool) {
+        inputAccessoryView = showsKeyboardAccessory ? toolbarHost : nil
+
+        switch keyboardInputMode {
+        case .systemKeyboard:
+            inputView = nil
+        case .formattingPanel:
+            inputView = panelInputView
+        }
+
+        toolbarHost.invalidateIntrinsicContentSize()
+
+        if reloadIfNeeded, isFirstResponder {
+            reloadInputViews()
+        }
     }
 
     private func applyTextContainerInset() {
@@ -615,14 +655,6 @@ final class LinedTextView: UITextView {
         isScrollEnabled = scrollsInternally
         alwaysBounceVertical = scrollsInternally
         showsVerticalScrollIndicator = scrollsInternally
-    }
-
-    private func applyKeyboardInputView() {
-        inputView = suppressesSystemKeyboard ? suppressedKeyboardInputView : nil
-
-        if isFirstResponder {
-            reloadInputViews()
-        }
     }
 
     override var intrinsicContentSize: CGSize {
@@ -1132,9 +1164,14 @@ struct LinedTextEditor: UIViewRepresentable {
     var tintUIColor: UIColor = .systemBlue
     var textStyle: NotebookTextStyle = .default
     var textLeadingInset = NotebookMetrics.textLeadingInset
-    var suppressesSystemKeyboard = false
+    var showsKeyboardAccessory = false
+    var keyboardInputMode: NotebookEditorInputMode = .systemKeyboard
+    var keyboardAccessoryContent: AnyView? = nil
+    var keyboardPanelContent: AnyView? = nil
     var usesTexturedPaperEffect = false
     var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)? = nil
+    var onEditingEnded: (() -> Void)? = nil
+    var onEditingBegan: (() -> Void)? = nil
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally
@@ -1152,11 +1189,21 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.tintColor = tintUIColor
         textView.notebookTextStyle = textStyle
         textView.textLeadingInset = textLeadingInset
-        textView.suppressesSystemKeyboard = suppressesSystemKeyboard
+        textView.showsKeyboardAccessory = showsKeyboardAccessory
+        textView.keyboardInputMode = keyboardInputMode
         textView.usesTexturedPaperEffect = usesTexturedPaperEffect
+        textView.onEditingEnded = onEditingEnded
+        if let keyboardAccessoryContent {
+            textView.setKeyboardAccessoryContent(keyboardAccessoryContent)
+        }
+        if let keyboardPanelContent {
+            textView.setKeyboardPanelContent(keyboardPanelContent)
+        }
         textView.setNotebookText(text, richText: richText?.wrappedValue)
         context.coordinator.currentRichTextDocument = textView.richTextDocument()
         context.coordinator.onSelectionStateChange = onSelectionStateChange
+        context.coordinator.onEditingEnded = onEditingEnded
+        context.coordinator.onEditingBegan = onEditingBegan
         context.coordinator.onTextChange = { newText in
             text = newText
         }
@@ -1171,6 +1218,9 @@ struct LinedTextEditor: UIViewRepresentable {
     func updateUIView(_ textView: LinedTextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.onSelectionStateChange = onSelectionStateChange
+        coordinator.onEditingEnded = onEditingEnded
+        coordinator.onEditingBegan = onEditingBegan
+        textView.onEditingEnded = onEditingEnded
         coordinator.onTextChange = { newText in
             text = newText
         }
@@ -1201,8 +1251,19 @@ struct LinedTextEditor: UIViewRepresentable {
             textView.textLeadingInset = textLeadingInset
         }
 
-        if textView.suppressesSystemKeyboard != suppressesSystemKeyboard {
-            textView.suppressesSystemKeyboard = suppressesSystemKeyboard
+        if let keyboardAccessoryContent {
+            textView.setKeyboardAccessoryContent(keyboardAccessoryContent)
+        }
+        if let keyboardPanelContent {
+            textView.setKeyboardPanelContent(keyboardPanelContent)
+        }
+
+        if textView.showsKeyboardAccessory != showsKeyboardAccessory {
+            textView.showsKeyboardAccessory = showsKeyboardAccessory
+        }
+
+        if textView.keyboardInputMode != keyboardInputMode {
+            textView.keyboardInputMode = keyboardInputMode
         }
 
         let didChangeTexturedPaperEffect = textView.usesTexturedPaperEffect != usesTexturedPaperEffect
@@ -1284,6 +1345,8 @@ struct LinedTextEditor: UIViewRepresentable {
         var onTextChange: ((String) -> Void)?
         var onRichTextChange: ((NotebookRichTextDocument) -> Void)?
         var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)?
+        var onEditingEnded: (() -> Void)?
+        var onEditingBegan: (() -> Void)?
 
         func textViewDidChange(_ textView: UITextView) {
             isUpdatingFromTextView = true
@@ -1326,6 +1389,15 @@ struct LinedTextEditor: UIViewRepresentable {
 
             linedTextView.refreshTypingAttributesFromSelection()
             onSelectionStateChange?(linedTextView.currentSelectionState())
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            onEditingBegan?()
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            onEditingEnded?()
+            (textView as? LinedTextView)?.onEditingEnded?()
         }
     }
 }
@@ -1675,10 +1747,15 @@ struct NotebookEditorContent: View {
     var showsTitleRule = true
     var leadingContentPadding = NotebookMetrics.marginLeading
     var leadingTextPadding = NotebookMetrics.textLeadingInset
-    var suppressesBodyKeyboard = false
+    var showsKeyboardAccessory = false
+    var keyboardInputMode: NotebookEditorInputMode = .systemKeyboard
+    var keyboardAccessoryContent: AnyView? = nil
+    var keyboardPanelContent: AnyView? = nil
     var usesTexturedPaperEffect = false
     var onBodyTap: (() -> Void)? = nil
     var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)? = nil
+    var onEditingEnded: (() -> Void)? = nil
+    var onEditingBegan: (() -> Void)? = nil
     var onTitleSubmit: () -> Void
 
     private var bodyMinHeight: CGFloat {
@@ -1755,9 +1832,14 @@ struct NotebookEditorContent: View {
                 minimumHeight: bodyMinHeight,
                 textStyle: textStyle,
                 textLeadingInset: leadingTextPadding,
-                suppressesSystemKeyboard: suppressesBodyKeyboard,
+                showsKeyboardAccessory: showsKeyboardAccessory,
+                keyboardInputMode: keyboardInputMode,
+                keyboardAccessoryContent: keyboardAccessoryContent,
+                keyboardPanelContent: keyboardPanelContent,
                 usesTexturedPaperEffect: usesTexturedPaperEffect,
-                onSelectionStateChange: onSelectionStateChange
+                onSelectionStateChange: onSelectionStateChange,
+                onEditingEnded: onEditingEnded,
+                onEditingBegan: onEditingBegan
             )
             .overlay(alignment: .topLeading) {
                 if usesTexturedPaperEffect && !entryText.isEmpty {
