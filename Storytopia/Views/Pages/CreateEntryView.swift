@@ -839,6 +839,7 @@ struct CreateEntryView: View {
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
+    @State private var editorSelectionState = NotebookTextSelectionState()
 
     private func dismissKeyboard() {
         isTitleFocused = false
@@ -1268,6 +1269,7 @@ struct CreateEntryView: View {
                             isTitleFocused = false
                             editorFocusRequestID += 1
                         },
+                        onSelectionStateChange: updateEditorSelectionState,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -1704,6 +1706,7 @@ struct CreateEntryView: View {
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
                         suppressesBodyKeyboard: activeKeyboardFormattingMode != nil,
                         usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
+                        onSelectionStateChange: updateEditorSelectionState,
                         onTitleSubmit: {
                             editorFocusRequestID += 1
                         }
@@ -1858,7 +1861,7 @@ struct CreateEntryView: View {
             keyboardFormattingButton(
                 title: "B",
                 accessibilityLabel: "Bold",
-                isSelected: false
+                isSelected: isKeyboardInlineStyleSelected(.bold)
             ) {
                 sendTextFormattingCommand(.bold)
             }
@@ -1866,7 +1869,7 @@ struct CreateEntryView: View {
             keyboardFormattingButton(
                 title: "I",
                 accessibilityLabel: "Italic",
-                isSelected: false,
+                isSelected: isKeyboardInlineStyleSelected(.italic),
                 isItalic: true
             ) {
                 sendTextFormattingCommand(.italic)
@@ -1875,7 +1878,7 @@ struct CreateEntryView: View {
             keyboardFormattingButton(
                 title: "U",
                 accessibilityLabel: "Underline",
-                isSelected: false,
+                isSelected: isKeyboardInlineStyleSelected(.underline),
                 isUnderlined: true
             ) {
                 sendTextFormattingCommand(.underline)
@@ -1884,7 +1887,7 @@ struct CreateEntryView: View {
             keyboardFormattingButton(
                 title: "S",
                 accessibilityLabel: "Strikethrough",
-                isSelected: false,
+                isSelected: isKeyboardInlineStyleSelected(.strikethrough),
                 isStrikethrough: true
             ) {
                 sendTextFormattingCommand(.strikethrough)
@@ -1897,6 +1900,28 @@ struct CreateEntryView: View {
             ) {
                 sendTextFormattingCommand(.bulletList)
             }
+        }
+    }
+
+    private func updateEditorSelectionState(_ state: NotebookTextSelectionState) {
+        editorSelectionState = state
+        if let textType = CreateKeyboardTextType.allCases.first(where: { $0.textRunStyle == state.textRunStyle }) {
+            selectedKeyboardTextType = textType
+        }
+    }
+
+    private func isKeyboardInlineStyleSelected(_ command: NotebookTextFormattingCommand) -> Bool {
+        switch command {
+        case .bold:
+            return editorSelectionState.hasSelection && editorSelectionState.isBold
+        case .italic:
+            return editorSelectionState.hasSelection && editorSelectionState.isItalic
+        case .underline:
+            return editorSelectionState.hasSelection && editorSelectionState.isUnderlined
+        case .strikethrough:
+            return editorSelectionState.hasSelection && editorSelectionState.isStrikethrough
+        case .bulletList, .textStyle:
+            return false
         }
     }
 
@@ -2227,19 +2252,20 @@ struct CreateEntryView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
-                .frame(width: 34, height: 44)
-                .background(
-                    Group {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color.storyPurple.opacity(0.12))
-                        }
-                    }
-                )
-                .contentShape(Rectangle())
+            ZStack {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.storyPurple.opacity(0.12))
+                        .frame(width: 34, height: 34)
+                }
+
+                Image(systemName: systemName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
+                    .frame(width: 34, height: 34)
+            }
+            .frame(width: 34, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -2255,21 +2281,22 @@ struct CreateEntryView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(isItalic ? .system(size: 17, weight: .bold, design: .serif).italic() : .system(size: 17, weight: .bold, design: .serif))
-                .underline(isUnderlined)
-                .strikethrough(isStrikethrough)
-                .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
-                .frame(width: 34, height: 44)
-                .background(
-                    Group {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color.storyPurple.opacity(0.12))
-                        }
-                    }
-                )
-                .contentShape(Rectangle())
+            ZStack {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.storyPurple.opacity(0.12))
+                        .frame(width: 34, height: 34)
+                }
+
+                Text(title)
+                    .font(isItalic ? .system(size: 17, weight: .bold, design: .serif).italic() : .system(size: 17, weight: .bold, design: .serif))
+                    .underline(isUnderlined)
+                    .strikethrough(isStrikethrough)
+                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
+                    .frame(width: 34, height: 34)
+            }
+            .frame(width: 34, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)

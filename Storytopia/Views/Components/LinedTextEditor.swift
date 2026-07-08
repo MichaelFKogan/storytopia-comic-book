@@ -242,6 +242,15 @@ struct NotebookTextFormattingRequest: Equatable {
     let command: NotebookTextFormattingCommand
 }
 
+struct NotebookTextSelectionState: Equatable {
+    var hasSelection = false
+    var isBold = false
+    var isItalic = false
+    var isUnderlined = false
+    var isStrikethrough = false
+    var textRunStyle: NotebookTextRunStyle = .body
+}
+
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
     static let bodyFontSize: CGFloat = 16
@@ -1020,6 +1029,51 @@ final class LinedTextView: UITextView {
         refreshTypingAttributes()
     }
 
+    func currentSelectionState() -> NotebookTextSelectionState {
+        let range = selectedRange
+        let hasSelection = range.location != NSNotFound && range.length > 0
+        guard hasSelection,
+              let attributedText,
+              attributedText.length > 0,
+              NSIntersectionRange(range, NSRange(location: 0, length: attributedText.length)).length == range.length else {
+            return NotebookTextSelectionState(
+                hasSelection: false,
+                isBold: isTypingBold,
+                isItalic: isTypingItalic,
+                textRunStyle: typingTextRunStyle
+            )
+        }
+
+        return NotebookTextSelectionState(
+            hasSelection: true,
+            isBold: attributedText.selectionContainsNotebookStyle(.notebookBold, in: range),
+            isItalic: attributedText.selectionContainsNotebookStyle(.notebookItalic, in: range),
+            isUnderlined: attributedText.selectionContainsAttribute(.underlineStyle, in: range),
+            isStrikethrough: attributedText.selectionContainsAttribute(.strikethroughStyle, in: range),
+            textRunStyle: selectedTextRunStyle(in: range, attributedText: attributedText)
+        )
+    }
+
+    private func selectedTextRunStyle(
+        in range: NSRange,
+        attributedText: NSAttributedString
+    ) -> NotebookTextRunStyle {
+        var selectedStyle: NotebookTextRunStyle?
+        var isMixed = false
+
+        attributedText.enumerateAttribute(.notebookTextStyle, in: range) { value, _, stop in
+            let style = (value as? String).flatMap(NotebookTextRunStyle.init(rawValue:)) ?? .body
+            if let selectedStyle, selectedStyle != style {
+                isMixed = true
+                stop.pointee = true
+            } else {
+                selectedStyle = style
+            }
+        }
+
+        return isMixed ? .body : selectedStyle ?? .body
+    }
+
     private func isNewlineCharacter(at location: Int, in plainText: NSString) -> Bool {
         guard location < plainText.length,
               let scalar = UnicodeScalar(Int(plainText.character(at: location))) else {
@@ -1080,6 +1134,7 @@ struct LinedTextEditor: UIViewRepresentable {
     var textLeadingInset = NotebookMetrics.textLeadingInset
     var suppressesSystemKeyboard = false
     var usesTexturedPaperEffect = false
+    var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)? = nil
 
     private var shouldDrawRuledLines: Bool {
         drawsRuledLines ?? scrollsInternally
@@ -1101,6 +1156,7 @@ struct LinedTextEditor: UIViewRepresentable {
         textView.usesTexturedPaperEffect = usesTexturedPaperEffect
         textView.setNotebookText(text, richText: richText?.wrappedValue)
         context.coordinator.currentRichTextDocument = textView.richTextDocument()
+        context.coordinator.onSelectionStateChange = onSelectionStateChange
         context.coordinator.onTextChange = { newText in
             text = newText
         }
@@ -1114,6 +1170,7 @@ struct LinedTextEditor: UIViewRepresentable {
 
     func updateUIView(_ textView: LinedTextView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.onSelectionStateChange = onSelectionStateChange
         coordinator.onTextChange = { newText in
             text = newText
         }
@@ -1195,6 +1252,7 @@ struct LinedTextEditor: UIViewRepresentable {
             coordinator.handledFormattingRequestID = formattingRequest.id
             DispatchQueue.main.async {
                 textView.applyFormattingCommand(formattingRequest.command)
+                coordinator.onSelectionStateChange?(textView.currentSelectionState())
             }
         }
     }
@@ -1225,6 +1283,7 @@ struct LinedTextEditor: UIViewRepresentable {
         var isWaitingForRichTextBindingSync = false
         var onTextChange: ((String) -> Void)?
         var onRichTextChange: ((NotebookRichTextDocument) -> Void)?
+        var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)?
 
         func textViewDidChange(_ textView: UITextView) {
             isUpdatingFromTextView = true
@@ -1236,6 +1295,7 @@ struct LinedTextEditor: UIViewRepresentable {
 
             if let linedTextView = textView as? LinedTextView {
                 linedTextView.refreshLayoutAfterContentChange()
+                onSelectionStateChange?(linedTextView.currentSelectionState())
             }
 
             DispatchQueue.main.async {
@@ -1265,7 +1325,50 @@ struct LinedTextEditor: UIViewRepresentable {
             }
 
             linedTextView.refreshTypingAttributesFromSelection()
+            onSelectionStateChange?(linedTextView.currentSelectionState())
         }
+    }
+}
+
+private extension NSAttributedString {
+    func selectionContainsNotebookStyle(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
+        var containsStyle = true
+
+        enumerateAttributes(in: range) { attributes, _, stop in
+            let explicitValue = attributes[key] as? Bool
+            let hasFallbackTrait: Bool
+            if explicitValue == nil, let font = attributes[.font] as? UIFont {
+                if key == .notebookBold {
+                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+                } else if key == .notebookItalic {
+                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+                } else {
+                    hasFallbackTrait = false
+                }
+            } else {
+                hasFallbackTrait = false
+            }
+
+            if explicitValue != true && !hasFallbackTrait {
+                containsStyle = false
+                stop.pointee = true
+            }
+        }
+
+        return containsStyle
+    }
+
+    func selectionContainsAttribute(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
+        var containsStyle = true
+
+        enumerateAttribute(key, in: range) { value, _, stop in
+            if value == nil {
+                containsStyle = false
+                stop.pointee = true
+            }
+        }
+
+        return containsStyle
     }
 }
 
@@ -1575,6 +1678,7 @@ struct NotebookEditorContent: View {
     var suppressesBodyKeyboard = false
     var usesTexturedPaperEffect = false
     var onBodyTap: (() -> Void)? = nil
+    var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)? = nil
     var onTitleSubmit: () -> Void
 
     private var bodyMinHeight: CGFloat {
@@ -1652,7 +1756,8 @@ struct NotebookEditorContent: View {
                 textStyle: textStyle,
                 textLeadingInset: leadingTextPadding,
                 suppressesSystemKeyboard: suppressesBodyKeyboard,
-                usesTexturedPaperEffect: usesTexturedPaperEffect
+                usesTexturedPaperEffect: usesTexturedPaperEffect,
+                onSelectionStateChange: onSelectionStateChange
             )
             .overlay(alignment: .topLeading) {
                 if usesTexturedPaperEffect && !entryText.isEmpty {
