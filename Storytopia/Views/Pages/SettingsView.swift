@@ -4,6 +4,10 @@ struct SettingsView: View {
     @Binding var selectedPage: StoryPage
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedArtStyle = "Anime"
+
+    private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
+
     var body: some View {
         List {
             Section("Account") {
@@ -17,23 +21,49 @@ struct SettingsView: View {
             }
 
             Section("Journal") {
-                NavigationLink {
+                SettingsNavigationRow(
+                    systemName: "calendar",
+                    title: "Daily",
+                    subtitle: "Open your daily journal",
+                    accessibilityLabel: "Open daily journal"
+                ) {
                     DaybookView(
                         selectedPage: $selectedPage,
                         embedsInNavigationStack: false,
                         showsBottomNavigation: false
                     )
                     .enableInteractivePopGesture()
-                } label: {
-                    SettingsRowContent(
-                        systemName: "calendar",
-                        title: "Daily",
-                        subtitle: "Open your daily journal"
-                    )
-                    .padding(.vertical, 4)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open daily journal")
+            }
+
+            Section("Create") {
+                SettingsNavigationRow(
+                    systemName: "paintpalette",
+                    title: "Choose Art Style",
+                    subtitle: "Preview and pick a storyboard look",
+                    accessibilityLabel: "Open choose art style"
+                ) {
+                    ArtStyleGridSheet(
+                        artStyles: artStyles,
+                        selectedArtStyle: $selectedArtStyle
+                    )
+                    .enableInteractivePopGesture()
+                }
+            }
+
+            Section("More Pages") {
+                SettingsNavigationRow(
+                    systemName: "safari",
+                    title: "Explore",
+                    subtitle: "Open the explore feed",
+                    accessibilityLabel: "Open explore"
+                ) {
+                    ExploreView(
+                        selectedPage: $selectedPage,
+                        showsBottomNavigation: false
+                    )
+                    .enableInteractivePopGesture()
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -42,7 +72,32 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
+        .preferredColorScheme(.light)
         .enableInteractivePopGesture()
+    }
+}
+
+private struct SettingsNavigationRow<Destination: View>: View {
+    let systemName: String
+    let title: String
+    let subtitle: String
+    let accessibilityLabel: String
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        NavigationLink {
+            destination()
+        } label: {
+            SettingsRowContent(
+                systemName: systemName,
+                title: title,
+                subtitle: subtitle,
+                showsChevron: false
+            )
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -69,6 +124,7 @@ private struct SettingsRowContent: View {
     let systemName: String
     let title: String
     let subtitle: String
+    var showsChevron = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -92,9 +148,11 @@ private struct SettingsRowContent: View {
 
             Spacer(minLength: 8)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(uiColor: .tertiaryLabel))
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color(uiColor: .tertiaryLabel))
+            }
         }
         .contentShape(Rectangle())
     }

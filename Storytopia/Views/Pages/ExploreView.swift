@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ExploreView: View {
     @Binding var selectedPage: StoryPage
+    var showsBottomNavigation = true
+
     @State private var selectedFilter = "For You"
 
     private let filters = ["For You", "Following", "Popular"]
@@ -62,11 +64,16 @@ struct ExploreView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
-                .padding(.bottom, 92)
+                .padding(.bottom, showsBottomNavigation ? 92 : 24)
             }
 
-            BottomNavigationBar(selectedPage: $selectedPage)
+            if showsBottomNavigation {
+                BottomNavigationBar(selectedPage: $selectedPage)
+            }
         }
+        .navigationTitle(showsBottomNavigation ? "" : "Explore")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsBottomNavigation ? .hidden : .visible, for: .navigationBar)
     }
 
     private var header: some View {

@@ -866,6 +866,7 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var previewedStoryboardPhoto: UIImage?
+    @State private var isPhotoPanelExpanded = false
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @GestureState private var exitDragOffset: CGFloat = 0
@@ -1217,16 +1218,6 @@ struct CreateEntryView: View {
             }
         }
         .background(selectedPaperSurfaceColor)
-        .overlay(alignment: .bottomTrailing) {
-            if !isKeyboardVisible
-                && !isBodyEditorEditing
-                && activeKeyboardFormattingMode == nil
-                && !isKeyboardFormattingToolbarVisible {
-                editorFloatingToolStack
-                    .padding(.trailing, 31)
-                    .padding(.bottom, editorFloatingToolBottomPadding)
-            }
-        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !isFullScreenEditorVisible {
@@ -1662,6 +1653,7 @@ struct CreateEntryView: View {
         isShowingEntryOptionsPage = false
         loadedDraftSnapshot = nil
         linkedJournalTitle = nil
+        isPhotoPanelExpanded = false
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         isKeyboardVisible = false
@@ -1831,30 +1823,13 @@ struct CreateEntryView: View {
         max(visibleHeight, UIScreen.main.bounds.height) * 2
     }
 
-    private var editorFloatingToolBottomPadding: CGFloat {
-        if isFullScreenEditorVisible {
-            return 24
-        }
-
-        if isKeyboardVisible {
-            return 68
-        }
-
-        var padding: CGFloat = hasStoryboardPhotos ? 232 : 196
-        if !showsComposeFlowControls {
-            padding -= 66
-        }
-        return padding
-    }
-
     private var entryDraftBottomBar: some View {
-        VStack(spacing: 14) {
-            if showsAddToJournalButton {
-                addToJournalButton
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 10) {
+            if hasStoryboardPhotos {
+                photosAttachedTab
             }
 
-            photoStripSection
+            unifiedEditorToolbar
 
             if showsComposeFlowControls {
                 nextEntryOptionsButton
@@ -1864,45 +1839,175 @@ struct CreateEntryView: View {
         .padding(.bottom, 24)
     }
 
-    private var showsAddToJournalButton: Bool {
-        true
-    }
-
-    private var addToJournalButton: some View {
-        Button {
-            dismissKeyboard()
-            selectedCustomJournalTitle = displayedAddToJournalTitle
-            isShowingAddToJournalPage = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: displayedAddToJournalTitle == nil ? "plus" : "book.closed.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 16, height: 16)
-
-                Text(displayedAddToJournalTitle ?? "Add to Journal")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .foregroundStyle(Color.storyPurple)
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.storyPurple.opacity(0.18), lineWidth: 1)
-            )
-            .shadow(color: Color.storyInk.opacity(0.05), radius: 5, y: 2)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(displayedAddToJournalTitle.map { "Added to \($0)" } ?? "Add to Journal")
-    }
-
     private var displayedAddToJournalTitle: String? {
         if let directJournalTitle = presentation.directJournalTitle {
             return directJournalTitle
         }
 
         return linkedJournalTitle ?? selectedCustomJournalTitle
+    }
+
+    private var photosAttachedTab: some View {
+        VStack(spacing: 0) {
+            Button {
+                dismissKeyboard()
+                withAnimation(.snappy(duration: 0.24)) {
+                    isPhotoPanelExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.74))
+                        .frame(width: 28, height: 28)
+                        .background(Color.storyInk.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                    Text(photosAttachedTitle)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.78))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 10)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.64))
+                        .rotationEffect(.degrees(isPhotoPanelExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 46)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(photosAttachedTitle)
+
+            if isPhotoPanelExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        photoStripHeader
+
+                        Spacer(minLength: 8)
+
+                        photoLimitText
+
+                        Button {
+                            withAnimation(.snappy(duration: 0.22)) {
+                                isPhotoPanelExpanded = false
+                            }
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color.storyInk.opacity(0.66))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Collapse photos")
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        photoStripContent
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(height: 76)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+    }
+
+    private var photosAttachedTitle: String {
+        let count = storyboardPhotos.compactMap { $0 }.count
+        return "\(count) Photo\(count == 1 ? "" : "s") Attached"
+    }
+
+    private var unifiedEditorToolbar: some View {
+        HStack(spacing: 0) {
+            toolbarActionButton(title: "Font", systemName: "textformat") {
+                openFontOptions()
+            }
+
+            toolbarActionButton(title: "Photos", systemName: "photo.on.rectangle.angled", isSelected: isPhotoPanelExpanded) {
+                handlePhotosToolbarTapped()
+            }
+
+            toolbarActionButton(title: "Paper", systemName: "doc.text") {
+                openPaperStyleOptions()
+            }
+
+            toolbarActionButton(title: "Prompts", systemName: "text.bubble") {
+                dismissKeyboard()
+                isShowingArtStyleGrid = true
+            }
+
+            toolbarActionButton(title: "Journal", systemName: displayedAddToJournalTitle == nil ? "book.closed" : "book.closed.fill") {
+                openAddToJournalPage()
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.52), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.09), radius: 16, y: 7)
+    }
+
+    private func toolbarActionButton(
+        title: String,
+        systemName: String,
+        isSelected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemName)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.storyInk.opacity(0.74))
+                    .frame(height: 22)
+
+                Text(title)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(isSelected ? Color.storyInk.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func handlePhotosToolbarTapped() {
+        dismissKeyboard()
+        if hasStoryboardPhotos {
+            withAnimation(.snappy(duration: 0.24)) {
+                isPhotoPanelExpanded.toggle()
+            }
+        } else {
+            selectedPhotoSlot = nextAvailablePhotoSlot
+            isShowingPhotoSourceDialog = true
+        }
+    }
+
+    private func openAddToJournalPage() {
+        dismissKeyboard()
+        selectedCustomJournalTitle = displayedAddToJournalTitle
+        isShowingAddToJournalPage = true
     }
 
     private var entryDraftKeyboardAccessory: some View {
@@ -2469,45 +2574,16 @@ struct CreateEntryView: View {
         .opacity(nextAvailablePhotoSlot == nil ? 0.42 : 1)
     }
 
-    private var editorFloatingToolStack: some View {
-        VStack(spacing: 10) {
-            fontStyleButton
-            paperStyleButton
-        }
-    }
-
     private func openFontOptions() {
         dismissKeyboard()
         selectedFormattingTab = .fontStyle
         isShowingFormattingSheet = true
     }
 
-    private var fontStyleButton: some View {
-        Button {
-            openFontOptions()
-        } label: {
-            editorFloatingToolIcon {
-                Image(systemName: "textformat")
-                    .font(.system(size: 18, weight: .semibold))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Font options")
-    }
-
-    private var paperStyleButton: some View {
-        Button {
-            dismissKeyboard()
-            selectedFormattingTab = .paperStyle
-            isShowingFormattingSheet = true
-        } label: {
-            editorFloatingToolIcon {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 18, weight: .semibold))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Paper style options")
+    private func openPaperStyleOptions() {
+        dismissKeyboard()
+        selectedFormattingTab = .paperStyle
+        isShowingFormattingSheet = true
     }
 
     private func editorFloatingToolIcon<Content: View>(
@@ -2816,31 +2892,6 @@ struct CreateEntryView: View {
         .buttonStyle(.plain)
     }
 
-    private var photoStripSection: some View {
-        Group {
-            if hasStoryboardPhotos {
-                populatedPhotoStripSection
-            } else {
-                emptyPhotoStripSection
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 9)
-        .padding(.bottom, 8)
-        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissKeyboard()
-            }
-        )
-    }
-
     private var photoStripHeader: some View {
         HStack(alignment: .center, spacing: 6) {
             Image(systemName: "paperclip")
@@ -2852,37 +2903,6 @@ struct CreateEntryView: View {
             Text("Photos")
                 .font(.system(size: 14, weight: .semibold, design: .serif))
                 .foregroundStyle(Color.storyInk)
-        }
-    }
-
-    private var emptyPhotoStripSection: some View {
-        HStack(alignment: .center, spacing: 10) {
-            photoStripHeader
-
-            Spacer(minLength: 10)
-
-            photoLimitText
-
-            addPhotoStripButton
-        }
-    }
-
-    private var populatedPhotoStripSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                photoStripHeader
-
-                Spacer(minLength: 10)
-
-                photoLimitText
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                photoStripContent
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 4)
-            }
-            .frame(height: 76)
         }
     }
 
@@ -3154,6 +3174,7 @@ struct CreateEntryView: View {
 
         storyboardPhotos[slot] = image
         selectedPhotoSlot = nil
+        isPhotoPanelExpanded = false
     }
 
     private func setStoryboardPhotos(_ images: [UIImage]) {
@@ -3179,6 +3200,7 @@ struct CreateEntryView: View {
 
         storyboardPhotos = updatedPhotos
         selectedPhotoSlot = nil
+        isPhotoPanelExpanded = false
     }
 
     @MainActor
@@ -3211,6 +3233,9 @@ struct CreateEntryView: View {
 
         existingPhotos.remove(at: index)
         storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
+        if existingPhotos.isEmpty {
+            isPhotoPanelExpanded = false
+        }
     }
 
     private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
