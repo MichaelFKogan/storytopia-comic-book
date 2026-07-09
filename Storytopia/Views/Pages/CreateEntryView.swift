@@ -195,6 +195,24 @@ private struct PendingCreateEntryDraftSave {
     let paperColorIndex: Int
 }
 
+private enum EntryJournalLinkStore {
+    private static let storageKey = "StorytopiaEntryJournalLinks"
+
+    static func loadJournalTitle(for draftID: UUID) -> String? {
+        links[draftID.uuidString]
+    }
+
+    static func save(journalTitle: String, for draftID: UUID) {
+        var links = links
+        links[draftID.uuidString] = journalTitle
+        UserDefaults.standard.set(links, forKey: storageKey)
+    }
+
+    private static var links: [String: String] {
+        UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+    }
+}
+
 private enum CreateTextAlignmentChoice: String, CaseIterable, Identifiable {
     case leading
     case center
@@ -814,6 +832,8 @@ struct CreateEntryView: View {
     @State private var entryDestination: CreateEntryDestination = .daily
     @State private var selectedCustomJournalTitle: String?
     @State private var addedJournalTitle: String?
+    @State private var isShowingAddToJournalPage = false
+    @State private var linkedJournalTitle: String?
     @State private var storyLocation = ""
     @State private var storyDate = Date()
     @State private var savesDraft = true
@@ -824,6 +844,7 @@ struct CreateEntryView: View {
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @GestureState private var exitDragOffset: CGFloat = 0
+    @State private var didDismissKeyboardForExitDrag = false
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
     @State private var editorBlurRequestID = 0
@@ -840,7 +861,6 @@ struct CreateEntryView: View {
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         editorBlurRequestID += 1
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func showEntryOptionsPage() {
@@ -916,10 +936,32 @@ struct CreateEntryView: View {
             .navigationDestination(isPresented: $isShowingEntryOptionsPage) {
                 entryOptionsPage
             }
+            .navigationDestination(isPresented: $isShowingAddToJournalPage) {
+                AddEntryToJournalPage(
+                    selectedJournalTitle: $selectedCustomJournalTitle,
+                    onSelect: addEditedEntryToJournal
+                )
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let addedJournalTitle {
+                addedToJournalToast(journalTitle: addedJournalTitle)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .offset(x: exitDragOffset)
         .simultaneousGesture(exitSwipeGesture)
         .animation(.snappy(duration: 0.22), value: exitDragOffset)
+        .onDisappear {
+            dismissKeyboard()
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?
+                .endEditing(true)
+        }
         .sheet(isPresented: $isShowingCamera) {
             CameraPhotoPicker { image in
                 setStoryboardPhoto(image)
@@ -1030,28 +1072,6 @@ struct CreateEntryView: View {
         } message: {
             Text(generationErrorMessage ?? "")
         }
-        .alert(
-            "Entry Added!",
-            isPresented: Binding(
-                get: { addedJournalTitle != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        addedJournalTitle = nil
-                    }
-                }
-            )
-        ) {
-            Button("Continue Writing", role: .cancel) {
-                addedJournalTitle = nil
-            }
-
-            Button("View Journal") {
-                addedJournalTitle = nil
-                selectedPage = .journal
-            }
-        } message: {
-            Text("This entry is now part of \(addedJournalTitle ?? "your journal").")
-        }
         .onChange(of: selectedPhotoPickerItems) { items in
             guard !items.isEmpty else {
                 return
@@ -1063,6 +1083,7 @@ struct CreateEntryView: View {
         }
         .onAppear {
             configureDirectJournalEntryIfNeeded()
+            loadLinkedJournalTitle(for: activeDraftID)
             loadSavedDraftIfNeeded()
         }
         .onChange(of: activeDraftID) { newDraftID in
@@ -1092,6 +1113,7 @@ struct CreateEntryView: View {
             return
         }
 
+        loadLinkedJournalTitle(for: draftID)
         loadSavedDraftIfNeeded()
     }
 
@@ -1411,6 +1433,20 @@ struct CreateEntryView: View {
 
     private var exitSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 18, coordinateSpace: .local)
+            .onChanged { value in
+                guard isExitSwipe(value) else {
+                    return
+                }
+
+                guard !didDismissKeyboardForExitDrag else {
+                    return
+                }
+
+                didDismissKeyboardForExitDrag = true
+                DispatchQueue.main.async {
+                    dismissKeyboard()
+                }
+            }
             .updating($exitDragOffset) { value, state, _ in
                 guard isExitSwipe(value) else {
                     return
@@ -1419,6 +1455,10 @@ struct CreateEntryView: View {
                 state = value.translation.width
             }
             .onEnded { value in
+                defer {
+                    didDismissKeyboardForExitDrag = false
+                }
+
                 let shouldExit = value.translation.width > 96
                     || value.predictedEndTranslation.width > 180
 
@@ -1591,6 +1631,19 @@ struct CreateEntryView: View {
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
         loadedDraftSnapshot = nil
+        linkedJournalTitle = nil
+        resetKeyboardFormattingState()
+        isBodyEditorEditing = false
+        isKeyboardVisible = false
+    }
+
+    private func loadLinkedJournalTitle(for draftID: UUID?) {
+        guard let draftID else {
+            linkedJournalTitle = nil
+            return
+        }
+
+        linkedJournalTitle = EntryJournalLinkStore.loadJournalTitle(for: draftID)
     }
 
     private func loadSavedDraftIfNeeded() {
@@ -1695,7 +1748,7 @@ struct CreateEntryView: View {
                         showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
                         leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
                         leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
-                        showsKeyboardAccessory: true,
+                        showsKeyboardAccessory: showsDraftKeyboardAccessory,
                         keyboardInputMode: draftKeyboardInputMode,
                         keyboardAccessoryContent: AnyView(entryDraftKeyboardAccessory),
                         keyboardPanelContent: AnyView(keyboardFormattingPanelContent),
@@ -1740,6 +1793,10 @@ struct CreateEntryView: View {
         return .systemKeyboard
     }
 
+    private var showsDraftKeyboardAccessory: Bool {
+        isBodyEditorEditing || isTitleFocused
+    }
+
     private func editorScrollContentHeight(for visibleHeight: CGFloat) -> CGFloat {
         max(visibleHeight, UIScreen.main.bounds.height) * 2
     }
@@ -1762,6 +1819,11 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 14) {
+            if showsAddToJournalButton {
+                addToJournalButton
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             photoStripSection
 
             if showsComposeFlowControls {
@@ -1770,6 +1832,41 @@ struct CreateEntryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 24)
+    }
+
+    private var showsAddToJournalButton: Bool {
+        true
+    }
+
+    private var addToJournalButton: some View {
+        Button {
+            dismissKeyboard()
+            selectedCustomJournalTitle = displayedAddToJournalTitle
+            isShowingAddToJournalPage = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: displayedAddToJournalTitle == nil ? "plus" : "book.closed")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 16, height: 16)
+
+                Text(displayedAddToJournalTitle ?? "Add to Journal")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundStyle(Color.storyPurple)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasDraftContent)
+        .opacity(hasDraftContent ? 1 : 0.42)
+        .accessibilityLabel(displayedAddToJournalTitle.map { "Added to \($0)" } ?? "Add to Journal")
+    }
+
+    private var displayedAddToJournalTitle: String? {
+        if let directJournalTitle = presentation.directJournalTitle {
+            return directJournalTitle
+        }
+
+        return linkedJournalTitle ?? selectedCustomJournalTitle
     }
 
     private var entryDraftKeyboardAccessory: some View {
@@ -1864,9 +1961,9 @@ struct CreateEntryView: View {
                         width: 104
                     )
 
-                    keyboardColorButton
-
                     keyboardTextSizeButton
+
+                    keyboardColorButton
                 }
                 .padding(.trailing, 12)
             }
@@ -2469,6 +2566,79 @@ struct CreateEntryView: View {
 
         StoryEntryStore.add(entry, to: journalTitle)
         onJournalEntryCreated(journalTitle, entry)
+    }
+
+    private func addEditedEntryToJournal(_ journalTitle: String) {
+        dismissKeyboard()
+
+        var linkedDraftID = activeDraftID
+        if presentation.isEditDraft {
+            saveEditedDraftChanges()
+            linkedDraftID = activeDraftID ?? linkedDraftID
+        }
+
+        addCurrentEntry(to: journalTitle)
+        selectedCustomJournalTitle = journalTitle
+        linkedJournalTitle = journalTitle
+        if let linkedDraftID {
+            EntryJournalLinkStore.save(journalTitle: journalTitle, for: linkedDraftID)
+        }
+        isShowingAddToJournalPage = false
+
+        withAnimation(.snappy(duration: 0.24)) {
+            addedJournalTitle = journalTitle
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard addedJournalTitle == journalTitle else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                addedJournalTitle = nil
+            }
+        }
+    }
+
+    private func addedToJournalToast(journalTitle: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 30, height: 30)
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Added to Journal")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Text(journalTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 10)
+
+            Button("View") {
+                withAnimation(.snappy(duration: 0.18)) {
+                    addedJournalTitle = nil
+                }
+                selectedPage = .journal
+            }
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.storyPurple)
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
     }
 
     private func saveDirectJournalEntryAndExit() {
@@ -3194,6 +3364,219 @@ struct CreateEntryView: View {
         .padding(.top, 2)
         .disabled(isGeneratingStoryboard)
         .opacity(isGeneratingStoryboard ? 0.76 : 1)
+    }
+}
+
+private struct AddEntryToJournalPage: View {
+    @Binding var selectedJournalTitle: String?
+
+    let onSelect: (String) -> Void
+
+    @State private var pendingJournalTitle: String?
+    @State private var isCreateJournalAlertPresented = false
+    @State private var newJournalName = ""
+
+    private var journals: [PrototypeChapter] {
+        DailyJournalData.allChapters()
+    }
+
+    private var trimmedNewJournalName: String {
+        newJournalName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(journals) { journal in
+                        Button {
+                            if pendingJournalTitle == journal.title {
+                                pendingJournalTitle = nil
+                            } else {
+                                pendingJournalTitle = journal.title
+                            }
+                        } label: {
+                            journalRow(journal)
+                        }
+                        .buttonStyle(.plain)
+
+                        if journal.id != journals.last?.id {
+                            Divider()
+                                .padding(.leading, 80)
+                        }
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.horizontal, 16)
+            }
+        }
+        .background(Color.homePageBackground)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Add to Journal")
+                    .font(.system(size: 14, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    if let pendingJournalTitle {
+                        selectedJournalTitle = pendingJournalTitle
+                        onSelect(pendingJournalTitle)
+                    }
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(pendingJournalTitle == nil ? Color.storyGray.opacity(0.42) : Color.storyPurple)
+                .disabled(pendingJournalTitle == nil)
+            }
+            .hideSharedBackgroundIfAvailable()
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            createNewJournalButton
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+                .background(Color.homePageBackground)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.homeBorder.opacity(0.7))
+                        .frame(height: 0.5)
+                }
+        }
+        .alert("Create New Journal", isPresented: $isCreateJournalAlertPresented) {
+            TextField("Journal name", text: $newJournalName)
+                .textInputAutocapitalization(.words)
+
+            Button("Cancel", role: .cancel) {
+                newJournalName = ""
+            }
+
+            Button("Create") {
+                createJournalAndAddEntry()
+            }
+            .disabled(trimmedNewJournalName.isEmpty)
+        } message: {
+            Text("Name the journal where this entry should be added.")
+        }
+        .onAppear {
+            pendingJournalTitle = selectedJournalTitle
+        }
+    }
+
+    private func journalRow(_ journal: PrototypeChapter) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: pendingJournalTitle == journal.title ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(pendingJournalTitle == journal.title ? Color.storyPurple : Color.homeBorder)
+                .frame(width: 22, height: 22)
+
+            AddEntryJournalNotebookCover(
+                color: Color.storyPurple.opacity(0.82),
+                isSelected: false
+            )
+            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+
+            Text(journal.title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            Spacer(minLength: 8)
+
+            Text("\(journal.entries.count) \(journal.entries.count == 1 ? "entry" : "entries")")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(Color.homeMutedText)
+                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
+        }
+        .frame(height: 50)
+        .contentShape(Rectangle())
+        .accessibilityLabel(journal.title)
+    }
+
+    private var createNewJournalButton: some View {
+        Button {
+            isCreateJournalAlertPresented = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+
+                Text("Create New Journal")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundStyle(Color.storyPurple)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func createJournalAndAddEntry() {
+        guard !trimmedNewJournalName.isEmpty else {
+            return
+        }
+
+        let journal = PrototypeChapter(
+            title: trimmedNewJournalName,
+            subtitle: "Personal journal",
+            color: Color.storyPurple,
+            symbol: "book.closed.fill",
+            coverImageName: nil,
+            kind: .journal,
+            isFavorite: false,
+            entries: []
+        )
+
+        UserChapterStore.add(journal)
+        selectedJournalTitle = journal.title
+        pendingJournalTitle = journal.title
+        newJournalName = ""
+        onSelect(journal.title)
+    }
+}
+
+private struct AddEntryJournalNotebookCover: View {
+    let color: Color
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 3,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 5,
+                topTrailingRadius: 5,
+                style: .continuous
+            )
+            .fill(color)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 5)
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 26, height: 34)
+        .overlay(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 3,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 5,
+                topTrailingRadius: 5,
+                style: .continuous
+            )
+            .stroke(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.08), lineWidth: isSelected ? 1.4 : 0.6)
+        )
     }
 }
 

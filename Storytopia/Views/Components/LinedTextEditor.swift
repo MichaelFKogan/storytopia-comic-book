@@ -609,6 +609,17 @@ final class LinedTextView: UITextView {
         panelHost.setRootView(view)
     }
 
+    func releaseKeyboardChrome() {
+        let wasFirstResponder = isFirstResponder
+
+        inputAccessoryView = nil
+        inputView = nil
+
+        if wasFirstResponder {
+            reloadInputViews()
+        }
+    }
+
     private func applyInputViews(reloadIfNeeded: Bool) {
         inputAccessoryView = showsKeyboardAccessory ? toolbarHost : nil
 
@@ -1252,10 +1263,12 @@ struct LinedTextEditor: UIViewRepresentable {
         }
 
         if let keyboardAccessoryContent {
-            textView.setKeyboardAccessoryContent(keyboardAccessoryContent)
+            coordinator.pendingKeyboardAccessoryContent = keyboardAccessoryContent
+            coordinator.scheduleKeyboardAccessoryRefresh(for: textView)
         }
         if let keyboardPanelContent {
-            textView.setKeyboardPanelContent(keyboardPanelContent)
+            coordinator.pendingKeyboardPanelContent = keyboardPanelContent
+            coordinator.scheduleKeyboardPanelRefresh(for: textView)
         }
 
         if textView.showsKeyboardAccessory != showsKeyboardAccessory {
@@ -1303,8 +1316,11 @@ struct LinedTextEditor: UIViewRepresentable {
 
         if blurRequestID != coordinator.handledBlurRequestID {
             coordinator.handledBlurRequestID = blurRequestID
+            coordinator.isProgrammaticallyEndingEditing = true
             DispatchQueue.main.async {
+                textView.releaseKeyboardChrome()
                 textView.resignFirstResponder()
+                coordinator.isProgrammaticallyEndingEditing = false
             }
         }
 
@@ -1337,6 +1353,7 @@ struct LinedTextEditor: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var isUpdatingFromTextView = false
+        var isProgrammaticallyEndingEditing = false
         var handledFocusRequestID = 0
         var handledBlurRequestID = 0
         var handledFormattingRequestID = 0
@@ -1347,6 +1364,50 @@ struct LinedTextEditor: UIViewRepresentable {
         var onSelectionStateChange: ((NotebookTextSelectionState) -> Void)?
         var onEditingEnded: (() -> Void)?
         var onEditingBegan: (() -> Void)?
+        var pendingKeyboardAccessoryContent: AnyView?
+        var pendingKeyboardPanelContent: AnyView?
+        private var isKeyboardAccessoryRefreshScheduled = false
+        private var isKeyboardPanelRefreshScheduled = false
+
+        private func dispatchToSwiftUI(_ action: @escaping () -> Void) {
+            DispatchQueue.main.async(execute: action)
+        }
+
+        func scheduleKeyboardAccessoryRefresh(for textView: LinedTextView) {
+            guard !isKeyboardAccessoryRefreshScheduled else {
+                return
+            }
+
+            isKeyboardAccessoryRefreshScheduled = true
+            dispatchToSwiftUI { [weak self, weak textView] in
+                guard let self, let textView else {
+                    return
+                }
+
+                self.isKeyboardAccessoryRefreshScheduled = false
+                if let pendingKeyboardAccessoryContent = self.pendingKeyboardAccessoryContent {
+                    textView.setKeyboardAccessoryContent(pendingKeyboardAccessoryContent)
+                }
+            }
+        }
+
+        func scheduleKeyboardPanelRefresh(for textView: LinedTextView) {
+            guard !isKeyboardPanelRefreshScheduled else {
+                return
+            }
+
+            isKeyboardPanelRefreshScheduled = true
+            dispatchToSwiftUI { [weak self, weak textView] in
+                guard let self, let textView else {
+                    return
+                }
+
+                self.isKeyboardPanelRefreshScheduled = false
+                if let pendingKeyboardPanelContent = self.pendingKeyboardPanelContent {
+                    textView.setKeyboardPanelContent(pendingKeyboardPanelContent)
+                }
+            }
+        }
 
         func textViewDidChange(_ textView: UITextView) {
             isUpdatingFromTextView = true
@@ -1358,7 +1419,10 @@ struct LinedTextEditor: UIViewRepresentable {
 
             if let linedTextView = textView as? LinedTextView {
                 linedTextView.refreshLayoutAfterContentChange()
-                onSelectionStateChange?(linedTextView.currentSelectionState())
+                let selectionState = linedTextView.currentSelectionState()
+                dispatchToSwiftUI { [weak self] in
+                    self?.onSelectionStateChange?(selectionState)
+                }
             }
 
             DispatchQueue.main.async {
@@ -1388,16 +1452,27 @@ struct LinedTextEditor: UIViewRepresentable {
             }
 
             linedTextView.refreshTypingAttributesFromSelection()
-            onSelectionStateChange?(linedTextView.currentSelectionState())
+            let selectionState = linedTextView.currentSelectionState()
+            dispatchToSwiftUI { [weak self] in
+                self?.onSelectionStateChange?(selectionState)
+            }
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
-            onEditingBegan?()
+            dispatchToSwiftUI { [weak self] in
+                self?.onEditingBegan?()
+            }
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
-            onEditingEnded?()
-            (textView as? LinedTextView)?.onEditingEnded?()
+            guard !isProgrammaticallyEndingEditing else {
+                return
+            }
+
+            dispatchToSwiftUI { [weak self] in
+                self?.onEditingEnded?()
+                (textView as? LinedTextView)?.onEditingEnded?()
+            }
         }
     }
 }
