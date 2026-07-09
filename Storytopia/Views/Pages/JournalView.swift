@@ -1,4 +1,5 @@
 import Foundation
+import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -16,6 +17,14 @@ struct JournalView: View {
     @State private var journalsPendingDeletion: [PrototypeChapter] = []
     @State private var isCreateJournalAlertPresented = false
     @State private var newJournalTitle = ""
+    @State private var selectedCoverJournalTitle: String?
+    @State private var selectedCoverPickerItem: PhotosPickerItem?
+    @State private var coverRefreshID = UUID()
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14)
+    ]
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -31,13 +40,17 @@ struct JournalView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                journalBackground
+                Color.homePageBackground
+                    .ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 10) {
-                    header
-                        .padding(.horizontal, 16)
-
-                    chapterList
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header
+                        journalGrid
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, showsPrototypeData ? 140 : 118)
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
@@ -46,6 +59,607 @@ struct JournalView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .environment(\.editMode, $editMode)
+        }
+        .id(coverRefreshID)
+        .onAppear {
+            chapters = DailyJournalData.allChapters()
+        }
+        .onChange(of: selectedPage) { newPage in
+            if newPage != .create {
+                chapters = DailyJournalData.allChapters()
+            }
+        }
+        .onChange(of: selectedCoverPickerItem) { newItem in
+            guard let selectedCoverJournalTitle, let newItem else {
+                return
+            }
+
+            Task {
+                await saveCover(from: newItem, for: selectedCoverJournalTitle)
+            }
+        }
+        .preferredColorScheme(.light)
+        .alert("Rename Journal", isPresented: isRenameAlertPresented) {
+            TextField("Journal name", text: $renamedJournalTitle)
+
+            Button("Cancel", role: .cancel) {
+                journalBeingRenamed = nil
+                renamedJournalTitle = ""
+            }
+
+            Button("Save") {
+                renameSelectedJournal()
+            }
+        }
+        .alert("Create Journal", isPresented: $isCreateJournalAlertPresented) {
+            TextField("Journal name", text: $newJournalTitle)
+
+            Button("Cancel", role: .cancel) {
+                newJournalTitle = ""
+            }
+
+            Button("Create") {
+                createJournal()
+            }
+        }
+        .alert(deleteJournalAlertTitle, isPresented: isDeleteJournalAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                journalsPendingDeletion = []
+            }
+
+            Button("Delete", role: .destructive) {
+                deletePendingJournals()
+            }
+        } message: {
+            Text(deleteJournalAlertMessage)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Text("Journals")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            EditButton()
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+
+            journalCreateButton
+        }
+    }
+
+    private var journalCreateButton: some View {
+        Button {
+            handleCreateButtonTapped()
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Create a new journal")
+    }
+
+    private var journalGrid: some View {
+        LazyVGrid(columns: columns, spacing: 14) {
+            if showsPrototypeData {
+                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                    NavigationLink {
+                        dailyJournalDetail(for: chapter, dayOffset: index)
+                    } label: {
+                        JournalCoverCard(
+                            chapter: chapter,
+                            coverImage: JournalCoverStore.image(for: chapter.title),
+                            fallbackImageName: fallbackCoverImageName(for: chapter, at: index),
+                            isEditing: editMode == .active,
+                            onPickCover: {
+                                selectedCoverJournalTitle = chapter.title
+                            },
+                            selectedPickerItem: $selectedCoverPickerItem,
+                            onRename: { beginRenaming(chapter) },
+                            onDelete: { requestDeleteJournals([chapter]) }
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                emptyState
+                    .gridCellColumns(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bottomPrototypeNotice: some View {
+        if showsPrototypeData {
+            prototypeNotice
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 82)
+        }
+    }
+
+    private var prototypeNotice: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "eye.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+
+            Text("Previewing sample journal entries")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+
+            Spacer()
+
+            Button("Show empty") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsPrototypeData = false
+                }
+            }
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color.homeAccent)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
+    private var isRenameAlertPresented: Binding<Bool> {
+        Binding(
+            get: { journalBeingRenamed != nil },
+            set: { isPresented in
+                if !isPresented {
+                    journalBeingRenamed = nil
+                    renamedJournalTitle = ""
+                }
+            }
+        )
+    }
+
+    private func beginRenaming(_ chapter: PrototypeChapter) {
+        journalBeingRenamed = chapter
+        renamedJournalTitle = chapter.title
+    }
+
+    private func renameSelectedJournal() {
+        guard
+            let selectedJournal = journalBeingRenamed,
+            let index = chapters.firstIndex(where: { $0.id == selectedJournal.id })
+        else {
+            return
+        }
+
+        let trimmedTitle = renamedJournalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return
+        }
+
+        let oldTitle = chapters[index].title
+        chapters[index] = chapters[index].copy(title: trimmedTitle)
+        UserChapterStore.rename(title: oldTitle, to: trimmedTitle)
+        StoryEntryStore.renameChapter(from: oldTitle, to: trimmedTitle)
+        JournalCoverStore.rename(from: oldTitle, to: trimmedTitle)
+        journalBeingRenamed = nil
+        renamedJournalTitle = ""
+    }
+
+    private func handleCreateButtonTapped() {
+        isCreateJournalAlertPresented = true
+    }
+
+    private func createJournal() {
+        let trimmedTitle = newJournalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return
+        }
+
+        let journal = PrototypeChapter(
+            title: trimmedTitle,
+            subtitle: "Personal journal",
+            color: Color.storyPurple,
+            symbol: "book.closed.fill",
+            coverImageName: nil,
+            kind: .journal,
+            isFavorite: false,
+            entries: []
+        )
+
+        UserChapterStore.add(journal)
+        chapters = DailyJournalData.allChapters()
+        showsPrototypeData = true
+        newJournalTitle = ""
+    }
+
+    private var isDeleteJournalAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !journalsPendingDeletion.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    journalsPendingDeletion = []
+                }
+            }
+        )
+    }
+
+    private var deleteJournalAlertTitle: String {
+        journalsPendingDeletion.count == 1 ? "Delete Journal?" : "Delete Journals?"
+    }
+
+    private var deleteJournalAlertMessage: String {
+        if let journal = journalsPendingDeletion.first, journalsPendingDeletion.count == 1 {
+            return "Are you sure you want to delete \"\(journal.title)\"? This journal and its entries can't be recovered."
+        }
+
+        return "Are you sure you want to delete these journals? These journals and their entries can't be recovered."
+    }
+
+    private func requestDeleteJournals(_ journals: [PrototypeChapter]) {
+        journalsPendingDeletion = journals
+    }
+
+    private func deletePendingJournals() {
+        let journalsToDelete = journalsPendingDeletion
+        journalsPendingDeletion = []
+        journalsToDelete.forEach(deleteJournal)
+    }
+
+    private func deleteJournal(_ journal: PrototypeChapter) {
+        let isUserJournal = UserChapterStore.contains(title: journal.title)
+        UserChapterStore.delete(title: journal.title)
+        JournalCoverStore.delete(title: journal.title)
+        if !isUserJournal {
+            DeletedSampleChapterStore.add(title: journal.title)
+        }
+        StoryEntryStore.deleteAll(for: journal.title)
+
+        chapters.removeAll { $0.id == journal.id }
+    }
+
+    private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
+        DailyJournalData.detailView(for: chapter, dayOffset: dayOffset) { entry in
+            guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
+                return
+            }
+
+            chapters[chapterIndex].entries.insert(entry, at: 0)
+        }
+    }
+
+    private func fallbackCoverImageName(for chapter: PrototypeChapter, at index: Int) -> String? {
+        if let coverImageName = chapter.coverImageName {
+            return coverImageName
+        }
+
+        return ["homepage_banner", "storyboard6", "IMG_9080", "storyboard10", "storyboard13", "storyboard16"][index % 6]
+    }
+
+    @MainActor
+    private func saveCover(from item: PhotosPickerItem, for title: String) async {
+        defer {
+            selectedCoverPickerItem = nil
+            selectedCoverJournalTitle = nil
+        }
+
+        guard
+            let data = try? await item.loadTransferable(type: Data.self),
+            let image = UIImage(data: data)
+        else {
+            return
+        }
+
+        JournalCoverStore.save(image, for: title)
+        coverRefreshID = UUID()
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Spacer(minLength: 58)
+
+            Image("no_entries_journal")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 165)
+                .padding(.bottom, 3)
+
+            VStack(spacing: 8) {
+                Text("No entries yet")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Text("Your journal will appear here\nonce you start writing.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineSpacing(2)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Color.homeMutedText)
+            }
+
+            Button {
+                selectedPage = .create
+            } label: {
+                Label("Write Your First Entry", systemImage: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .frame(height: 39)
+                    .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .padding(.top, 10)
+
+            Button("Preview sample chapters") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsPrototypeData = true
+                }
+            }
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.homeAccent)
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct JournalCoverCard: View {
+    let chapter: PrototypeChapter
+    let coverImage: UIImage?
+    let fallbackImageName: String?
+    let isEditing: Bool
+    let onPickCover: () -> Void
+    @Binding var selectedPickerItem: PhotosPickerItem?
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                Color.clear
+                    .aspectRatio(0.96, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .overlay {
+                        cover
+                    }
+                    .clipShape(Rectangle())
+                    .overlay(alignment: .leading) {
+                        journalSpine
+                    }
+
+                if isEditing {
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, Color.red)
+                            .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .accessibilityLabel("Delete \(chapter.title)")
+                } else {
+                    Menu {
+                        PhotosPicker(selection: $selectedPickerItem, matching: .images) {
+                            Label("Change Cover Photo", systemImage: "photo")
+                        }
+                        .simultaneousGesture(TapGesture().onEnded(onPickCover))
+
+                        Button(action: onRename) {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.storyInk)
+                            .frame(width: 31, height: 24)
+                            .background(Color.white.opacity(0.94), in: Capsule())
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .accessibilityLabel("Journal options for \(chapter.title)")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(chapter.title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+
+                Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 11)
+            .padding(.top, 9)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white)
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+        .shadow(color: Color.storyInk.opacity(0.09), radius: 8, y: 4)
+    }
+
+    @ViewBuilder
+    private var cover: some View {
+        if let coverImage {
+            Image(uiImage: coverImage)
+                .resizable()
+                .scaledToFill()
+        } else if let fallbackImageName {
+            Image(fallbackImageName)
+                .resizable()
+                .scaledToFill()
+        } else {
+            LinearGradient(
+                colors: [chapter.color.opacity(0.95), chapter.color.opacity(0.54), Color.storyGold.opacity(0.52)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .overlay {
+                Image(systemName: chapter.symbol)
+                    .font(.system(size: 31, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+            }
+        }
+    }
+
+    private var journalSpine: some View {
+        ZStack(alignment: .leading) {
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.38),
+                    Color.black.opacity(0.26),
+                    Color.black.opacity(0.12),
+                    Color.black.opacity(0.04),
+                    Color.clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            Rectangle()
+                .fill(Color.black.opacity(0.24))
+                .frame(width: 3)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.18))
+                .frame(width: 1)
+                .padding(.leading, 5)
+                .blendMode(.screen)
+
+            Rectangle()
+                .fill(Color.black.opacity(0.20))
+                .frame(width: 1)
+                .padding(.leading, 13)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.24))
+                .frame(width: 1)
+                .padding(.leading, 16)
+                .blendMode(.screen)
+        }
+        .frame(width: 30)
+        .frame(maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
+private enum JournalCoverStore {
+    private static let folderName = "JournalCovers"
+
+    static func image(for title: String) -> UIImage? {
+        guard
+            let data = try? Data(contentsOf: fileURL(for: title)),
+            let image = UIImage(data: data)
+        else {
+            return nil
+        }
+
+        return image
+    }
+
+    static func save(_ image: UIImage, for title: String) {
+        guard let data = image.storytopiaPreparedJPEGData(compressionQuality: 0.86) ?? image.jpegData(compressionQuality: 0.86) else {
+            return
+        }
+
+        try? FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: fileURL(for: title), options: [.atomic])
+    }
+
+    static func rename(from oldTitle: String, to newTitle: String) {
+        let oldURL = fileURL(for: oldTitle)
+        let newURL = fileURL(for: newTitle)
+        guard FileManager.default.fileExists(atPath: oldURL.path) else {
+            return
+        }
+
+        try? FileManager.default.removeItem(at: newURL)
+        try? FileManager.default.moveItem(at: oldURL, to: newURL)
+    }
+
+    static func delete(title: String) {
+        try? FileManager.default.removeItem(at: fileURL(for: title))
+    }
+
+    private static var directoryURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(folderName, isDirectory: true)
+    }
+
+    private static func fileURL(for title: String) -> URL {
+        directoryURL.appendingPathComponent(fileName(for: title))
+    }
+
+    private static func fileName(for title: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let sanitized = title.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }.joined()
+        return "\(sanitized.isEmpty ? "journal" : sanitized).jpg"
+    }
+}
+
+struct ClassicJournalView: View {
+    @Binding var selectedPage: StoryPage
+    @Binding var isDraftSaved: Bool
+    @Binding var activeDraftID: UUID?
+    var embedsInNavigationStack = true
+    var showsBottomNavigation = true
+
+    @State private var showsPrototypeData = true
+    @State private var chapters: [PrototypeChapter]
+    @State private var editMode: EditMode = .inactive
+    @State private var journalBeingRenamed: PrototypeChapter?
+    @State private var renamedJournalTitle = ""
+    @State private var journalsPendingDeletion: [PrototypeChapter] = []
+    @State private var isCreateJournalAlertPresented = false
+    @State private var newJournalTitle = ""
+
+    init(
+        selectedPage: Binding<StoryPage>,
+        isDraftSaved: Binding<Bool>,
+        activeDraftID: Binding<UUID?>,
+        embedsInNavigationStack: Bool = true,
+        showsBottomNavigation: Bool = true
+    ) {
+        _selectedPage = selectedPage
+        _isDraftSaved = isDraftSaved
+        _activeDraftID = activeDraftID
+        self.embedsInNavigationStack = embedsInNavigationStack
+        self.showsBottomNavigation = showsBottomNavigation
+        _chapters = State(initialValue: DailyJournalData.allChapters())
+    }
+
+    var body: some View {
+        Group {
+            if embedsInNavigationStack {
+                NavigationStack {
+                    classicJournalContent
+                }
+            } else {
+                classicJournalContent
+            }
         }
         .onAppear {
             chapters = DailyJournalData.allChapters()
@@ -90,6 +704,29 @@ struct JournalView: View {
         } message: {
             Text(deleteJournalAlertMessage)
         }
+    }
+
+    private var classicJournalContent: some View {
+        ZStack(alignment: .bottom) {
+            journalBackground
+
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                    .padding(.horizontal, 16)
+
+                chapterList
+            }
+
+            if showsBottomNavigation {
+                BottomNavigationBar(selectedPage: $selectedPage)
+            }
+
+            bottomPrototypeNotice
+        }
+        .navigationTitle(embedsInNavigationStack ? "" : "All Journals")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(embedsInNavigationStack ? .hidden : .visible, for: .navigationBar)
+        .environment(\.editMode, $editMode)
     }
 
     private var header: some View {
@@ -185,7 +822,7 @@ struct JournalView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: showsPrototypeData ? 170 : 150)
+            Color.clear.frame(height: showsBottomNavigation ? (showsPrototypeData ? 170 : 150) : 60)
         }
     }
 
@@ -250,6 +887,7 @@ struct JournalView: View {
         chapters[index] = chapters[index].copy(title: trimmedTitle)
         UserChapterStore.rename(title: oldTitle, to: trimmedTitle)
         StoryEntryStore.renameChapter(from: oldTitle, to: trimmedTitle)
+        JournalCoverStore.rename(from: oldTitle, to: trimmedTitle)
         journalBeingRenamed = nil
         renamedJournalTitle = ""
     }
@@ -321,6 +959,7 @@ struct JournalView: View {
     private func deleteJournal(_ journal: PrototypeChapter) {
         let isUserJournal = UserChapterStore.contains(title: journal.title)
         UserChapterStore.delete(title: journal.title)
+        JournalCoverStore.delete(title: journal.title)
         if !isUserJournal {
             DeletedSampleChapterStore.add(title: journal.title)
         }

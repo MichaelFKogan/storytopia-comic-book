@@ -34,6 +34,22 @@ struct SettingsView: View {
                     )
                     .enableInteractivePopGesture()
                 }
+
+                SettingsNavigationRow(
+                    systemName: "book.closed",
+                    title: "All Journals",
+                    subtitle: "Open the classic journals list",
+                    accessibilityLabel: "Open all journals"
+                ) {
+                    ClassicJournalView(
+                        selectedPage: $selectedPage,
+                        isDraftSaved: .constant(false),
+                        activeDraftID: .constant(nil),
+                        embedsInNavigationStack: false,
+                        showsBottomNavigation: false
+                    )
+                    .enableInteractivePopGesture()
+                }
             }
 
             Section("Create") {
