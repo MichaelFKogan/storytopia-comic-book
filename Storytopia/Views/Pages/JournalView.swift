@@ -20,11 +20,21 @@ struct JournalView: View {
     @State private var selectedCoverJournalTitle: String?
     @State private var selectedCoverPickerItem: PhotosPickerItem?
     @State private var coverRefreshID = UUID()
+    @AppStorage("StorytopiaSelectedJournalLayout") private var selectedJournalLayoutRawValue = JournalDisplayLayout.grid.rawValue
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
         GridItem(.flexible(), spacing: 14)
     ]
+
+    private var selectedJournalLayout: JournalDisplayLayout {
+        get {
+            JournalDisplayLayout(rawValue: selectedJournalLayoutRawValue) ?? .grid
+        }
+        nonmutating set {
+            selectedJournalLayoutRawValue = newValue.rawValue
+        }
+    }
 
     init(
         selectedPage: Binding<StoryPage>,
@@ -43,14 +53,15 @@ struct JournalView: View {
                 Color.homePageBackground
                     .ignoresSafeArea()
 
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header
-                        journalGrid
+                VStack(alignment: .leading, spacing: 10) {
+                    header
+                        .padding(.horizontal, 16)
+
+                    if selectedJournalLayout == .list {
+                        chapterList
+                    } else {
+                        journalGridScroll
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, showsPrototypeData ? 140 : 118)
                 }
 
                 BottomNavigationBar(selectedPage: $selectedPage)
@@ -116,7 +127,7 @@ struct JournalView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .lastTextBaseline, spacing: 14) {
             Text("Journals")
                 .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
@@ -127,8 +138,51 @@ struct JournalView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Color.homeAccent)
 
+            journalLayoutSwitcher
+
             journalCreateButton
         }
+        .padding(.top, 12)
+    }
+
+    private var journalLayoutSwitcher: some View {
+        HStack(spacing: 4) {
+            journalLayoutButton(.grid)
+            journalLayoutButton(.list)
+        }
+        .padding(4)
+        .frame(height: 34)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
+    private func journalLayoutButton(_ layout: JournalDisplayLayout) -> some View {
+        let isSelected = selectedJournalLayout == layout
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedJournalLayout = layout
+            }
+        } label: {
+            Image(systemName: layout.systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(isSelected ? Color.white : Color.homeMutedText)
+                .frame(width: 34, height: 26)
+                .background(
+                    Group {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.storyInk)
+                        }
+                    }
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(layout.accessibilityLabel)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var journalCreateButton: some View {
@@ -142,6 +196,16 @@ struct JournalView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Create a new journal")
+    }
+
+    private var journalGridScroll: some View {
+        ScrollView(showsIndicators: false) {
+            journalGrid
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, showsPrototypeData ? 140 : 118)
+        }
+        .background(Color.homePageBackground)
     }
 
     private var journalGrid: some View {
@@ -171,6 +235,61 @@ struct JournalView: View {
                     .gridCellColumns(2)
             }
         }
+    }
+
+    private var chapterList: some View {
+        List {
+            if showsPrototypeData {
+                Section {
+                    if chapters.isEmpty {
+                        noSearchResults
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    } else {
+                        journalRows
+                    }
+                }
+            } else {
+                Section {
+                    emptyState
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: showsPrototypeData ? 170 : 150)
+        }
+    }
+
+    private var journalRows: some View {
+        ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+            NavigationLink {
+                dailyJournalDetail(for: chapter, dayOffset: index)
+            } label: {
+                JournalChapterListRow(chapter: chapter)
+            }
+            .listRowInsets(EdgeInsets(
+                top: 0,
+                leading: JournalChapterListMetrics.horizontalInset,
+                bottom: 0,
+                trailing: JournalChapterListMetrics.trailingInset
+            ))
+            .listRowBackground(Color.homePageBackground)
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button {
+                    beginRenaming(chapter)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(Color.homeAccent)
+            }
+        }
+        .onDelete(perform: deleteChapters)
+        .onMove(perform: moveChapters)
     }
 
     @ViewBuilder
@@ -278,6 +397,10 @@ struct JournalView: View {
         newJournalTitle = ""
     }
 
+    private func deleteChapters(at offsets: IndexSet) {
+        requestDeleteJournals(offsets.map { chapters[$0] })
+    }
+
     private var isDeleteJournalAlertPresented: Binding<Bool> {
         Binding(
             get: { !journalsPendingDeletion.isEmpty },
@@ -323,6 +446,11 @@ struct JournalView: View {
         chapters.removeAll { $0.id == journal.id }
     }
 
+    private func moveChapters(from source: IndexSet, to destination: Int) {
+        chapters.move(fromOffsets: source, toOffset: destination)
+        UserChapterStore.replace(with: chapters.filter { UserChapterStore.contains(title: $0.title) })
+    }
+
     private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
         DailyJournalData.detailView(for: chapter, dayOffset: dayOffset) { entry in
             guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
@@ -357,6 +485,29 @@ struct JournalView: View {
 
         JournalCoverStore.save(image, for: title)
         coverRefreshID = UUID()
+    }
+
+    private var noSearchResults: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 28))
+                .foregroundStyle(Color.homeAccent.opacity(0.6))
+
+            Text("No journals yet")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+
+            Text("Your journals will appear here.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.homeMutedText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 38)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 
     private var emptyState: some View {
@@ -403,6 +554,29 @@ struct JournalView: View {
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private enum JournalDisplayLayout: String {
+    case grid
+    case list
+
+    var systemImage: String {
+        switch self {
+        case .grid:
+            return "square.grid.2x2"
+        case .list:
+            return "list.bullet"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .grid:
+            return "Show journals as grid"
+        case .list:
+            return "Show journals as list"
+        }
     }
 }
 
@@ -4027,7 +4201,16 @@ struct EntriesView: View {
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
     @State private var entriesPendingDeletion: [CreateEntryDraft] = []
-    @State private var selectedEntryLayout: JournalEntryLayout = .list
+    @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
+
+    private var selectedEntryLayout: JournalEntryLayout {
+        get {
+            JournalEntryLayout(rawValue: selectedEntryLayoutRawValue) ?? .grid
+        }
+        nonmutating set {
+            selectedEntryLayoutRawValue = newValue.rawValue
+        }
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -4603,7 +4786,7 @@ private struct EntryGridPreviewCard: View {
     }
 }
 
-private enum JournalEntryLayout {
+private enum JournalEntryLayout: String {
     case grid
     case list
 
