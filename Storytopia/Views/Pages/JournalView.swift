@@ -95,7 +95,7 @@ struct JournalView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
             Text("Journals")
-                .font(.system(size: 30, weight: .bold, design: .serif))
+                .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()
