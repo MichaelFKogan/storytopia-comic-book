@@ -20,6 +20,12 @@ struct JournalView: View {
     @State private var selectedCoverJournalTitle: String?
     @State private var selectedCoverPickerItem: PhotosPickerItem?
     @State private var coverRefreshID = UUID()
+    @State private var openingJournal: JournalOpeningContext?
+    @State private var isJournalOpening = false
+    @State private var journalNavigationPath: [JournalRoute] = []
+    @State private var areJournalPagesExpanded = false
+    @State private var isJournalDetailVisible = false
+    @Namespace private var journalOpenNamespace
     @AppStorage("StorytopiaSelectedJournalLayout") private var selectedJournalLayoutRawValue = JournalDisplayLayout.grid.rawValue
 
     private let columns = [
@@ -48,7 +54,7 @@ struct JournalView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $journalNavigationPath) {
             ZStack(alignment: .bottom) {
                 Color.homePageBackground
                     .ignoresSafeArea()
@@ -70,6 +76,12 @@ struct JournalView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .environment(\.editMode, $editMode)
+            .overlay {
+                journalOpeningOverlay
+            }
+            .navigationDestination(for: JournalRoute.self) { route in
+                dailyJournalDetail(for: route.chapter, dayOffset: route.dayOffset)
+            }
         }
         .id(coverRefreshID)
         .onAppear {
@@ -212,28 +224,84 @@ struct JournalView: View {
         LazyVGrid(columns: columns, spacing: 14) {
             if showsPrototypeData {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
-                    NavigationLink {
-                        dailyJournalDetail(for: chapter, dayOffset: index)
-                    } label: {
-                        JournalCoverCard(
-                            chapter: chapter,
-                            coverImage: JournalCoverStore.image(for: chapter.title),
-                            fallbackImageName: fallbackCoverImageName(for: chapter, at: index),
-                            isEditing: editMode == .active,
-                            onPickCover: {
-                                selectedCoverJournalTitle = chapter.title
-                            },
-                            selectedPickerItem: $selectedCoverPickerItem,
-                            onRename: { beginRenaming(chapter) },
-                            onDelete: { requestDeleteJournals([chapter]) }
-                        )
+                    JournalCoverCard(
+                        chapter: chapter,
+                        coverImage: JournalCoverStore.image(for: chapter.title),
+                        fallbackImageName: fallbackCoverImageName(for: chapter, at: index),
+                        isEditing: editMode == .active,
+                        onPickCover: {
+                            selectedCoverJournalTitle = chapter.title
+                        },
+                        selectedPickerItem: $selectedCoverPickerItem,
+                        onRename: { beginRenaming(chapter) },
+                        onDelete: { requestDeleteJournals([chapter]) }
+                    )
+                    .matchedGeometryEffect(
+                        id: journalCoverAnimationID(for: chapter),
+                        in: journalOpenNamespace,
+                        isSource: openingJournal?.id != chapter.id
+                    )
+                    .opacity(openingJournal?.id == chapter.id ? 0 : 1)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .onTapGesture {
+                        openJournal(chapter, dayOffset: index)
                     }
-                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction {
+                        openJournal(chapter, dayOffset: index)
+                    }
+                    .allowsHitTesting(openingJournal == nil && journalNavigationPath.isEmpty)
                 }
             } else {
                 emptyState
                     .gridCellColumns(2)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var journalOpeningOverlay: some View {
+        if openingJournal != nil {
+            GeometryReader { proxy in
+                ZStack {
+                    Color.homePageBackground
+                        .opacity(isJournalOpening ? 1 : 0)
+                        .ignoresSafeArea()
+
+                    if let openingJournal {
+                        let bookWidth = areJournalPagesExpanded ? proxy.size.width + 2 : min(proxy.size.width - 72, 290)
+                        let bookHeight = areJournalPagesExpanded
+                            ? proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom + 2
+                            : bookWidth / JournalOpeningBook.compactAspectRatio
+
+                        JournalOpeningBook(
+                            chapter: openingJournal.chapter,
+                            coverImage: openingJournal.coverImage,
+                            fallbackImageName: openingJournal.fallbackImageName,
+                            isOpen: isJournalOpening,
+                            pagesExpanded: areJournalPagesExpanded
+                        )
+                        .frame(
+                            width: bookWidth,
+                            height: bookHeight
+                        )
+                        .matchedGeometryEffect(
+                            id: journalCoverAnimationID(for: openingJournal.chapter),
+                            in: journalOpenNamespace,
+                            isSource: false
+                        )
+                        .position(
+                            x: proxy.size.width / 2 - journalPageCenterCorrection(for: bookWidth),
+                            y: proxy.size.height / 2
+                        )
+                        .scaleEffect(isJournalOpening ? 1 : 0.96)
+                        .shadow(color: Color.storyInk.opacity(areJournalPagesExpanded ? 0 : 0.24), radius: 18, y: 10)
+                    }
+                }
+                .allowsHitTesting(true)
+            }
+            .transition(.opacity)
+            .zIndex(10)
         }
     }
 
@@ -451,6 +519,82 @@ struct JournalView: View {
         UserChapterStore.replace(with: chapters.filter { UserChapterStore.contains(title: $0.title) })
     }
 
+    private func openJournal(_ chapter: PrototypeChapter, dayOffset: Int) {
+        guard openingJournal == nil, journalNavigationPath.isEmpty else {
+            return
+        }
+
+        let context = JournalOpeningContext(
+            chapter: chapter,
+            dayOffset: dayOffset,
+            coverImage: JournalCoverStore.image(for: chapter.title),
+            fallbackImageName: fallbackCoverImageName(for: chapter, at: dayOffset)
+        )
+
+        openingJournal = context
+        isJournalOpening = false
+        areJournalPagesExpanded = false
+        isJournalDetailVisible = false
+
+        withAnimation(.spring(response: 1.16, dampingFraction: 0.88)) {
+            isJournalOpening = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02) {
+            guard openingJournal?.id == context.id else {
+                return
+            }
+
+            withAnimation(.spring(response: 1.04, dampingFraction: 0.91)) {
+                areJournalPagesExpanded = true
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.58) {
+                guard openingJournal?.id == context.id else {
+                    return
+                }
+
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+
+                withTransaction(transaction) {
+                    journalNavigationPath = [JournalRoute(chapter: chapter, dayOffset: dayOffset)]
+                    openingJournal = nil
+                    isJournalOpening = false
+                    areJournalPagesExpanded = false
+                    isJournalDetailVisible = false
+                }
+            }
+        }
+    }
+
+    private func dismissOpenedJournal() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+
+        withTransaction(transaction) {
+            journalNavigationPath = []
+            openingJournal = nil
+            isJournalOpening = false
+            areJournalPagesExpanded = false
+            isJournalDetailVisible = false
+        }
+    }
+
+    private func journalPageCenterCorrection(for bookWidth: CGFloat) -> CGFloat {
+        guard isJournalOpening, !areJournalPagesExpanded else {
+            return 0
+        }
+
+        let openPageOffset: CGFloat = 42
+        let openPageScale: CGFloat = 0.94
+        return openPageOffset + (bookWidth * openPageScale / 2) - (bookWidth / 2)
+    }
+
+    private func journalCoverAnimationID(for chapter: PrototypeChapter) -> String {
+        "journal-cover-\(chapter.id.uuidString)"
+    }
+
     private func dailyJournalDetail(for chapter: PrototypeChapter, dayOffset: Int) -> some View {
         DailyJournalData.detailView(for: chapter, dayOffset: dayOffset) { entry in
             guard let chapterIndex = chapters.firstIndex(where: { $0.id == chapter.id }) else {
@@ -580,6 +724,176 @@ private enum JournalDisplayLayout: String {
     }
 }
 
+private struct JournalRoute: Hashable, Identifiable {
+    let chapter: PrototypeChapter
+    let dayOffset: Int
+
+    var id: UUID {
+        chapter.id
+    }
+
+    static func == (lhs: JournalRoute, rhs: JournalRoute) -> Bool {
+        lhs.id == rhs.id && lhs.dayOffset == rhs.dayOffset
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(dayOffset)
+    }
+}
+
+private struct JournalOpeningContext: Identifiable {
+    let chapter: PrototypeChapter
+    let dayOffset: Int
+    let coverImage: UIImage?
+    let fallbackImageName: String?
+
+    var id: UUID {
+        chapter.id
+    }
+}
+
+private struct JournalOpeningBook: View {
+    static let compactAspectRatio: CGFloat = 0.72
+
+    let chapter: PrototypeChapter
+    let coverImage: UIImage?
+    let fallbackImageName: String?
+    let isOpen: Bool
+    let pagesExpanded: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                pages
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .offset(x: pagesExpanded ? 0 : (isOpen ? 42 : 12))
+                    .scaleEffect(x: pagesExpanded ? 1 : (isOpen ? 0.94 : 0.98), y: pagesExpanded ? 1 : (isOpen ? 0.96 : 0.99), anchor: .leading)
+                    .opacity(isOpen ? 1 : 0.76)
+
+                cover
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .overlay(alignment: .leading) {
+                        spine
+                    }
+                    .mask(
+                        RoundedRectangle(cornerRadius: pagesExpanded ? 0 : 14, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: pagesExpanded ? 0 : 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                    )
+                    .rotation3DEffect(
+                        .degrees(pagesExpanded ? -92 : (isOpen ? -68 : 0)),
+                        axis: (x: 0, y: 1, z: 0),
+                        anchor: .leading,
+                        perspective: 0.62
+                    )
+                    .offset(x: pagesExpanded ? -120 : (isOpen ? -34 : 0))
+                    .opacity(pagesExpanded ? 0 : 1)
+                    .shadow(color: Color.storyInk.opacity(isOpen ? 0.28 : 0.14), radius: isOpen ? 16 : 9, y: 8)
+            }
+        }
+        .animation(.spring(response: 1.16, dampingFraction: 0.88), value: isOpen)
+        .animation(.spring(response: 1.04, dampingFraction: 0.91), value: pagesExpanded)
+        .accessibilityHidden(true)
+    }
+
+    private var pages: some View {
+        RoundedRectangle(cornerRadius: pagesExpanded ? 0 : 14, style: .continuous)
+            .fill(Color.white)
+            .overlay(alignment: .leading) {
+                LinearGradient(
+                    colors: [
+                        Color.storyInk.opacity(pagesExpanded ? 0.03 : 0.16),
+                        Color.storyInk.opacity(pagesExpanded ? 0.015 : 0.05),
+                        Color.clear
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: pagesExpanded ? 18 : 54)
+            }
+            .overlay(alignment: .trailing) {
+                VStack(spacing: 10) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        Capsule()
+                            .fill(Color.homeBorder.opacity(0.62))
+                            .frame(height: 3)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .opacity(pagesExpanded ? 0 : 0.72)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: pagesExpanded ? 0 : 14, style: .continuous)
+                    .stroke(Color.homeBorder.opacity(pagesExpanded ? 0 : 1), lineWidth: 1)
+            )
+    }
+
+    @ViewBuilder
+    private var cover: some View {
+        GeometryReader { proxy in
+            Group {
+                if let coverImage {
+                    Image(uiImage: coverImage)
+                        .resizable()
+                        .scaledToFill()
+                } else if let fallbackImageName {
+                    Image(fallbackImageName)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [chapter.color.opacity(0.95), chapter.color.opacity(0.54), Color.storyGold.opacity(0.52)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .overlay {
+                        Image(systemName: chapter.symbol)
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.86))
+                    }
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
+        }
+    }
+
+    private var spine: some View {
+        ZStack(alignment: .leading) {
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.42),
+                    Color.black.opacity(0.30),
+                    Color.black.opacity(0.18),
+                    Color.clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.white.opacity(0.26),
+                    Color.white.opacity(0.16),
+                    Color.clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+                .frame(width: 12.5)
+                .padding(.leading, 24.25)
+                .blendMode(.screen)
+        }
+        .frame(width: 46)
+        .frame(maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
 private struct JournalCoverCard: View {
     let chapter: PrototypeChapter
     let coverImage: UIImage?
@@ -591,75 +905,58 @@ private struct JournalCoverCard: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                Color.clear
-                    .aspectRatio(0.96, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay {
-                        cover
-                    }
-                    .clipShape(Rectangle())
-                    .overlay(alignment: .leading) {
-                        journalSpine
-                    }
-
-                if isEditing {
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 24, weight: .bold))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, Color.red)
-                            .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(8)
-                    .accessibilityLabel("Delete \(chapter.title)")
-                } else {
-                    Menu {
-                        PhotosPicker(selection: $selectedPickerItem, matching: .images) {
-                            Label("Change Cover Photo", systemImage: "photo")
-                        }
-                        .simultaneousGesture(TapGesture().onEnded(onPickCover))
-
-                        Button(action: onRename) {
-                            Label("Rename", systemImage: "pencil")
-                        }
-
-                        Button(role: .destructive, action: onDelete) {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyInk)
-                            .frame(width: 31, height: 24)
-                            .background(Color.white.opacity(0.94), in: Capsule())
-                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(8)
-                    .accessibilityLabel("Journal options for \(chapter.title)")
+        ZStack(alignment: .topTrailing) {
+            Color.clear
+                .aspectRatio(JournalOpeningBook.compactAspectRatio, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    cover
                 }
-            }
+                .clipShape(Rectangle())
+                .overlay(alignment: .leading) {
+                    journalSpine
+                }
+                .overlay(alignment: .bottomLeading) {
+                    journalTitleScrim
+                }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(chapter.title)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
+            if isEditing {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 24, weight: .bold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.red)
+                        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel("Delete \(chapter.title)")
+            } else {
+                Menu {
+                    PhotosPicker(selection: $selectedPickerItem, matching: .images) {
+                        Label("Change Cover Photo", systemImage: "photo")
+                    }
+                    .simultaneousGesture(TapGesture().onEnded(onPickCover))
 
-                Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.homeMutedText)
-                    .lineLimit(1)
+                    Button(action: onRename) {
+                        Label("Rename", systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.storyInk)
+                        .frame(width: 31, height: 24)
+                        .background(Color.white.opacity(0.94), in: Capsule())
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel("Journal options for \(chapter.title)")
             }
-            .padding(.horizontal, 11)
-            .padding(.top, 9)
-            .padding(.bottom, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
         }
         .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -668,6 +965,38 @@ private struct JournalCoverCard: View {
                 .stroke(Color.homeBorder, lineWidth: 1)
         )
         .shadow(color: Color.storyInk.opacity(0.09), radius: 8, y: 4)
+    }
+
+    private var journalTitleScrim: some View {
+        LinearGradient(
+            colors: [
+                Color.clear,
+                Color.black.opacity(0.50),
+                Color.black.opacity(0.74)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .overlay(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(chapter.title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+
+                Text("\(chapter.entries.count) \(chapter.entries.count == 1 ? "entry" : "entries")")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 11)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -698,38 +1027,30 @@ private struct JournalCoverCard: View {
         ZStack(alignment: .leading) {
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.38),
-                    Color.black.opacity(0.26),
-                    Color.black.opacity(0.12),
-                    Color.black.opacity(0.04),
+                    Color.black.opacity(0.42),
+                    Color.black.opacity(0.28),
+                    Color.black.opacity(0.16),
                     Color.clear
                 ],
                 startPoint: .leading,
                 endPoint: .trailing
             )
 
-            Rectangle()
-                .fill(Color.black.opacity(0.24))
-                .frame(width: 3)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 1)
-                .padding(.leading, 5)
-                .blendMode(.screen)
-
-            Rectangle()
-                .fill(Color.black.opacity(0.20))
-                .frame(width: 1)
-                .padding(.leading, 13)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.24))
-                .frame(width: 1)
-                .padding(.leading, 16)
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.white.opacity(0.26),
+                    Color.white.opacity(0.16),
+                    Color.clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+                .frame(width: 12.5)
+                .padding(.leading, 14.25)
                 .blendMode(.screen)
         }
-        .frame(width: 30)
+        .frame(width: 22)
         .frame(maxHeight: .infinity)
         .allowsHitTesting(false)
     }
