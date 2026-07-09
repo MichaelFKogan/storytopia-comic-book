@@ -70,7 +70,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .preferredColorScheme(.light)
         .enableInteractivePopGesture()

@@ -94,7 +94,7 @@ struct ProfileView: View {
     private var header: some View {
         HStack(alignment: .center) {
             Text("Profile")
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Color.storyInk)
 
             Spacer()

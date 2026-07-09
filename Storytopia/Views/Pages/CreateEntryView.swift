@@ -125,6 +125,33 @@ private enum CreateEntryDestination {
     case custom
 }
 
+private struct JournalEntryPrompt: Identifiable {
+    let title: String
+    let text: String
+    let systemName: String
+
+    var id: String { title }
+}
+
+private enum JournalPromptCategory: String, CaseIterable, Identifiable {
+    case today
+    case past
+    case future
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today:
+            "Life Now"
+        case .past:
+            "Past"
+        case .future:
+            "Future"
+        }
+    }
+}
+
 private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let id: UUID
     let title: String
@@ -310,7 +337,7 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
         case .fontStyle:
             "textformat"
         case .paperStyle:
-            "doc"
+            "doc.text"
         }
     }
 }
@@ -835,7 +862,7 @@ struct CreateEntryView: View {
     private let previewLayout = StoryboardLayoutOption.fiveClassic
 
     @State private var selectedPhotoSlot: Int?
-    @State private var isShowingPhotoSourceDialog = false
+    @State private var isShowingPhotoSourceSheet = false
     @State private var isShowingPhotoLibrary = false
     @State private var isShowingCamera = false
     @State private var isShowingExitConfirmation = false
@@ -843,6 +870,7 @@ struct CreateEntryView: View {
     @State private var generationErrorMessage: String?
     @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
+    @State private var isShowingJournalPromptsSheet = false
     @State private var isShowingFormattingSheet = false
     @State private var isShowingJournalDestinationSheet = false
     @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
@@ -1013,6 +1041,15 @@ struct CreateEntryView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $isShowingJournalPromptsSheet) {
+            NavigationStack {
+                JournalEntryPromptsSheet { prompt in
+                    applyJournalPrompt(prompt)
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $isShowingFormattingSheet) {
             CreateFormattingSheet(
                 selectedTab: $selectedFormattingTab,
@@ -1023,7 +1060,7 @@ struct CreateEntryView: View {
                 previewTextSize: $previewTextSize
             )
             .presentationDetents([.height(430), .large])
-            .presentationDragIndicator(.hidden)
+            .presentationDragIndicator(.visible)
             .presentationBackground(Color.homePageBackground)
         }
         .sheet(isPresented: $isShowingAddToJournalPage) {
@@ -1053,25 +1090,15 @@ struct CreateEntryView: View {
             selectionBehavior: .ordered,
             matching: .images
         )
-        .confirmationDialog(
-            "Add Photo",
-            isPresented: $isShowingPhotoSourceDialog,
-            titleVisibility: .visible
-        ) {
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("Camera") {
-                    selectedPhotoSlot = nextAvailablePhotoSlot
-                    isShowingCamera = true
-                }
-            }
-
-            Button("Photo Library") {
-                selectedPhotoSlot = nextAvailablePhotoSlot
-                isShowingPhotoLibrary = true
-            }
-
-            Button("Cancel", role: .cancel) {
-            }
+        .sheet(isPresented: $isShowingPhotoSourceSheet) {
+            PhotoSourceSheet(
+                showsCamera: UIImagePickerController.isSourceTypeAvailable(.camera),
+                onCamera: presentCameraFromPhotoSourceSheet,
+                onPhotoLibrary: presentPhotoLibraryFromPhotoSourceSheet
+            )
+            .presentationDetents([.height(210)])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.homePageBackground)
         }
         .alert(presentation.exitConfirmationTitle, isPresented: $isShowingExitConfirmation) {
             Button(presentation.exitConfirmationSaveButtonTitle) {
@@ -1849,6 +1876,31 @@ struct CreateEntryView: View {
 
     private var photosAttachedTab: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        photoStripHeader
+
+                        Spacer(minLength: 8)
+
+                        photoLimitText
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        photoStripContent
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(height: 76)
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+            .padding(.top, isPhotoPanelExpanded ? 4 : 0)
+            .frame(maxHeight: isPhotoPanelExpanded ? 120 : 0, alignment: .top)
+            .opacity(isPhotoPanelExpanded ? 1 : 0)
+            .clipped()
+
             Button {
                 dismissKeyboard()
                 withAnimation(.snappy(duration: 0.24)) {
@@ -1880,42 +1932,6 @@ struct CreateEntryView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(photosAttachedTitle)
-
-            if isPhotoPanelExpanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        photoStripHeader
-
-                        Spacer(minLength: 8)
-
-                        photoLimitText
-
-                        Button {
-                            withAnimation(.snappy(duration: 0.22)) {
-                                isPhotoPanelExpanded = false
-                            }
-                        } label: {
-                            Image(systemName: "chevron.up")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(Color.storyInk.opacity(0.66))
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Collapse photos")
-                    }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        photoStripContent
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 4)
-                    }
-                    .frame(height: 76)
-                }
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
-                .padding(.bottom, 10)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
         .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
@@ -1923,6 +1939,7 @@ struct CreateEntryView: View {
                 .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+        .animation(.snappy(duration: 0.28, extraBounce: 0), value: isPhotoPanelExpanded)
     }
 
     private var photosAttachedTitle: String {
@@ -1945,8 +1962,7 @@ struct CreateEntryView: View {
             }
 
             toolbarActionButton(title: "Prompts", systemName: "text.bubble") {
-                dismissKeyboard()
-                isShowingArtStyleGrid = true
+                openJournalPromptsSheet()
             }
 
             toolbarActionButton(title: "Journal", systemName: displayedAddToJournalTitle == nil ? "book.closed" : "book.closed.fill") {
@@ -1999,8 +2015,30 @@ struct CreateEntryView: View {
                 isPhotoPanelExpanded.toggle()
             }
         } else {
-            selectedPhotoSlot = nextAvailablePhotoSlot
-            isShowingPhotoSourceDialog = true
+            openPhotoSourceSheet()
+        }
+    }
+
+    private func openPhotoSourceSheet() {
+        guard let nextAvailablePhotoSlot else {
+            return
+        }
+
+        selectedPhotoSlot = nextAvailablePhotoSlot
+        isShowingPhotoSourceSheet = true
+    }
+
+    private func presentCameraFromPhotoSourceSheet() {
+        isShowingPhotoSourceSheet = false
+        DispatchQueue.main.async {
+            isShowingCamera = true
+        }
+    }
+
+    private func presentPhotoLibraryFromPhotoSourceSheet() {
+        isShowingPhotoSourceSheet = false
+        DispatchQueue.main.async {
+            isShowingPhotoLibrary = true
         }
     }
 
@@ -2008,6 +2046,28 @@ struct CreateEntryView: View {
         dismissKeyboard()
         selectedCustomJournalTitle = displayedAddToJournalTitle
         isShowingAddToJournalPage = true
+    }
+
+    private func openJournalPromptsSheet() {
+        dismissKeyboard()
+        isShowingJournalPromptsSheet = true
+    }
+
+    private func applyJournalPrompt(_ prompt: JournalEntryPrompt) {
+        let trimmedTitle = prompt.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedText = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            return
+        }
+
+        if storyTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            storyTitle = trimmedTitle
+        }
+
+        let trimmedEntryText = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        entryText = trimmedEntryText.isEmpty ? trimmedText : "\(trimmedEntryText)\n\n\(trimmedText)"
+        entryRichText = NotebookRichTextDocument(text: entryText)
+        isShowingJournalPromptsSheet = false
     }
 
     private var entryDraftKeyboardAccessory: some View {
@@ -2563,8 +2623,7 @@ struct CreateEntryView: View {
     private var keyboardPhotoButton: some View {
         Button {
             dismissKeyboard()
-            selectedPhotoSlot = nextAvailablePhotoSlot
-            isShowingPhotoSourceDialog = true
+            openPhotoSourceSheet()
         } label: {
             KeyboardPhotoAddButton(hasPhotos: hasStoryboardPhotos)
         }
@@ -2950,8 +3009,7 @@ struct CreateEntryView: View {
     private var addPhotoStripButton: some View {
         Button {
             dismissKeyboard()
-            selectedPhotoSlot = nextAvailablePhotoSlot
-            isShowingPhotoSourceDialog = true
+            openPhotoSourceSheet()
         } label: {
             StoryboardPhotoStripAddButton()
         }
@@ -3459,6 +3517,256 @@ struct CreateEntryView: View {
     }
 }
 
+private struct JournalEntryPromptsSheet: View {
+    let onSelect: (JournalEntryPrompt) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedCategory: JournalPromptCategory = .today
+
+    private var prompts: [JournalEntryPrompt] {
+        switch selectedCategory {
+        case .today:
+            todayPrompts
+        case .past:
+            pastPrompts
+        case .future:
+            futurePrompts
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Prompt category", selection: $selectedCategory) {
+                ForEach(JournalPromptCategory.allCases) { category in
+                    Text(category.title)
+                        .tag(category)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(prompts) { prompt in
+                        Button {
+                            onSelect(prompt)
+                        } label: {
+                            promptRow(prompt)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
+            }
+        }
+        .background(Color.homePageBackground)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+            }
+            .hideSharedBackgroundIfAvailable()
+
+            ToolbarItem(placement: .principal) {
+                Text("Journal Prompts")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+            }
+        }
+        .toolbarBackground(Color.homePageBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    private var todayPrompts: [JournalEntryPrompt] {
+        [
+            JournalEntryPrompt(
+                title: "A Moment I Want to Remember",
+                text: "What happened today that felt worth holding onto, even if it was small?",
+                systemName: "sparkle"
+            ),
+            JournalEntryPrompt(
+                title: "How I Really Feel",
+                text: "What have I been feeling lately, and what might be underneath it?",
+                systemName: "heart.text.square"
+            ),
+            JournalEntryPrompt(
+                title: "Someone on My Mind",
+                text: "Who has been on my mind recently, and why do they matter to me right now?",
+                systemName: "person.crop.circle"
+            ),
+            JournalEntryPrompt(
+                title: "Something I Appreciated",
+                text: "What made my life feel a little warmer, easier, or more beautiful today?",
+                systemName: "sun.max"
+            ),
+            JournalEntryPrompt(
+                title: "Things I Am Grateful For",
+                text: "What people, places, moments, or comforts am I grateful for in my life right now?",
+                systemName: "heart.circle"
+            ),
+            JournalEntryPrompt(
+                title: "Where My Energy Went",
+                text: "What took most of my energy today, and did it feel worth it?",
+                systemName: "bolt"
+            ),
+            JournalEntryPrompt(
+                title: "A Change I Noticed",
+                text: "What feels different in my life lately, even in a subtle way?",
+                systemName: "arrow.triangle.2.circlepath"
+            ),
+            JournalEntryPrompt(
+                title: "A Conversation That Stayed",
+                text: "What conversation, message, or quiet exchange has stayed with me?",
+                systemName: "bubble.left.and.bubble.right"
+            ),
+            JournalEntryPrompt(
+                title: "What I Need to Let Go",
+                text: "What am I carrying that I might be ready to set down?",
+                systemName: "leaf"
+            ),
+            JournalEntryPrompt(
+                title: "What I Need Next",
+                text: "What would help me feel more grounded, connected, or alive tomorrow?",
+                systemName: "arrow.forward.circle"
+            )
+        ]
+    }
+
+    private var pastPrompts: [JournalEntryPrompt] {
+        [
+            JournalEntryPrompt(
+                title: "The Best Day of My Life",
+                text: "What day still feels like one of the best days of my life, and what made it so alive?",
+                systemName: "star.circle"
+            ),
+            JournalEntryPrompt(
+                title: "A Childhood Place",
+                text: "What place from my childhood can I still picture clearly, and what did it feel like to be there?",
+                systemName: "house"
+            ),
+            JournalEntryPrompt(
+                title: "A Person Who Shaped Me",
+                text: "Who from my past helped shape who I am, and what part of them do I still carry?",
+                systemName: "person.2"
+            ),
+            JournalEntryPrompt(
+                title: "A Memory That Changed Me",
+                text: "What past experience changed the way I see myself, other people, or the world?",
+                systemName: "arrow.left.and.right"
+            ),
+            JournalEntryPrompt(
+                title: "Something I Miss",
+                text: "What do I miss from an earlier season of my life, and what did it give me?",
+                systemName: "clock.arrow.circlepath"
+            ),
+            JournalEntryPrompt(
+                title: "A Hard Thing I Survived",
+                text: "What difficult chapter did I make it through, and what strength did it reveal in me?",
+                systemName: "mountain.2"
+            ),
+            JournalEntryPrompt(
+                title: "A Version of Me",
+                text: "What would I want to say to a younger version of myself today?",
+                systemName: "figure.wave"
+            ),
+            JournalEntryPrompt(
+                title: "An Ordinary Day Back Then",
+                text: "What ordinary day from the past do I wish I could visit again for a few minutes?",
+                systemName: "calendar"
+            )
+        ]
+    }
+
+    private var futurePrompts: [JournalEntryPrompt] {
+        [
+            JournalEntryPrompt(
+                title: "A Future I Want",
+                text: "What future would make me proud to say I built it with care?",
+                systemName: "sparkles"
+            ),
+            JournalEntryPrompt(
+                title: "My Life One Year From Now",
+                text: "If life feels better one year from now, what has changed in my days, relationships, and habits?",
+                systemName: "calendar.badge.clock"
+            ),
+            JournalEntryPrompt(
+                title: "A Dream Day Ahead",
+                text: "What would a truly beautiful day in my future look like from morning to night?",
+                systemName: "sunrise"
+            ),
+            JournalEntryPrompt(
+                title: "Who I Am Becoming",
+                text: "What kind of person am I slowly becoming, and what do I hope people feel around me?",
+                systemName: "person.crop.circle.badge.plus"
+            ),
+            JournalEntryPrompt(
+                title: "Something I Want to Create",
+                text: "What do I want to create, build, learn, or experience that would make my life feel larger?",
+                systemName: "paintbrush"
+            ),
+            JournalEntryPrompt(
+                title: "A Place I Want to Go",
+                text: "Where do I want to go someday, and what am I hoping to find or feel there?",
+                systemName: "map"
+            ),
+            JournalEntryPrompt(
+                title: "Future Relationships",
+                text: "What do I want my relationships to feel like in the future, and how can I move toward that now?",
+                systemName: "heart.circle"
+            ),
+            JournalEntryPrompt(
+                title: "A Promise to Myself",
+                text: "What promise do I want to make to my future self, even if I start small?",
+                systemName: "checkmark.seal"
+            )
+        ]
+    }
+
+    private func promptRow(_ prompt: JournalEntryPrompt) -> some View {
+        HStack(alignment: .top, spacing: 13) {
+            Image(systemName: prompt.systemName)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 38, height: 38)
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(prompt.title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.storyInk)
+
+                Text(prompt.text)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.homeMutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.storyPurple.opacity(0.88))
+                .padding(.top, 8)
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.62), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
+        .contentShape(Rectangle())
+    }
+}
+
 private struct AddEntryToJournalPage: View {
     @Binding var selectedJournalTitle: String?
 
@@ -3511,19 +3819,19 @@ private struct AddEntryToJournalPage: View {
                 Button("Cancel") {
                     dismiss()
                 }
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(Color.storyPurple)
             }
             .hideSharedBackgroundIfAvailable()
 
             ToolbarItem(placement: .principal) {
                 Text("Add to Journal")
-                    .font(.system(size: 14, weight: .bold, design: .serif))
+                    .font(.system(size: 18, weight: .bold, design: .serif))
                     .foregroundStyle(Color.storyInk)
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") {
+                Button("Save") {
                     if let pendingJournalTitle {
                         selectedJournalTitle = pendingJournalTitle
                         onSelect(pendingJournalTitle)
@@ -3531,7 +3839,7 @@ private struct AddEntryToJournalPage: View {
                         onDeselect(selectedJournalTitle)
                     }
                 }
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(canUseDoneButton ? Color.storyPurple : Color.storyGray.opacity(0.42))
                 .disabled(!canUseDoneButton)
             }
@@ -3754,7 +4062,7 @@ private struct AddToJournalSheet: View {
             Button("Cancel") {
                 dismiss()
             }
-            .font(.system(size: 14, weight: .bold))
+            .font(.system(size: 16, weight: .bold))
             .foregroundStyle(Color.storyPurple)
 
             Spacer()
@@ -3990,6 +4298,92 @@ private struct AddToJournalSheet: View {
 
         UserChapterStore.add(journal)
         onSelect(journal.title)
+    }
+}
+
+private struct PhotoSourceSheet: View {
+    let showsCamera: Bool
+    let onCamera: () -> Void
+    let onPhotoLibrary: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center) {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+
+                Spacer()
+
+                Text("Add Photo")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+
+                Color.clear
+                    .frame(width: 52, height: 20)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
+
+            HStack(spacing: 12) {
+                if showsCamera {
+                    photoSourceOptionButton(title: "Camera", systemName: "camera.fill") {
+                        onCamera()
+                    }
+                }
+
+                photoSourceOptionButton(title: "Photo Library", systemName: "photo.on.rectangle.angled") {
+                    onPhotoLibrary()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .padding(.top, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.homePageBackground)
+    }
+
+    private func photoSourceOptionButton(
+        title: String,
+        systemName: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            dismiss()
+            DispatchQueue.main.async {
+                action()
+            }
+        } label: {
+            VStack(spacing: 10) {
+                Image(systemName: systemName)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(height: 28)
+
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.86))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 104)
+            .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
