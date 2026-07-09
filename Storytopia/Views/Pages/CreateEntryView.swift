@@ -197,19 +197,44 @@ private struct PendingCreateEntryDraftSave {
 
 private enum EntryJournalLinkStore {
     private static let storageKey = "StorytopiaEntryJournalLinks"
+    private static let entryIDStorageKey = "StorytopiaEntryJournalEntryIDs"
 
     static func loadJournalTitle(for draftID: UUID) -> String? {
         links[draftID.uuidString]
     }
 
-    static func save(journalTitle: String, for draftID: UUID) {
+    static func loadJournalEntryID(for draftID: UUID) -> UUID? {
+        guard let rawID = entryIDs[draftID.uuidString] else {
+            return nil
+        }
+
+        return UUID(uuidString: rawID)
+    }
+
+    static func save(journalTitle: String, journalEntryID: UUID, for draftID: UUID) {
         var links = links
+        var entryIDs = entryIDs
         links[draftID.uuidString] = journalTitle
+        entryIDs[draftID.uuidString] = journalEntryID.uuidString
         UserDefaults.standard.set(links, forKey: storageKey)
+        UserDefaults.standard.set(entryIDs, forKey: entryIDStorageKey)
+    }
+
+    static func remove(for draftID: UUID) {
+        var links = links
+        var entryIDs = entryIDs
+        links.removeValue(forKey: draftID.uuidString)
+        entryIDs.removeValue(forKey: draftID.uuidString)
+        UserDefaults.standard.set(links, forKey: storageKey)
+        UserDefaults.standard.set(entryIDs, forKey: entryIDStorageKey)
     }
 
     private static var links: [String: String] {
         UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+    }
+
+    private static var entryIDs: [String: String] {
+        UserDefaults.standard.dictionary(forKey: entryIDStorageKey) as? [String: String] ?? [:]
     }
 }
 
@@ -936,12 +961,6 @@ struct CreateEntryView: View {
             .navigationDestination(isPresented: $isShowingEntryOptionsPage) {
                 entryOptionsPage
             }
-            .navigationDestination(isPresented: $isShowingAddToJournalPage) {
-                AddEntryToJournalPage(
-                    selectedJournalTitle: $selectedCustomJournalTitle,
-                    onSelect: addEditedEntryToJournal
-                )
-            }
         }
         .overlay(alignment: .bottom) {
             if let addedJournalTitle {
@@ -1005,6 +1024,17 @@ struct CreateEntryView: View {
             .presentationDetents([.height(430), .large])
             .presentationDragIndicator(.hidden)
             .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingAddToJournalPage) {
+            NavigationStack {
+                AddEntryToJournalPage(
+                    selectedJournalTitle: $selectedCustomJournalTitle,
+                    onSelect: addEditedEntryToJournal,
+                    onDeselect: removeEditedEntryFromJournal
+                )
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingJournalDestinationSheet) {
             AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
@@ -1845,7 +1875,7 @@ struct CreateEntryView: View {
             isShowingAddToJournalPage = true
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: displayedAddToJournalTitle == nil ? "plus" : "book.closed")
+                Image(systemName: displayedAddToJournalTitle == nil ? "plus" : "book.closed.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(width: 16, height: 16)
 
@@ -1853,11 +1883,17 @@ struct CreateEntryView: View {
                     .font(.system(size: 14, weight: .bold))
             }
             .foregroundStyle(Color.storyPurple)
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.storyPurple.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: Color.storyInk.opacity(0.05), radius: 5, y: 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!hasDraftContent)
-        .opacity(hasDraftContent ? 1 : 0.42)
         .accessibilityLabel(displayedAddToJournalTitle.map { "Added to \($0)" } ?? "Add to Journal")
     }
 
@@ -2534,11 +2570,22 @@ struct CreateEntryView: View {
         storyboardPhotos.contains { $0 != nil }
     }
 
-    private func addCurrentEntry(to journalTitle: String) {
+    @discardableResult
+    private func addCurrentEntry(to journalTitle: String) -> PrototypeEntry? {
+        guard let entry = currentJournalEntry() else {
+            return nil
+        }
+
+        StoryEntryStore.add(entry, to: journalTitle)
+        onJournalEntryCreated(journalTitle, entry)
+        return entry
+    }
+
+    private func currentJournalEntry() -> PrototypeEntry? {
         let trimmedTitle = storyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBody = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty || !trimmedBody.isEmpty else {
-            return
+            return nil
         }
 
         let weekdayFormatter = DateFormatter()
@@ -2553,7 +2600,7 @@ struct CreateEntryView: View {
         let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedRichText = currentEntryRichText()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let entry = PrototypeEntry(
+        return PrototypeEntry(
             weekday: weekdayFormatter.string(from: storyDate).uppercased(),
             day: dayFormatter.string(from: storyDate),
             title: trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle,
@@ -2563,9 +2610,6 @@ struct CreateEntryView: View {
             location: trimmedLocation.isEmpty ? nil : trimmedLocation,
             imageNames: []
         )
-
-        StoryEntryStore.add(entry, to: journalTitle)
-        onJournalEntryCreated(journalTitle, entry)
     }
 
     private func addEditedEntryToJournal(_ journalTitle: String) {
@@ -2577,11 +2621,13 @@ struct CreateEntryView: View {
             linkedDraftID = activeDraftID ?? linkedDraftID
         }
 
-        addCurrentEntry(to: journalTitle)
+        guard let entry = addCurrentEntry(to: journalTitle) else {
+            return
+        }
         selectedCustomJournalTitle = journalTitle
         linkedJournalTitle = journalTitle
         if let linkedDraftID {
-            EntryJournalLinkStore.save(journalTitle: journalTitle, for: linkedDraftID)
+            EntryJournalLinkStore.save(journalTitle: journalTitle, journalEntryID: entry.id, for: linkedDraftID)
         }
         isShowingAddToJournalPage = false
 
@@ -2598,6 +2644,27 @@ struct CreateEntryView: View {
                 addedJournalTitle = nil
             }
         }
+    }
+
+    private func removeEditedEntryFromJournal(_ journalTitle: String) {
+        dismissKeyboard()
+
+        if let activeDraftID {
+            if let journalEntryID = EntryJournalLinkStore.loadJournalEntryID(for: activeDraftID) {
+                StoryEntryStore.delete(entryID: journalEntryID, from: journalTitle)
+            } else if let currentEntry = currentJournalEntry() {
+                StoryEntryStore.deleteFirstMatchingContent(currentEntry, from: journalTitle)
+            }
+
+            EntryJournalLinkStore.remove(for: activeDraftID)
+        } else if let currentEntry = currentJournalEntry() {
+            StoryEntryStore.deleteFirstMatchingContent(currentEntry, from: journalTitle)
+        }
+
+        selectedCustomJournalTitle = nil
+        linkedJournalTitle = nil
+        addedJournalTitle = nil
+        isShowingAddToJournalPage = false
     }
 
     private func addedToJournalToast(journalTitle: String) -> some View {
@@ -3371,7 +3438,9 @@ private struct AddEntryToJournalPage: View {
     @Binding var selectedJournalTitle: String?
 
     let onSelect: (String) -> Void
+    let onDeselect: (String) -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var pendingJournalTitle: String?
     @State private var isCreateJournalAlertPresented = false
     @State private var newJournalName = ""
@@ -3413,6 +3482,15 @@ private struct AddEntryToJournalPage: View {
         .background(Color.homePageBackground)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+            }
+            .hideSharedBackgroundIfAvailable()
+
             ToolbarItem(placement: .principal) {
                 Text("Add to Journal")
                     .font(.system(size: 14, weight: .bold, design: .serif))
@@ -3424,11 +3502,13 @@ private struct AddEntryToJournalPage: View {
                     if let pendingJournalTitle {
                         selectedJournalTitle = pendingJournalTitle
                         onSelect(pendingJournalTitle)
+                    } else if let selectedJournalTitle {
+                        onDeselect(selectedJournalTitle)
                     }
                 }
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(pendingJournalTitle == nil ? Color.storyGray.opacity(0.42) : Color.storyPurple)
-                .disabled(pendingJournalTitle == nil)
+                .foregroundStyle(canUseDoneButton ? Color.storyPurple : Color.storyGray.opacity(0.42))
+                .disabled(!canUseDoneButton)
             }
             .hideSharedBackgroundIfAvailable()
         }
@@ -3462,6 +3542,12 @@ private struct AddEntryToJournalPage: View {
         .onAppear {
             pendingJournalTitle = selectedJournalTitle
         }
+    }
+
+    private var canUseDoneButton: Bool {
+        pendingJournalTitle != selectedJournalTitle
+            || (pendingJournalTitle != nil && selectedJournalTitle == nil)
+            || (pendingJournalTitle == nil && selectedJournalTitle != nil)
     }
 
     private func journalRow(_ journal: PrototypeChapter) -> some View {

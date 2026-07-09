@@ -6274,7 +6274,11 @@ enum StoryEntryStore {
             }
 
             return id == nil
-                && weekday == entry.weekday
+                && matchesContent(of: entry)
+        }
+
+        func matchesContent(of entry: PrototypeEntry) -> Bool {
+            weekday == entry.weekday
                 && day == entry.day
                 && title == entry.title
                 && body == entry.body
@@ -6336,6 +6340,50 @@ enum StoryEntryStore {
             }
 
             if record.id == nil, !didDelete, record.matches(entry) {
+                didDelete = true
+                return false
+            }
+
+            return true
+        }
+
+        guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func delete(entryID: UUID, from chapterTitle: String) {
+        var didDelete = false
+        let remainingRecords = records.filter { record in
+            guard record.chapterTitle == chapterTitle else {
+                return true
+            }
+
+            if record.id == entryID, !didDelete {
+                didDelete = true
+                return false
+            }
+
+            return true
+        }
+
+        guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func deleteFirstMatchingContent(_ entry: PrototypeEntry, from chapterTitle: String) {
+        var didDelete = false
+        let remainingRecords = records.filter { record in
+            guard record.chapterTitle == chapterTitle else {
+                return true
+            }
+
+            if !didDelete, record.matchesContent(of: entry) {
                 didDelete = true
                 return false
             }

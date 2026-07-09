@@ -157,14 +157,14 @@ struct CreateNavItem: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: 21, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
+                .frame(width: 54, height: 54)
                 .background(selectedColor, in: Circle())
                 .shadow(color: selectedColor.opacity(0.28), radius: 7, y: 3)
         }
         .frame(maxWidth: .infinity)
-        .offset(y: -3)
+        .offset(y: -4)
         .accessibilityLabel("Create")
     }
 }
