@@ -610,7 +610,16 @@ struct JournalView: View {
             return coverImageName
         }
 
-        return ["homepage_banner", "storyboard6", "IMG_9080", "storyboard10", "storyboard13", "storyboard16"][index % 6]
+        let storyboardCoverRotation: [String?] = [
+            nil,
+            "storyboard6",
+            "storyboard10",
+            nil,
+            "storyboard13",
+            "storyboard16"
+        ]
+
+        return storyboardCoverRotation[index % storyboardCoverRotation.count]
     }
 
     @MainActor
@@ -844,16 +853,7 @@ private struct JournalOpeningBook: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    LinearGradient(
-                        colors: [chapter.color.opacity(0.95), chapter.color.opacity(0.54), Color.storyGold.opacity(0.52)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .overlay {
-                        Image(systemName: chapter.symbol)
-                            .font(.system(size: 42, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.86))
-                    }
+                    chapter.color
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -968,15 +968,7 @@ private struct JournalCoverCard: View {
     }
 
     private var journalTitleScrim: some View {
-        LinearGradient(
-            colors: [
-                Color.clear,
-                Color.black.opacity(0.50),
-                Color.black.opacity(0.74)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        titleBackdrop
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(chapter.title)
@@ -990,13 +982,35 @@ private struct JournalCoverCard: View {
                     .foregroundStyle(Color.white.opacity(0.92))
                     .lineLimit(1)
             }
-            .padding(.horizontal, 11)
+            .padding(.leading, 28)
+            .padding(.trailing, 11)
             .padding(.bottom, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 58)
         .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var titleBackdrop: some View {
+        if hasImageCover {
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.black.opacity(0.50),
+                    Color.black.opacity(0.74)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            Color.clear
+        }
+    }
+
+    private var hasImageCover: Bool {
+        coverImage != nil || fallbackImageName != nil
     }
 
     @ViewBuilder
@@ -1010,16 +1024,7 @@ private struct JournalCoverCard: View {
                 .resizable()
                 .scaledToFill()
         } else {
-            LinearGradient(
-                colors: [chapter.color.opacity(0.95), chapter.color.opacity(0.54), Color.storyGold.opacity(0.52)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .overlay {
-                Image(systemName: chapter.symbol)
-                    .font(.system(size: 31, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.86))
-            }
+            chapter.color
         }
     }
 
