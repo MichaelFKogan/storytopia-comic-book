@@ -6667,7 +6667,7 @@ private struct VerticalComicViewer: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 36, height: 36)
-                        .background(accentColor.opacity(0.94), in: Circle())
+                        .background(.black.opacity(0.62), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close comic viewer")
