@@ -4522,6 +4522,9 @@ struct EntriesView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
+    private let thumbnailRendererVersion = 7
+    private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
+
     @State private var entries: [CreateEntryDraft] = []
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
@@ -4879,6 +4882,7 @@ struct EntriesView: View {
         let entryThumbnail = DraftThumbnailRenderer.render(
             title: trimmedTitle,
             text: entry.text,
+            richText: entry.richText,
             photos: entry.photos,
             fontChoiceRawValue: entry.fontChoiceRawValue,
             textColorIndex: entry.textColorIndex,
@@ -4897,6 +4901,7 @@ struct EntriesView: View {
             id: entry.id,
             title: trimmedTitle,
             text: entry.text,
+            richText: entry.richText,
             photos: entry.photos,
             artStyle: entry.artStyle,
             location: entry.location,
@@ -4938,12 +4943,15 @@ struct EntriesView: View {
 
     private func backfillEntryThumbnailsIfNeeded() {
         var didCreateThumbnail = false
+        let storedRendererVersion = UserDefaults.standard.integer(forKey: thumbnailRendererVersionKey)
+        let shouldRefreshExistingThumbnails = storedRendererVersion < thumbnailRendererVersion
 
-        for entry in entries where entry.thumbnail == nil {
+        for entry in entries where shouldRefreshExistingThumbnails || entry.thumbnail == nil {
             guard
                 let thumbnail = DraftThumbnailRenderer.render(
                     title: entry.title,
                     text: entry.text,
+                    richText: entry.richText,
                     photos: entry.photos,
                     fontChoiceRawValue: entry.fontChoiceRawValue,
                     textColorIndex: entry.textColorIndex,
@@ -4963,6 +4971,10 @@ struct EntriesView: View {
 
             CreateEntryDraftStore.saveThumbnail(thumbnail, for: entry.id)
             didCreateThumbnail = true
+        }
+
+        if shouldRefreshExistingThumbnails {
+            UserDefaults.standard.set(thumbnailRendererVersion, forKey: thumbnailRendererVersionKey)
         }
 
         if didCreateThumbnail {

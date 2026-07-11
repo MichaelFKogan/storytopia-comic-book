@@ -714,6 +714,7 @@ enum DraftThumbnailRenderer {
     static func render(
         title: String,
         text: String,
+        richText: NotebookRichTextDocument? = nil,
         photos: [UIImage],
         fontChoiceRawValue: String?,
         textColorIndex: Int?,
@@ -740,9 +741,11 @@ enum DraftThumbnailRenderer {
         let thumbnail = DraftPageThumbnail(
             title: title,
             text: text,
-            photos: Array(photos.prefix(2)),
+            richText: richText?.normalized(for: text),
+            photos: Array(photos.prefix(5)),
             fontChoice: fontChoice,
             textColor: textColor,
+            textUIColor: CreateFormattingPalette.textColors[normalizedTextColorIndex].uiColor,
             textSize: CGFloat(14 + normalizedTextSize * 8),
             paperStyle: paperStyle,
             paperColor: paperStyle.showsPaperColorOptions ? paperColor : .homePageBackground,
@@ -765,9 +768,11 @@ enum DraftThumbnailRenderer {
 private struct DraftPageThumbnail: View {
     let title: String
     let text: String
+    let richText: NotebookRichTextDocument?
     let photos: [UIImage]
     let fontChoice: CreateFontChoice
     let textColor: Color
+    let textUIColor: UIColor
     let textSize: CGFloat
     let paperStyle: CreatePaperStyleChoice
     let paperColor: Color
@@ -777,6 +782,11 @@ private struct DraftPageThumbnail: View {
     let isStrikethrough: Bool
     let isHighlighted: Bool
     let textAlignment: CreateTextAlignmentChoice
+
+    private let filmstripItemWidth: CGFloat = 50
+    private let filmstripItemHeight: CGFloat = 56
+    private let filmstripImageHeight: CGFloat = 40
+    private let filmstripSpacing: CGFloat = 6
 
     private var displayTitle: String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -788,11 +798,78 @@ private struct DraftPageThumbnail: View {
         return trimmedText.isEmpty ? "Start writing..." : trimmedText
     }
 
+    private var displayRichText: AttributedString {
+        let sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? displayText : text
+        let document = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? NotebookRichTextDocument(text: sourceText)
+            : richText?.normalized(for: text) ?? NotebookRichTextDocument(text: sourceText)
+
+        let textStyle = NotebookTextStyle(
+            swiftUIDesign: fontChoice.design,
+            uiKitDesign: fontChoice.uiKitDesign,
+            customFontName: fontChoice.fontName,
+            customFontBoldName: fontChoice.boldFontName,
+            customFontWeight: fontChoice.bodyWeight,
+            customFontWght: fontChoice.bodyWght,
+            customFontBoldWeight: fontChoice.bodyBoldWeight,
+            customFontBoldWght: fontChoice.bodyBoldWght,
+            customFontUsesVariableWeight: fontChoice.usesVariableWeight,
+            customFontSizeScale: fontChoice.bodySizeScale,
+            bodyFontSize: min(textSize, 19),
+            color: textColor,
+            uiColor: textUIColor
+        )
+
+        let attributedText = NSMutableAttributedString(
+            attributedString: document.attributedString(textStyle: textStyle)
+        )
+        let fullRange = NSRange(location: 0, length: attributedText.length)
+        attributedText.addAttribute(
+            .paragraphStyle,
+            value: thumbnailParagraphStyle,
+            range: fullRange
+        )
+
+        if isUnderlined {
+            attributedText.addAttribute(
+                .underlineStyle,
+                value: NSUnderlineStyle.single.rawValue,
+                range: fullRange
+            )
+        }
+
+        if isStrikethrough {
+            attributedText.addAttribute(
+                .strikethroughStyle,
+                value: NSUnderlineStyle.single.rawValue,
+                range: fullRange
+            )
+        }
+
+        return AttributedString(attributedText)
+    }
+
+    private var thumbnailParagraphStyle: NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 4
+        style.lineBreakMode = .byWordWrapping
+        style.alignment = textAlignment == .center ? .center : textAlignment == .trailing ? .right : .left
+        return style
+    }
+
+    private var visibleFilmstripPhotos: [UIImage] {
+        Array(photos.prefix(photos.count > 4 ? 3 : 4))
+    }
+
+    private var overflowPhotoCount: Int {
+        max(photos.count - visibleFilmstripPhotos.count, 0)
+    }
+
     var body: some View {
         ZStack {
             Color.homePageBackground
 
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .bottom) {
                 NotebookPaperBackground(
                     paperColor: paperStyle.backgroundImageName == nil ? paperColor : .homePageBackground,
                     paperImageName: paperStyle.backgroundImageName,
@@ -808,39 +885,109 @@ private struct DraftPageThumbnail: View {
                         .foregroundStyle(Color.storyInk)
                         .lineLimit(2)
 
-                    if !photos.isEmpty {
-                        HStack(spacing: 7) {
-                            ForEach(Array(photos.enumerated()), id: \.offset) { _, photo in
-                                Image(uiImage: photo)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(height: 74)
-                                    .frame(maxWidth: .infinity)
-                                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            }
-                        }
-                    }
-
-                    Text(displayText)
-                        .font(isItalic ? fontChoice.swiftUIBodyFont(size: min(textSize, 19)).italic() : fontChoice.swiftUIBodyFont(size: min(textSize, 19)))
-                        .fontWeight(isBold ? .bold : .regular)
-                        .underline(isUnderlined)
-                        .strikethrough(isStrikethrough)
+                    Text(displayRichText)
                         .foregroundStyle(textColor)
                         .padding(.horizontal, isHighlighted ? 3 : 0)
                         .background(isHighlighted ? Color.yellow.opacity(0.26) : Color.clear)
                         .multilineTextAlignment(textAlignment == .center ? .center : textAlignment == .trailing ? .trailing : .leading)
                         .lineSpacing(4)
-                        .lineLimit(10)
+                        .lineLimit(photos.isEmpty ? 10 : 8)
                 }
                 .padding(.top, 28)
                 .padding(.trailing, 18)
-                .padding(.bottom, 20)
+                .padding(.bottom, photos.isEmpty ? 20 : 88)
                 .padding(.leading, paperStyle.leadingContentPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                if !photos.isEmpty {
+                    photoFilmstrip
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 14)
+                }
             }
             .background(paperStyle.backgroundImageName == nil ? paperColor : Color.homePageBackground)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+    }
+
+    private var photoFilmstrip: some View {
+        HStack(spacing: filmstripSpacing) {
+            ForEach(Array(visibleFilmstripPhotos.enumerated()), id: \.offset) { index, photo in
+                polaroidThumbnail(photo, index: index)
+            }
+
+            if overflowPhotoCount > 0 {
+                overflowBadge
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: Color.storyInk.opacity(0.12), radius: 5, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.storyInk.opacity(0.08), lineWidth: 0.7)
+        )
+    }
+
+    private func polaroidThumbnail(_ photo: UIImage, index: Int) -> some View {
+        VStack(spacing: 0) {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: filmstripItemWidth - 6, height: filmstripImageHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(Color.storyInk.opacity(0.08), lineWidth: 0.6)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 3)
+        .padding(.horizontal, 3)
+        .padding(.bottom, 10)
+        .frame(width: filmstripItemWidth, height: filmstripItemHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: Color.storyInk.opacity(0.14), radius: 2, x: 0, y: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(Color.storyInk.opacity(0.08), lineWidth: 0.6)
+        )
+        .rotationEffect(.degrees(polaroidRotation(for: index)))
+    }
+
+    private func polaroidRotation(for index: Int) -> Double {
+        switch index % 3 {
+        case 0:
+            return -2
+        case 1:
+            return 1.5
+        default:
+            return -0.8
+        }
+    }
+
+    private var overflowBadge: some View {
+        Text("+\(overflowPhotoCount)")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.storyInk)
+            .frame(width: filmstripItemWidth, height: filmstripItemHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.white)
+                    .shadow(color: Color.storyInk.opacity(0.12), radius: 2, x: 0, y: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.1), lineWidth: 0.7)
+            )
     }
 }
 
@@ -1616,6 +1763,7 @@ struct CreateEntryView: View {
         let draftThumbnail = DraftThumbnailRenderer.render(
             title: pendingSave.title,
             text: pendingSave.text,
+            richText: pendingSave.richText,
             photos: pendingSave.photos,
             fontChoiceRawValue: pendingSave.fontChoiceRawValue,
             textColorIndex: pendingSave.textColorIndex,
@@ -1713,6 +1861,7 @@ struct CreateEntryView: View {
         let photos = Array(draft.photos.prefix(5))
         storyboardPhotos = photos.map(Optional.some)
             + Array(repeating: nil, count: max(0, 5 - photos.count))
+        isPhotoPanelExpanded = !photos.isEmpty
         selectedArtStyle = draft.artStyle
         storyLocation = draft.location
         storyDate = draft.date
@@ -3232,7 +3381,7 @@ struct CreateEntryView: View {
 
         storyboardPhotos[slot] = image
         selectedPhotoSlot = nil
-        isPhotoPanelExpanded = false
+        isPhotoPanelExpanded = true
     }
 
     private func setStoryboardPhotos(_ images: [UIImage]) {
@@ -3258,7 +3407,7 @@ struct CreateEntryView: View {
 
         storyboardPhotos = updatedPhotos
         selectedPhotoSlot = nil
-        isPhotoPanelExpanded = false
+        isPhotoPanelExpanded = true
     }
 
     @MainActor
