@@ -253,7 +253,7 @@ struct NotebookTextSelectionState: Equatable {
 
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
-    static let bodyFontSize: CGFloat = 14
+    static let bodyFontSize: CGFloat = 15
     static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
     static let marginLeading: CGFloat = 54
     static let textLeadingInset: CGFloat = 5

@@ -711,7 +711,7 @@ private enum CreateFormattingPalette {
 }
 
 private enum CreateEntryTextSize {
-    static let defaultSliderValue: Double = 0
+    static let defaultSliderValue: Double = 0.125
 }
 
 @MainActor
