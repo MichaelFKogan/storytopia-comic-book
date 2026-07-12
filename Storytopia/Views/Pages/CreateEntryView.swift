@@ -609,8 +609,8 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 }
 
 fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
-    case collegeRuled
     case blank
+    case collegeRuled
     case watercolorPaper
     case cottonPaper
     case recycledPaper
@@ -710,6 +710,10 @@ private enum CreateFormattingPalette {
     ]
 }
 
+private enum CreateEntryTextSize {
+    static let defaultSliderValue: Double = 0
+}
+
 @MainActor
 enum DraftThumbnailRenderer {
     static func render(
@@ -731,8 +735,8 @@ enum DraftThumbnailRenderer {
     ) -> UIImage? {
         let fontChoice = CreateFontChoice.savedValue(fontChoiceRawValue)
         let normalizedTextColorIndex = min(max(textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
-        let normalizedTextSize = min(max(textSize ?? 0.36, 0), 1)
-        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
+        let normalizedTextSize = min(max(textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
+        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
         let normalizedPaperColorIndex = min(max(paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         let paperColor = CreateFormattingPalette.paperColors[normalizedPaperColorIndex]
         let textColor = CreateFormattingPalette.textColors[normalizedTextColorIndex].color
@@ -1023,14 +1027,16 @@ struct CreateEntryView: View {
     @State private var isShowingArtStyleGrid = false
     @State private var isShowingJournalPromptsSheet = false
     @State private var isShowingFormattingSheet = false
+    @State private var isShowingEntryDateSheet = false
+    @State private var isShowingEntryLocationSheet = false
     @State private var isShowingJournalDestinationSheet = false
     @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
     @State private var selectedFontChoice: CreateFontChoice = .sans
-    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .collegeRuled
+    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .blank
     @State private var selectedTextColorIndex = 0
     @State private var selectedPaperColorIndex = 0
     @State private var entryRichText: NotebookRichTextDocument?
-    @State private var previewTextSize: Double = 0.36
+    @State private var previewTextSize: Double = CreateEntryTextSize.defaultSliderValue
     @State private var textFormattingRequestID = 0
     @State private var textFormattingRequest: NotebookTextFormattingRequest?
     @State private var entryDestination: CreateEntryDestination = .daily
@@ -1214,6 +1220,18 @@ struct CreateEntryView: View {
             .presentationDetents([.height(430), .large])
             .presentationDragIndicator(.visible)
             .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingEntryDateSheet) {
+            entryDateSheet
+                .presentationDetents([.height(260)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingEntryLocationSheet) {
+            entryLocationSheet
+                .presentationDetents([.height(230)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color.homePageBackground)
         }
         .sheet(isPresented: $isShowingAddToJournalPage) {
             NavigationStack {
@@ -1826,9 +1844,9 @@ struct CreateEntryView: View {
         isPrivateEntry = false
         selectedFontChoice = .sans
         selectedTextColorIndex = 0
-        previewTextSize = 0.36
+        previewTextSize = CreateEntryTextSize.defaultSliderValue
         textFormattingRequest = nil
-        selectedPaperStyleChoice = .collegeRuled
+        selectedPaperStyleChoice = .blank
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
         loadedDraftSnapshot = nil
@@ -1874,8 +1892,8 @@ struct CreateEntryView: View {
         isPrivateEntry = draft.isPrivate
         selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
         selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
-        previewTextSize = min(max(draft.textSize ?? 0.36, 0), 1)
-        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .collegeRuled
+        previewTextSize = min(max(draft.textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
+        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
         selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         loadedDraftSnapshot = currentDraftSnapshot(id: draft.id)
     }
@@ -2006,6 +2024,8 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 10) {
+            addToJournalTextButton
+
             if hasStoryboardPhotos {
                 photosAttachedTab
             }
@@ -2018,6 +2038,26 @@ struct CreateEntryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 24)
+    }
+
+    private var addToJournalTextButton: some View {
+        Button {
+            openAddToJournalPage()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+
+                Text("Add To Journal")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundStyle(Color.storyPurple)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add to journal")
     }
 
     private var displayedAddToJournalTitle: String? {
@@ -2111,16 +2151,23 @@ struct CreateEntryView: View {
                 handlePhotosToolbarTapped()
             }
 
+            toolbarActionButton(title: "Date", systemName: "calendar") {
+                openEntryDateSheet()
+            }
+
+            toolbarActionButton(
+                title: "Place",
+                systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill"
+            ) {
+                openEntryLocationSheet()
+            }
+
             toolbarActionButton(title: "Paper", systemName: "doc.text") {
                 openPaperStyleOptions()
             }
 
             toolbarActionButton(title: "Prompts", systemName: "text.bubble") {
                 openJournalPromptsSheet()
-            }
-
-            toolbarActionButton(title: "Journal", systemName: displayedAddToJournalTitle == nil ? "book.closed" : "book.closed.fill") {
-                openAddToJournalPage()
             }
         }
         .padding(.horizontal, 6)
@@ -2797,6 +2844,16 @@ struct CreateEntryView: View {
         dismissKeyboard()
         selectedFormattingTab = .paperStyle
         isShowingFormattingSheet = true
+    }
+
+    private func openEntryDateSheet() {
+        dismissKeyboard()
+        isShowingEntryDateSheet = true
+    }
+
+    private func openEntryLocationSheet() {
+        dismissKeyboard()
+        isShowingEntryLocationSheet = true
     }
 
     private func editorFloatingToolIcon<Content: View>(
@@ -3497,6 +3554,84 @@ struct CreateEntryView: View {
                 .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+    }
+
+    private var entryDateSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sheetHeader(title: "Entry Date", systemName: "calendar")
+
+            DatePicker("Date/time", selection: $storyDate, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .font(.system(size: 15, weight: .semibold))
+                .tint(Color.storyPurple)
+                .padding(.horizontal, 14)
+                .frame(height: 54)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+
+    private var entryLocationSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sheetHeader(title: "Entry Location", systemName: "location")
+
+            HStack(spacing: 12) {
+                Image(systemName: "location")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 22)
+
+                TextField("Add a location", text: $storyLocation)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.storyInk)
+                    .tint(Color.storyPurple)
+                    .textInputAutocapitalization(.words)
+
+                if !storyLocation.isEmpty {
+                    Button {
+                        storyLocation = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.storyGray.opacity(0.48))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear location")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 54)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+
+    private func sheetHeader(title: String, systemName: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 30, height: 30)
+                .background(Color.storyPurple.opacity(0.11), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Text(title)
+                .font(.system(size: 18, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
     }
 
     private func storyTextFieldRow(

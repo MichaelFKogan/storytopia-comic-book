@@ -4525,10 +4525,13 @@ struct EntriesView: View {
     private let thumbnailRendererVersion = 8
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
 
+    @State private var showsPrototypeData = true
     @State private var entries: [CreateEntryDraft] = []
+    @State private var sampleEntries: [CreateEntryDraft] = []
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
+    @State private var sampleEntryBeingPreviewed: CreateEntryDraft?
     @State private var entriesPendingDeletion: [CreateEntryDraft] = []
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
 
@@ -4558,6 +4561,8 @@ struct EntriesView: View {
             }
 
             BottomNavigationBar(selectedPage: $selectedPage)
+
+            bottomPrototypeNotice
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -4576,6 +4581,9 @@ struct EntriesView: View {
             }
         }
         .preferredColorScheme(.light)
+        .sheet(item: $sampleEntryBeingPreviewed) { entry in
+            EntrySamplePreview(entry: entry)
+        }
         .alert("Rename Entry", isPresented: isRenameEntryAlertPresented) {
             TextField("Entry name", text: $renamedEntryTitle)
 
@@ -4674,6 +4682,45 @@ struct EntriesView: View {
         .accessibilityLabel("Create a new entry")
     }
 
+    @ViewBuilder
+    private var bottomPrototypeNotice: some View {
+        if showsSampleEntries {
+            prototypeNotice
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 82)
+        }
+    }
+
+    private var prototypeNotice: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "eye.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+
+            Text("Previewing sample entries")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+
+            Spacer()
+
+            Button("Show Empty") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsPrototypeData = false
+                }
+            }
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color.homeAccent)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
     private var entryList: some View {
         List {
             Section {
@@ -4695,40 +4742,59 @@ struct EntriesView: View {
         }
     }
 
+    @ViewBuilder
     private var entryRows: some View {
-        ForEach(filteredEntries) { entry in
-            Button {
-                activeDraftID = entry.id
-                selectedPage = .create
-            } label: {
-                EntryListRow(entry: entry)
-            }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(
-                top: 0,
-                leading: JournalChapterListMetrics.horizontalInset,
-                bottom: 0,
-                trailing: JournalChapterListMetrics.trailingInset
-            ))
-            .listRowBackground(Color.homePageBackground)
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+        if showsSampleEntries {
+            ForEach(filteredEntries) { entry in
                 Button {
-                    beginRenaming(entry)
+                    sampleEntryBeingPreviewed = entry
                 } label: {
-                    Label("Rename", systemImage: "pencil")
+                    EntryListRow(entry: entry)
                 }
-                .tint(Color.homeAccent)
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(
+                    top: 0,
+                    leading: JournalChapterListMetrics.horizontalInset,
+                    bottom: 0,
+                    trailing: JournalChapterListMetrics.trailingInset
+                ))
+                .listRowBackground(Color.homePageBackground)
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                Button(role: .destructive) {
-                    requestDeleteEntry(entry)
+        } else {
+            ForEach(filteredEntries) { entry in
+                Button {
+                    activeDraftID = entry.id
+                    selectedPage = .create
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    EntryListRow(entry: entry)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(
+                    top: 0,
+                    leading: JournalChapterListMetrics.horizontalInset,
+                    bottom: 0,
+                    trailing: JournalChapterListMetrics.trailingInset
+                ))
+                .listRowBackground(Color.homePageBackground)
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    Button {
+                        beginRenaming(entry)
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .tint(Color.homeAccent)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        requestDeleteEntry(entry)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
             }
+            .onDelete(perform: deleteEntries)
+            .onMove(perform: moveEntries)
         }
-        .onDelete(perform: deleteEntries)
-        .onMove(perform: moveEntries)
     }
 
     private var entryGrid: some View {
@@ -4742,17 +4808,26 @@ struct EntriesView: View {
                         ForEach(filteredEntries) { entry in
                             EntryGridPreviewCard(
                                 entry: entry,
-                                isEditing: editMode == .active,
+                                isEditing: editMode == .active && !showsSampleEntries,
+                                showsActions: !showsSampleEntries,
                                 title: entryDisplayTitle(entry),
                                 onOpen: {
-                                    activeDraftID = entry.id
-                                    selectedPage = .create
+                                    if showsSampleEntries {
+                                        sampleEntryBeingPreviewed = entry
+                                    } else {
+                                        activeDraftID = entry.id
+                                        selectedPage = .create
+                                    }
                                 },
                                 onDelete: {
-                                    requestDeleteEntry(entry)
+                                    if !showsSampleEntries {
+                                        requestDeleteEntry(entry)
+                                    }
                                 },
                                 onRename: {
-                                    beginRenaming(entry)
+                                    if !showsSampleEntries {
+                                        beginRenaming(entry)
+                                    }
                                 }
                             )
                         }
@@ -4799,7 +4874,11 @@ struct EntriesView: View {
     }
 
     private var filteredEntries: [CreateEntryDraft] {
-        entries
+        showsSampleEntries ? sampleEntries : entries
+    }
+
+    private var showsSampleEntries: Bool {
+        entries.isEmpty && showsPrototypeData && !sampleEntries.isEmpty
     }
 
     private func deleteEntries(at offsets: IndexSet) {
@@ -4937,6 +5016,9 @@ struct EntriesView: View {
 
     private func refreshEntries() {
         entries = CreateEntryDraftStore.loadAll()
+        if entries.isEmpty && showsPrototypeData && sampleEntries.isEmpty {
+            sampleEntries = EntriesSampleData.entries()
+        }
         backfillEntryThumbnailsIfNeeded()
         isDraftSaved = !entries.isEmpty
     }
@@ -4979,6 +5061,233 @@ struct EntriesView: View {
 
         if didCreateThumbnail {
             entries = CreateEntryDraftStore.loadAll()
+        }
+    }
+}
+
+private enum EntriesSampleData {
+    private struct Sample {
+        let id: String
+        let title: String
+        let text: String
+        let daysAgo: Int
+        let location: String
+        let paperStyleRawValue: String
+        let paperColorIndex: Int
+        let textColorIndex: Int
+        let textSize: Double
+    }
+
+    @MainActor
+    static func entries() -> [CreateEntryDraft] {
+        samples.enumerated().map { index, sample in
+            let date = Calendar.current.date(byAdding: .day, value: -sample.daysAgo, to: Date()) ?? Date()
+            let thumbnail = DraftThumbnailRenderer.render(
+                title: sample.title,
+                text: sample.text,
+                richText: NotebookRichTextDocument(text: sample.text),
+                photos: [],
+                fontChoiceRawValue: nil,
+                textColorIndex: sample.textColorIndex,
+                textSize: sample.textSize,
+                paperStyleRawValue: sample.paperStyleRawValue,
+                paperColorIndex: sample.paperColorIndex,
+                isBold: false,
+                isItalic: index == 5,
+                isUnderlined: false,
+                isStrikethrough: false,
+                isHighlighted: index == 1,
+                textAlignmentRawValue: "leading"
+            )
+
+            return CreateEntryDraft(
+                id: UUID(uuidString: sample.id) ?? UUID(),
+                title: sample.title,
+                text: sample.text,
+                richText: NotebookRichTextDocument(text: sample.text),
+                photos: [],
+                artStyle: "Cozy Storybook",
+                location: sample.location,
+                date: date,
+                savesDraft: true,
+                isPrivate: index == 3,
+                fontChoiceRawValue: nil,
+                textColorIndex: sample.textColorIndex,
+                textSize: sample.textSize,
+                paperStyleRawValue: sample.paperStyleRawValue,
+                paperColorIndex: sample.paperColorIndex,
+                isBold: false,
+                isItalic: index == 5,
+                isUnderlined: false,
+                isStrikethrough: false,
+                isHighlighted: index == 1,
+                textAlignmentRawValue: "leading",
+                thumbnail: thumbnail,
+                createdAt: date,
+                updatedAt: date,
+                displayOrder: index
+            )
+        }
+    }
+
+    private static let samples: [Sample] = [
+        Sample(
+            id: "10000000-0000-0000-0000-000000000001",
+            title: "Morning Light",
+            text: "The kitchen was quiet except for the kettle. I watched the first strip of sun reach the table and felt like the whole day was waiting politely.",
+            daysAgo: 0,
+            location: "Home",
+            paperStyleRawValue: "collegeRuled",
+            paperColorIndex: 1,
+            textColorIndex: 1,
+            textSize: 18
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000002",
+            title: "Tiny Win",
+            text: "Finished the thing I kept avoiding. It only took twenty minutes, which is both hilarious and a little rude.",
+            daysAgo: 1,
+            location: "Desk",
+            paperStyleRawValue: "blank",
+            paperColorIndex: 4,
+            textColorIndex: 4,
+            textSize: 20
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000003",
+            title: "Rain Walk",
+            text: "Took the long way home after lunch. The sidewalks were shiny, the trees smelled awake, and nobody seemed in a rush.",
+            daysAgo: 2,
+            location: "Maple Street",
+            paperStyleRawValue: "watercolorPaper",
+            paperColorIndex: 0,
+            textColorIndex: 2,
+            textSize: 18
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000004",
+            title: "What I Needed",
+            text: "A slow dinner, a charged phone left in another room, and a conversation that did not try to solve anything.",
+            daysAgo: 3,
+            location: "West Village",
+            paperStyleRawValue: "cottonPaper",
+            paperColorIndex: 0,
+            textColorIndex: 6,
+            textSize: 19
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000005",
+            title: "Saturday Errands",
+            text: "Bought flowers, returned the library book, remembered batteries, forgot basil. The list was almost victorious.",
+            daysAgo: 5,
+            location: "Downtown",
+            paperStyleRawValue: "blank",
+            paperColorIndex: 5,
+            textColorIndex: 8,
+            textSize: 18
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000006",
+            title: "A Line to Keep",
+            text: "There are days that do not announce themselves as important until later. Today had that quiet shimmer.",
+            daysAgo: 7,
+            location: "Park Bench",
+            paperStyleRawValue: "recycledPaper",
+            paperColorIndex: 0,
+            textColorIndex: 5,
+            textSize: 21
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000007",
+            title: "Coffee Notes",
+            text: "The cafe playlist was all old soul songs. I wrote three messy ideas and one good sentence.",
+            daysAgo: 9,
+            location: "Corner Cafe",
+            paperStyleRawValue: "collegeRuled",
+            paperColorIndex: 2,
+            textColorIndex: 3,
+            textSize: 18
+        ),
+        Sample(
+            id: "10000000-0000-0000-0000-000000000008",
+            title: "Before Sleep",
+            text: "Grateful for clean sheets, a book with short chapters, and the particular relief of putting tomorrow down for a while.",
+            daysAgo: 12,
+            location: "Bedroom",
+            paperStyleRawValue: "blank",
+            paperColorIndex: 6,
+            textColorIndex: 7,
+            textSize: 19
+        )
+    ]
+}
+
+private struct EntrySamplePreview: View {
+    let entry: CreateEntryDraft
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    previewImage
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(entryDisplayTitle(entry))
+                            .font(.system(size: 26, weight: .bold, design: .serif))
+                            .foregroundStyle(Color.storyInk)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 8) {
+                            Text(entry.createdAt.formatted(date: .abbreviated, time: .omitted))
+
+                            if !entry.location.isEmpty {
+                                Text("•")
+                                Text(entry.location)
+                            }
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                    }
+
+                    Text(entry.text)
+                        .font(.system(size: 18, weight: .regular, design: .serif))
+                        .lineSpacing(5)
+                        .foregroundStyle(Color.storyInk)
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.homeBorder, lineWidth: 1)
+                        )
+                }
+                .padding(18)
+            }
+            .background(Color.homePageBackground.ignoresSafeArea())
+            .navigationTitle("Sample Entry")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.homeAccent)
+                }
+            }
+        }
+        .preferredColorScheme(.light)
+    }
+
+    @ViewBuilder
+    private var previewImage: some View {
+        if let thumbnail = entry.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
         }
     }
 }
@@ -5049,6 +5358,7 @@ private func entryDisplayTitle(_ entry: CreateEntryDraft) -> String {
 private struct EntryGridPreviewCard: View {
     let entry: CreateEntryDraft
     let isEditing: Bool
+    let showsActions: Bool
     let title: String
     let onOpen: () -> Void
     let onDelete: () -> Void
@@ -5083,18 +5393,20 @@ private struct EntryGridPreviewCard: View {
             onOpen()
         }
         .contextMenu {
-            if let onRename {
-                Button {
-                    onRename()
-                } label: {
-                    Label("Rename", systemImage: "pencil")
+            if showsActions {
+                if let onRename {
+                    Button {
+                        onRename()
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
                 }
-            }
 
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete", systemImage: "trash")
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
             }
         }
         .accessibilityElement(children: .ignore)

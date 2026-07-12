@@ -253,7 +253,7 @@ struct NotebookTextSelectionState: Equatable {
 
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
-    static let bodyFontSize: CGFloat = 16
+    static let bodyFontSize: CGFloat = 14
     static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
     static let marginLeading: CGFloat = 54
     static let textLeadingInset: CGFloat = 5
@@ -1924,7 +1924,7 @@ struct NotebookEditorContent: View {
             TextField(
                 "",
                 text: $storyTitle,
-                prompt: Text("Title")
+                prompt: Text("Add a title")
                     .foregroundColor(Color.storyGray.opacity(0.46))
             )
             .font(NotebookMetrics.titleFont(for: textStyle))
