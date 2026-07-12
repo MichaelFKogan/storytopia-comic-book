@@ -418,7 +418,6 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
     case serif
     case nunito
     case lora
-    case crimsonPro
     case caveat
     case patrickHand
     case gloriaHallelujah
@@ -437,8 +436,6 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             "Nunito"
         case .lora:
             "Lora"
-        case .crimsonPro:
-            "Crimson Pro"
         case .caveat:
             "Caveat"
         case .patrickHand:
@@ -454,7 +451,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var design: Font.Design {
         switch self {
-        case .serif, .lora, .crimsonPro:
+        case .serif, .lora:
             .serif
         case .sans, .nunito:
             .default
@@ -467,7 +464,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var uiKitDesign: UIFontDescriptor.SystemDesign {
         switch self {
-        case .serif, .lora, .crimsonPro:
+        case .serif, .lora:
             .serif
         case .sans, .nunito:
             .default
@@ -486,8 +483,6 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
             "Nunito"
         case .lora:
             "Lora-Regular"
-        case .crimsonPro:
-            "CrimsonPro-Regular"
         case .caveat:
             "Caveat-Regular"
         case .patrickHand:
@@ -507,7 +502,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var usesVariableWeight: Bool {
         switch self {
-        case .nunito, .lora, .crimsonPro, .caveat:
+        case .nunito, .lora, .caveat:
             true
         default:
             false
@@ -516,7 +511,9 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var bodyWeight: Font.Weight {
         switch self {
-        case .nunito, .lora, .crimsonPro:
+        case .sans, .serif:
+            .medium
+        case .nunito, .lora:
             .regular
         case .caveat:
             .medium
@@ -530,6 +527,10 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
     /// Direct wght-axis values for variable fonts that need tuning beyond `bodyWeight`.
     var bodyWght: CGFloat? {
         switch self {
+        case .nunito:
+            600
+        case .lora:
+            450
         case .caveat:
             500
         default:
@@ -543,7 +544,7 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 
     var bodyBoldWght: CGFloat? {
         switch self {
-        case .nunito, .lora, .crimsonPro, .caveat:
+        case .nunito, .lora, .caveat:
             700
         default:
             nil
@@ -553,8 +554,6 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
     /// Compensates for fonts that render smaller at the same point size.
     var bodySizeScale: CGFloat {
         switch self {
-        case .crimsonPro:
-            1.18
         case .patrickHand:
             1.18
         case .caveat:
@@ -570,6 +569,8 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
         }
 
         switch rawValue {
+        case "crimsonPro":
+            return .lora
         case "handwritten":
             return .patrickHand
         case "typewriter":
@@ -798,13 +799,8 @@ private struct DraftPageThumbnail: View {
         return trimmedText.isEmpty ? "Start writing..." : trimmedText
     }
 
-    private var displayRichText: AttributedString {
-        let sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? displayText : text
-        let document = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? NotebookRichTextDocument(text: sourceText)
-            : richText?.normalized(for: text) ?? NotebookRichTextDocument(text: sourceText)
-
-        let textStyle = NotebookTextStyle(
+    private var thumbnailTextStyle: NotebookTextStyle {
+        NotebookTextStyle(
             swiftUIDesign: fontChoice.design,
             uiKitDesign: fontChoice.uiKitDesign,
             customFontName: fontChoice.fontName,
@@ -815,13 +811,21 @@ private struct DraftPageThumbnail: View {
             customFontBoldWght: fontChoice.bodyBoldWght,
             customFontUsesVariableWeight: fontChoice.usesVariableWeight,
             customFontSizeScale: fontChoice.bodySizeScale,
+            bodyFontWeight: fontChoice.bodyWeight,
             bodyFontSize: min(textSize, 19),
             color: textColor,
             uiColor: textUIColor
         )
+    }
+
+    private var displayRichText: AttributedString {
+        let sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? displayText : text
+        let document = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? NotebookRichTextDocument(text: sourceText)
+            : richText?.normalized(for: text) ?? NotebookRichTextDocument(text: sourceText)
 
         let attributedText = NSMutableAttributedString(
-            attributedString: document.attributedString(textStyle: textStyle)
+            attributedString: document.attributedString(textStyle: thumbnailTextStyle)
         )
         let fullRange = NSRange(location: 0, length: attributedText.length)
         attributedText.addAttribute(
@@ -881,8 +885,8 @@ private struct DraftPageThumbnail: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(displayTitle)
-                        .font(.system(size: 21, weight: .bold, design: .serif))
-                        .foregroundStyle(Color.storyInk)
+                        .font(NotebookMetrics.titleFont(for: thumbnailTextStyle))
+                        .foregroundStyle(thumbnailTextStyle.color)
                         .lineLimit(2)
 
                     Text(displayRichText)
@@ -1089,6 +1093,7 @@ struct CreateEntryView: View {
             customFontBoldWght: selectedFontChoice.bodyBoldWght,
             customFontUsesVariableWeight: selectedFontChoice.usesVariableWeight,
             customFontSizeScale: selectedFontChoice.bodySizeScale,
+            bodyFontWeight: selectedFontChoice.bodyWeight,
             bodyFontSize: CGFloat(14 + previewTextSize * 8),
             color: textColor.color,
             uiColor: textColor.uiColor

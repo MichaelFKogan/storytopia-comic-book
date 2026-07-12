@@ -30,17 +30,17 @@ enum NotebookTextRunStyle: String, Codable, Equatable, CaseIterable {
         case .body:
             1
         case .heading1:
-            1.86
+            1.55
         case .heading2:
-            1.66
+            1.42
         case .heading3:
-            1.48
+            1.30
         case .heading4:
-            1.32
+            1.20
         case .heading5:
-            1.18
+            1.12
         case .heading6:
-            1.08
+            1.06
         }
     }
 
@@ -254,9 +254,10 @@ struct NotebookTextSelectionState: Equatable {
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
     static let bodyFontSize: CGFloat = 16
-    static let titleFontSize: CGFloat = 20
+    static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
     static let marginLeading: CGFloat = 54
     static let textLeadingInset: CGFloat = 5
+    static let syntheticItalicObliqueness: CGFloat = 0.16
 
     static var titleFont: UIFont {
         UIFont.systemFont(ofSize: titleFontSize, weight: .bold)
@@ -294,17 +295,7 @@ enum NotebookMetrics {
     }
 
     static func titleFont(for style: NotebookTextStyle) -> Font {
-        if let customFontName = style.customFontName {
-            return VariableFont.font(
-                name: style.customFontBoldName ?? customFontName,
-                size: style.titleFontSize,
-                weight: style.customFontBoldWeight,
-                usesWeightAxis: style.customFontUsesVariableWeight,
-                wghtOverride: style.customFontBoldWght ?? style.customFontWght.map { max($0, 700) }
-            )
-        }
-
-        return .system(size: style.titleFontSize, weight: .bold, design: style.swiftUIDesign)
+        Font(uiFont(for: style, size: style.titleFontSize, isBold: true, isItalic: false))
     }
 
     static func bodyPlaceholderFont(for style: NotebookTextStyle) -> Font {
@@ -318,7 +309,7 @@ enum NotebookMetrics {
             )
         }
 
-        return .system(size: style.bodyFontSize, weight: .regular, design: style.swiftUIDesign)
+        return .system(size: style.bodyFontSize, weight: style.bodyFontWeight, design: style.swiftUIDesign)
     }
 
     static func uiBodyFont(for style: NotebookTextStyle) -> UIFont {
@@ -330,10 +321,20 @@ enum NotebookMetrics {
         isBold: Bool,
         isItalic: Bool
     ) -> UIFont {
+        uiFont(for: style, size: style.scaledBodyFontSize, isBold: isBold, isItalic: isItalic)
+    }
+
+    /// Shared font construction for title, body, and headings so weight matches across SwiftUI and UIKit.
+    static func uiFont(
+        for style: NotebookTextStyle,
+        size: CGFloat,
+        isBold: Bool,
+        isItalic: Bool
+    ) -> UIFont {
         if let customFontName = style.customFontName,
            let customFont = VariableFont.uiFont(
                name: isBold ? style.customFontBoldName ?? customFontName : customFontName,
-               size: style.scaledBodyFontSize,
+               size: size,
                weight: isBold ? style.customFontBoldWeight : style.customFontWeight,
                usesWeightAxis: style.customFontUsesVariableWeight,
                wghtOverride: isBold ? style.customFontBoldWght : style.customFontWght
@@ -342,31 +343,48 @@ enum NotebookMetrics {
         }
 
         let baseFont = UIFont.systemFont(
-            ofSize: style.bodyFontSize,
-            weight: isBold ? .bold : .regular
+            ofSize: size,
+            weight: isBold ? .bold : uiFontWeight(for: style.bodyFontWeight)
         )
         guard var descriptor = baseFont.fontDescriptor.withDesign(style.uiKitDesign) else {
-            return baseFont
+            return resolvedItalicFont(baseFont, isItalic: isItalic)
         }
 
-        var traits = descriptor.symbolicTraits
-        if isBold {
-            traits.insert(.traitBold)
-        } else {
-            traits.remove(.traitBold)
-        }
-
+        // Weight already encodes bold — only layer italic here to avoid double-bold.
         if isItalic {
+            var traits = descriptor.symbolicTraits
             traits.insert(.traitItalic)
-        } else {
-            traits.remove(.traitItalic)
+            if let italicDescriptor = descriptor.withSymbolicTraits(traits) {
+                descriptor = italicDescriptor
+            }
         }
 
-        if let styledDescriptor = descriptor.withSymbolicTraits(traits) {
-            descriptor = styledDescriptor
-        }
+        return UIFont(descriptor: descriptor, size: size)
+    }
 
-        return UIFont(descriptor: descriptor, size: style.bodyFontSize)
+    private static func uiFontWeight(for weight: Font.Weight) -> UIFont.Weight {
+        switch weight {
+        case .ultraLight:
+            return .ultraLight
+        case .thin:
+            return .thin
+        case .light:
+            return .light
+        case .regular:
+            return .regular
+        case .medium:
+            return .medium
+        case .semibold:
+            return .semibold
+        case .bold:
+            return .bold
+        case .heavy:
+            return .heavy
+        case .black:
+            return .black
+        default:
+            return .regular
+        }
     }
 
     static func typingAttributes(
@@ -391,9 +409,17 @@ enum NotebookMetrics {
 
         if isItalic {
             attributes[.notebookItalic] = true
+
+            if shouldUseSyntheticItalic(for: style) {
+                attributes[.obliqueness] = syntheticItalicObliqueness
+            }
         }
 
         return attributes
+    }
+
+    static func shouldUseSyntheticItalic(for style: NotebookTextStyle) -> Bool {
+        style.customFontName != nil
     }
 
     static func shouldUseSyntheticBold(for style: NotebookTextStyle) -> Bool {
@@ -468,6 +494,7 @@ struct NotebookTextStyle: Equatable {
     var customFontUsesVariableWeight: Bool = false
     var customFontAllowsSyntheticBold: Bool = true
     var customFontSizeScale: CGFloat = 1
+    var bodyFontWeight: Font.Weight = .regular
     var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
     var color: Color = Color(NotebookMetrics.bodyTextUIColor)
     var uiColor: UIColor = NotebookMetrics.bodyTextUIColor
@@ -479,7 +506,7 @@ struct NotebookTextStyle: Equatable {
     }
 
     var titleFontSize: CGFloat {
-        scaledBodyFontSize + 4
+        scaledBodyFontSize * NotebookTextRunStyle.heading1.fontScale
     }
 }
 
@@ -1027,8 +1054,11 @@ final class LinedTextView: UITextView {
                 isItalic: isTypingItalic
             )
 
-            if !isTypingBold, NotebookMetrics.shouldUseSyntheticBold(for: adjustedStyle) {
+            if (isTypingBold || typingTextRunStyle.usesHeadingWeight),
+               NotebookMetrics.shouldUseSyntheticBold(for: adjustedStyle) {
                 attributes[.strokeWidth] = -2
+            } else if !isTypingBold {
+                attributes.removeValue(forKey: .strokeWidth)
             }
         }
 
@@ -1485,9 +1515,7 @@ private extension NSAttributedString {
             let explicitValue = attributes[key] as? Bool
             let hasFallbackTrait: Bool
             if explicitValue == nil, let font = attributes[.font] as? UIFont {
-                if key == .notebookBold {
-                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-                } else if key == .notebookItalic {
+                if key == .notebookItalic {
                     hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
                 } else {
                     hasFallbackTrait = false
@@ -1544,7 +1572,16 @@ private extension NSMutableAttributedString {
                 addAttribute(.notebookTextStyle, value: runStyle.rawValue, range: subrange)
             }
 
-            applySyntheticBoldIfNeeded(isBold: isBold || runStyle.usesHeadingWeight, textStyle: textStyle, range: subrange)
+            applySyntheticBoldIfNeeded(
+                isBold: isBold || runStyle.usesHeadingWeight,
+                textStyle: textStyle,
+                range: subrange
+            )
+            applySyntheticItalicIfNeeded(
+                isItalic: isItalic,
+                textStyle: textStyle,
+                range: subrange
+            )
         }
     }
 
@@ -1570,7 +1607,16 @@ private extension NSMutableAttributedString {
             addAttribute(.font, value: font, range: subrange)
             setBooleanAttribute(.notebookBold, isEnabled: resolvedBold, range: subrange)
             setBooleanAttribute(.notebookItalic, isEnabled: resolvedItalic, range: subrange)
-            applySyntheticBoldIfNeeded(isBold: resolvedBold || runStyle.usesHeadingWeight, textStyle: textStyle, range: subrange)
+            applySyntheticBoldIfNeeded(
+                isBold: resolvedBold || runStyle.usesHeadingWeight,
+                textStyle: textStyle,
+                range: subrange
+            )
+            applySyntheticItalicIfNeeded(
+                isItalic: resolvedItalic,
+                textStyle: textStyle,
+                range: subrange
+            )
         }
     }
 
@@ -1605,9 +1651,7 @@ private extension NSMutableAttributedString {
             let explicitValue = attributes[key] as? Bool
             let hasFallbackTrait: Bool
             if explicitValue == nil, let font = attributes[.font] as? UIFont {
-                if key == .notebookBold {
-                    hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-                } else if key == .notebookItalic {
+                if key == .notebookItalic {
                     hasFallbackTrait = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
                 } else {
                     hasFallbackTrait = false
@@ -1655,12 +1699,25 @@ private extension NSMutableAttributedString {
         textStyle: NotebookTextStyle,
         range: NSRange
     ) {
-        guard isBold else {
+        guard isBold, NotebookMetrics.shouldUseSyntheticBold(for: textStyle) else {
             removeAttribute(.strokeWidth, range: range)
             return
         }
 
         addAttribute(.strokeWidth, value: -2, range: range)
+    }
+
+    private func applySyntheticItalicIfNeeded(
+        isItalic: Bool,
+        textStyle: NotebookTextStyle,
+        range: NSRange
+    ) {
+        guard isItalic, NotebookMetrics.shouldUseSyntheticItalic(for: textStyle) else {
+            removeAttribute(.obliqueness, range: range)
+            return
+        }
+
+        addAttribute(.obliqueness, value: NotebookMetrics.syntheticItalicObliqueness, range: range)
     }
 }
 

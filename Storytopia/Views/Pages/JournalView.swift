@@ -4522,7 +4522,7 @@ struct EntriesView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
-    private let thumbnailRendererVersion = 7
+    private let thumbnailRendererVersion = 8
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
 
     @State private var entries: [CreateEntryDraft] = []
