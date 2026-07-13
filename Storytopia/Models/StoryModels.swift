@@ -12,6 +12,31 @@ enum StoryPage {
     case settings
 }
 
+enum EntryDatePrecision: String, CaseIterable, Identifiable, Codable {
+    case noDate
+    case exact
+    case dateOnly
+    case monthAndYear
+    case yearOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .noDate:
+            "No Date"
+        case .exact:
+            "Date & Time"
+        case .dateOnly:
+            "Date Only"
+        case .monthAndYear:
+            "Month & Year"
+        case .yearOnly:
+            "Year Only"
+        }
+    }
+}
+
 enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
     case twoRectangles
     case threeHorizontalPanels
@@ -143,6 +168,7 @@ struct CreateEntryDraft: Identifiable {
     let artStyle: String
     let location: String
     let date: Date
+    let datePrecision: EntryDatePrecision
     let savesDraft: Bool
     let isPrivate: Bool
     let fontChoiceRawValue: String?
@@ -160,6 +186,32 @@ struct CreateEntryDraft: Identifiable {
     let createdAt: Date
     let updatedAt: Date
     let displayOrder: Int?
+}
+
+enum EntryLocationRecentStore {
+    private static let storageKey = "StorytopiaRecentEntryLocations"
+    private static let limit = 8
+
+    static var all: [String] {
+        UserDefaults.standard.stringArray(forKey: storageKey) ?? []
+    }
+
+    static func add(_ location: String) {
+        let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLocation.isEmpty else {
+            return
+        }
+
+        let existingLocations = all.filter {
+            $0.compare(trimmedLocation, options: [.caseInsensitive, .diacriticInsensitive]) != .orderedSame
+        }
+        let updatedLocations = Array(([trimmedLocation] + existingLocations).prefix(limit))
+        UserDefaults.standard.set(updatedLocations, forKey: storageKey)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: storageKey)
+    }
 }
 
 enum CreateEntryDraftStore {
@@ -199,6 +251,7 @@ enum CreateEntryDraftStore {
         artStyle: String,
         location: String,
         date: Date,
+        datePrecision: EntryDatePrecision = .exact,
         savesDraft: Bool,
         isPrivate: Bool,
         fontChoiceRawValue: String? = nil,
@@ -258,6 +311,7 @@ enum CreateEntryDraftStore {
                 artStyle: artStyle,
                 location: location,
                 date: date,
+                datePrecision: datePrecision,
                 savesDraft: savesDraft,
                 isPrivate: isPrivate,
                 fontChoiceRawValue: fontChoiceRawValue,
@@ -351,6 +405,7 @@ enum CreateEntryDraftStore {
             artStyle: metadata.artStyle ?? "Anime",
             location: metadata.location ?? "",
             date: metadata.date ?? Date(),
+            datePrecision: metadata.datePrecision ?? .exact,
             savesDraft: metadata.savesDraft ?? true,
             isPrivate: metadata.isPrivate ?? false,
             fontChoiceRawValue: metadata.fontChoiceRawValue,
@@ -446,6 +501,7 @@ private struct CreateEntryDraftMetadata: Codable {
     var artStyle: String?
     var location: String?
     var date: Date?
+    var datePrecision: EntryDatePrecision?
     var savesDraft: Bool?
     var isPrivate: Bool?
     var fontChoiceRawValue: String?

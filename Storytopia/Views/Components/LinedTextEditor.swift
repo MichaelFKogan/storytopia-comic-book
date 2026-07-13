@@ -2109,6 +2109,7 @@ struct NotebookEditorContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             titleRow
+
             bodyEditor
                 .padding(.top, titleBodySpacing)
         }

@@ -5109,6 +5109,7 @@ private enum EntriesSampleData {
                 artStyle: "Cozy Storybook",
                 location: sample.location,
                 date: date,
+                datePrecision: .exact,
                 savesDraft: true,
                 isPrivate: index == 3,
                 fontChoiceRawValue: nil,
@@ -6540,6 +6541,7 @@ private struct NewStorySheet: View {
         timeFormatter.timeStyle = .short
 
         let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        EntryLocationRecentStore.add(trimmedLocation)
         let trimmedRichText = currentBodyRichText()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         onCreate(

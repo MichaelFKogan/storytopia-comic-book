@@ -1,3 +1,5 @@
+import Combine
+import MapKit
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -161,6 +163,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let artStyle: String
     let location: String
     let date: Date
+    let datePrecision: EntryDatePrecision
     let savesDraft: Bool
     let isPrivate: Bool
     let fontChoiceRawValue: String?
@@ -178,6 +181,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         artStyle: String,
         location: String,
         date: Date,
+        datePrecision: EntryDatePrecision,
         savesDraft: Bool,
         isPrivate: Bool,
         fontChoiceRawValue: String?,
@@ -194,6 +198,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.artStyle = artStyle
         self.location = location
         self.date = date
+        self.datePrecision = datePrecision
         self.savesDraft = savesDraft
         self.isPrivate = isPrivate
         self.fontChoiceRawValue = fontChoiceRawValue
@@ -213,6 +218,7 @@ private struct PendingCreateEntryDraftSave {
     let artStyle: String
     let location: String
     let date: Date
+    let datePrecision: EntryDatePrecision
     let savesDraft: Bool
     let isPrivate: Bool
     let fontChoiceRawValue: String
@@ -220,6 +226,131 @@ private struct PendingCreateEntryDraftSave {
     let textSize: Double
     let paperStyleRawValue: String
     let paperColorIndex: Int
+}
+
+private struct EntryLocationSuggestion: Identifiable, Equatable {
+    let title: String
+    let subtitle: String
+
+    var id: String {
+        "\(title)|\(subtitle)"
+    }
+
+    var displayText: String {
+        subtitle.isEmpty ? title : "\(title), \(subtitle)"
+    }
+}
+
+private final class EntryLocationSearchModel: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    @Published var suggestions: [EntryLocationSuggestion] = []
+    @Published var isSearching = false
+
+    private let completer = MKLocalSearchCompleter()
+
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.address, .pointOfInterest]
+    }
+
+    func updateQuery(_ query: String) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.count >= 2 else {
+            clear()
+            return
+        }
+
+        isSearching = true
+        completer.queryFragment = trimmedQuery
+    }
+
+    func clear() {
+        completer.queryFragment = ""
+        suggestions = []
+        isSearching = false
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        let suggestions = completer.results
+            .prefix(6)
+            .map { EntryLocationSuggestion(title: $0.title, subtitle: $0.subtitle) }
+
+        DispatchQueue.main.async {
+            self.suggestions = suggestions
+            self.isSearching = false
+        }
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.suggestions = []
+            self.isSearching = false
+        }
+    }
+}
+
+struct EntryLocationRecentsList: View {
+    let locations: [String]
+    let accentColor: Color
+    let onSelect: (String) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("Recent Locations")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText)
+
+                Spacer()
+
+                Button("Clear") {
+                    onClear()
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(accentColor)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear recent locations")
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                ForEach(locations, id: \.self) { location in
+                    Button {
+                        onSelect(location)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(accentColor)
+                                .frame(width: 24)
+
+                            Text(location)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.storyInk)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 8)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 46)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if location != locations.last {
+                        Divider()
+                            .padding(.leading, 48)
+                    }
+                }
+            }
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            )
+        }
+    }
 }
 
 private enum EntryJournalLinkStore {
@@ -1075,7 +1206,10 @@ struct CreateEntryView: View {
     @State private var isShowingAddToJournalPage = false
     @State private var linkedJournalTitle: String?
     @State private var storyLocation = ""
+    @State private var recentEntryLocations = EntryLocationRecentStore.all
+    @StateObject private var locationSearch = EntryLocationSearchModel()
     @State private var storyDate = Date()
+    @State private var storyDatePrecision: EntryDatePrecision = .exact
     @State private var savesDraft = true
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
@@ -1254,13 +1388,13 @@ struct CreateEntryView: View {
         }
         .sheet(isPresented: $isShowingEntryDateSheet) {
             entryDateSheet
-                .presentationDetents([.height(260)])
+                .presentationDetents([.height(520), .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.homePageBackground)
         }
         .sheet(isPresented: $isShowingEntryLocationSheet) {
             entryLocationSheet
-                .presentationDetents([.height(230)])
+                .presentationDetents([.height(560), .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.homePageBackground)
         }
@@ -1802,6 +1936,7 @@ struct CreateEntryView: View {
             artStyle: selectedArtStyle,
             location: storyLocation,
             date: storyDate,
+            datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
             isPrivate: isPrivateEntry,
             fontChoiceRawValue: selectedFontChoice.rawValue,
@@ -1826,7 +1961,7 @@ struct CreateEntryView: View {
             paperColorIndex: pendingSave.paperColorIndex
         )
 
-        return CreateEntryDraftStore.save(
+        if let savedDraftID = CreateEntryDraftStore.save(
             id: pendingSave.id,
             title: pendingSave.title,
             text: pendingSave.text,
@@ -1835,6 +1970,7 @@ struct CreateEntryView: View {
             artStyle: pendingSave.artStyle,
             location: pendingSave.location,
             date: pendingSave.date,
+            datePrecision: pendingSave.datePrecision,
             savesDraft: pendingSave.savesDraft,
             isPrivate: pendingSave.isPrivate,
             fontChoiceRawValue: pendingSave.fontChoiceRawValue,
@@ -1843,7 +1979,13 @@ struct CreateEntryView: View {
             paperStyleRawValue: pendingSave.paperStyleRawValue,
             paperColorIndex: pendingSave.paperColorIndex,
             thumbnail: draftThumbnail
-        )
+        ) {
+            EntryLocationRecentStore.add(pendingSave.location)
+            recentEntryLocations = EntryLocationRecentStore.all
+            return savedDraftID
+        }
+
+        return nil
     }
 
     private func discardDraftAndExit() {
@@ -1871,6 +2013,7 @@ struct CreateEntryView: View {
         selectedArtStyle = "Anime"
         storyLocation = ""
         storyDate = Date()
+        storyDatePrecision = .exact
         savesDraft = true
         isPrivateEntry = false
         selectedFontChoice = .sans
@@ -1919,6 +2062,7 @@ struct CreateEntryView: View {
         selectedArtStyle = draft.artStyle
         storyLocation = draft.location
         storyDate = draft.date
+        storyDatePrecision = draft.datePrecision
         savesDraft = draft.savesDraft
         isPrivateEntry = draft.isPrivate
         selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
@@ -1948,6 +2092,7 @@ struct CreateEntryView: View {
             artStyle: selectedArtStyle,
             location: storyLocation,
             date: storyDate,
+            datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
             isPrivate: isPrivateEntry,
             fontChoiceRawValue: selectedFontChoice.rawValue,
@@ -2055,11 +2200,11 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 10) {
-            addToJournalTextButton
-
             if hasStoryboardPhotos {
                 photosAttachedTab
             }
+
+            entryMetadataChips
 
             unifiedEditorToolbar
 
@@ -2069,26 +2214,6 @@ struct CreateEntryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 24)
-    }
-
-    private var addToJournalTextButton: some View {
-        Button {
-            openAddToJournalPage()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
-
-                Text("Add To Journal")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .foregroundStyle(Color.storyPurple)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 48)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Add to journal")
     }
 
     private var displayedAddToJournalTitle: String? {
@@ -2172,6 +2297,70 @@ struct CreateEntryView: View {
         return "\(count) Photo\(count == 1 ? "" : "s") Attached"
     }
 
+    private var entryMetadataChips: some View {
+        HStack(spacing: 8) {
+            entryMetadataTextButton(title: entryDateMetadataText, systemName: "calendar") {
+                openEntryDateSheet()
+            }
+
+            Text("•")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.storyInk.opacity(0.28))
+
+            entryMetadataTextButton(
+                title: entryPlaceMetadataText,
+                systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill"
+            ) {
+                openEntryLocationSheet()
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 24)
+    }
+
+    private var entryDateMetadataText: String {
+        switch storyDatePrecision {
+        case .noDate:
+            "Date"
+        case .exact:
+            storyDate.formatted(.dateTime.month(.wide).day().year().hour().minute())
+        case .dateOnly:
+            storyDate.formatted(.dateTime.month(.wide).day().year())
+        case .monthAndYear:
+            storyDate.formatted(.dateTime.month(.wide).year())
+        case .yearOnly:
+            storyDate.formatted(.dateTime.year())
+        }
+    }
+
+    private var entryPlaceMetadataText: String {
+        let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedLocation.isEmpty ? "Location" : trimmedLocation
+    }
+
+    private func entryMetadataTextButton(
+        title: String,
+        systemName: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemName)
+                    .font(.system(size: 11, weight: .medium))
+
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(Color.storyInk.opacity(0.48))
+            .frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
     private var unifiedEditorToolbar: some View {
         HStack(spacing: 0) {
             toolbarActionButton(title: "Font", systemName: "textformat") {
@@ -2182,23 +2371,16 @@ struct CreateEntryView: View {
                 handlePhotosToolbarTapped()
             }
 
-            toolbarActionButton(title: "Date", systemName: "calendar") {
-                openEntryDateSheet()
-            }
-
-            toolbarActionButton(
-                title: "Place",
-                systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill"
-            ) {
-                openEntryLocationSheet()
-            }
-
             toolbarActionButton(title: "Paper", systemName: "doc.text") {
                 openPaperStyleOptions()
             }
 
             toolbarActionButton(title: "Prompts", systemName: "text.bubble") {
                 openJournalPromptsSheet()
+            }
+
+            toolbarActionButton(title: "Add to\nJournal", systemName: "plus.square") {
+                openAddToJournalPage()
             }
         }
         .padding(.horizontal, 6)
@@ -2215,21 +2397,26 @@ struct CreateEntryView: View {
         title: String,
         systemName: String,
         isSelected: Bool = false,
+        foregroundColor: Color = Color.storyInk.opacity(0.82),
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: systemName)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.storyInk.opacity(0.74))
+                    .foregroundStyle(foregroundColor.opacity(0.92))
                     .frame(height: 22)
 
                 Text(title)
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-                    .lineLimit(1)
+                    .foregroundStyle(foregroundColor)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(0)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.7)
+                    .frame(height: 20)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(maxWidth: .infinity)
             .frame(height: 48)
             .background(isSelected ? Color.storyInk.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -3046,6 +3233,8 @@ struct CreateEntryView: View {
         timeFormatter.timeStyle = .short
 
         let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        EntryLocationRecentStore.add(trimmedLocation)
+        recentEntryLocations = EntryLocationRecentStore.all
         let trimmedRichText = currentEntryRichText()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return PrototypeEntry(
@@ -3659,13 +3848,400 @@ struct CreateEntryView: View {
     }
 
     private var entryDateSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
+            entryDateSheetHeader
+
+            Text(entryDateMetadataText)
+                .font(.system(size: 22, weight: .bold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            currentEntryDateButton
+
+            entryDatePrecisionPicker
+
+            if hasEntryDateValue {
+                entryDateFieldsCard
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+
+    private var entryDateSheetHeader: some View {
+        HStack(spacing: 10) {
             sheetHeader(title: "Entry Date", systemName: "calendar")
 
-            DatePicker("Date/time", selection: $storyDate, displayedComponents: [.date, .hourAndMinute])
-                .datePickerStyle(.compact)
+            Spacer()
+
+            if hasEntryDateValue {
+                Button("Clear") {
+                    clearEntryDate()
+                }
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear entry date")
+            }
+        }
+    }
+
+    private var entryDateFieldsCard: some View {
+        VStack(spacing: 0) {
+            if selectedEntryIncludesTime {
+                entryDateTimeRow
+            }
+
+            if entryDatePrecisionIncludesDay {
+                entryDateDividerIfNeeded(after: selectedEntryIncludesTime)
+
+                entryDateMenuRow(
+                    title: "Day",
+                    value: String(selectedEntryDay)
+                ) {
+                    entryDayMenu
+                }
+            }
+
+            if entryDatePrecisionIncludesMonth {
+                entryDateDividerIfNeeded(after: selectedEntryIncludesTime || entryDatePrecisionIncludesDay)
+
+                entryDateMenuRow(
+                    title: "Month",
+                    value: monthName(for: selectedEntryMonth)
+                ) {
+                    entryMonthMenu
+                }
+            }
+
+            entryDateDividerIfNeeded(after: selectedEntryIncludesTime || entryDatePrecisionIncludesDay || entryDatePrecisionIncludesMonth)
+
+            entryDateMenuRow(
+                title: "Year",
+                value: String(selectedEntryYear)
+            ) {
+                entryYearMenu
+            }
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
+    }
+
+    private var currentEntryDateButton: some View {
+        Button {
+            setEntryDateToCurrentDateTime()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Text("Current")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundStyle(Color.storyPurple)
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reset to current date and time")
+    }
+
+    @ViewBuilder
+    private func entryDateDividerIfNeeded(after previousRowIsVisible: Bool) -> some View {
+        if previousRowIsVisible {
+            Divider()
+                .padding(.leading, 16)
+        }
+    }
+
+    private var entryDatePrecisionPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(entryDatePrecisionOptions, id: \.self) { precision in
+                Button {
+                    setEntryDatePrecision(precision)
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: entryDatePrecisionIcon(for: precision))
+                            .font(.system(size: 15, weight: .semibold))
+
+                        Text(entryDatePrecisionLabel(for: precision))
+                            .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                    .foregroundStyle(storyDatePrecision == precision ? Color.white : Color.storyInk.opacity(0.68))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 62)
+                    .background(
+                        storyDatePrecision == precision ? Color.storyPurple : Color.white,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(
+                                storyDatePrecision == precision ? Color.storyPurple : Color.storyBorder.opacity(0.7),
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(entryDatePrecisionAccessibilityLabel(for: precision))
+            }
+        }
+    }
+
+    private func entryDateMenuRow<MenuContent: View>(
+        title: String,
+        value: String,
+        @ViewBuilder menuContent: () -> MenuContent
+    ) -> some View {
+        Menu {
+            menuContent()
+        } label: {
+            entryDateRowLabel(title: title, value: value)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func entryDateRowLabel(title: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
                 .font(.system(size: 15, weight: .semibold))
-                .tint(Color.storyPurple)
+                .foregroundStyle(Color.storyInk)
+
+            Spacer()
+
+            Text(value)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.62))
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.storyGray.opacity(0.54))
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 54)
+    }
+
+    @ViewBuilder
+    private var entryMonthMenu: some View {
+        ForEach(1...12, id: \.self) { month in
+            Button(monthName(for: month)) {
+                updateStoryDate(month: month)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var entryDayMenu: some View {
+        ForEach(entryDayOptions, id: \.self) { day in
+            Button(String(day)) {
+                updateStoryDate(day: day)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var entryYearMenu: some View {
+        ForEach(entryYearOptions, id: \.self) { year in
+            Button(String(year)) {
+                updateStoryDate(year: year)
+            }
+        }
+    }
+
+    private var entryDateTimeRow: some View {
+        HStack {
+            DatePicker(
+                "Time",
+                selection: $storyDate,
+                displayedComponents: [.hourAndMinute]
+            )
+            .datePickerStyle(.compact)
+            .font(.system(size: 15, weight: .semibold))
+            .tint(Color.storyPurple)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 54)
+    }
+
+    private var entryDatePrecisionOptions: [EntryDatePrecision] {
+        [.exact, .dateOnly, .monthAndYear, .yearOnly]
+    }
+
+    private var selectedEntryMonth: Int {
+        Calendar.current.component(.month, from: storyDate)
+    }
+
+    private var selectedEntryDay: Int {
+        Calendar.current.component(.day, from: storyDate)
+    }
+
+    private var selectedEntryYear: Int {
+        Calendar.current.component(.year, from: storyDate)
+    }
+
+    private var selectedEntryIncludesTime: Bool {
+        storyDatePrecision == .exact
+    }
+
+    private var hasEntryDateValue: Bool {
+        storyDatePrecision != .noDate
+    }
+
+    private var entryDatePrecisionIncludesMonth: Bool {
+        storyDatePrecision == .monthAndYear || storyDatePrecision == .dateOnly || storyDatePrecision == .exact
+    }
+
+    private var entryDatePrecisionIncludesDay: Bool {
+        storyDatePrecision == .dateOnly || storyDatePrecision == .exact
+    }
+
+    private var entryYearOptions: [Int] {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        return Array(stride(from: currentYear + 1, through: currentYear - 125, by: -1))
+    }
+
+    private var entryDayOptions: [Int] {
+        let calendar = Calendar.current
+        var components = DateComponents()
+        components.year = selectedEntryYear
+        components.month = selectedEntryMonth
+        components.day = 1
+
+        guard
+            let date = calendar.date(from: components),
+            let range = calendar.range(of: .day, in: .month, for: date)
+        else {
+            return Array(1...31)
+        }
+
+        return Array(range)
+    }
+
+    private func monthName(for month: Int) -> String {
+        let formatter = DateFormatter()
+        return formatter.monthSymbols[min(max(month - 1, 0), 11)]
+    }
+
+    private func entryDatePrecisionLabel(for precision: EntryDatePrecision) -> String {
+        switch precision {
+        case .yearOnly:
+            "Year"
+        case .monthAndYear:
+            "Month"
+        case .dateOnly:
+            "Day"
+        case .exact:
+            "Time"
+        case .noDate:
+            "Date"
+        }
+    }
+
+    private func entryDatePrecisionAccessibilityLabel(for precision: EntryDatePrecision) -> String {
+        switch precision {
+        case .yearOnly:
+            "Year only"
+        case .monthAndYear:
+            "Year and month"
+        case .dateOnly:
+            "Year, month, and day"
+        case .exact:
+            "Year, month, day, and time"
+        case .noDate:
+            "Date"
+        }
+    }
+
+    private func entryDatePrecisionIcon(for precision: EntryDatePrecision) -> String {
+        switch precision {
+        case .yearOnly:
+            "calendar"
+        case .monthAndYear:
+            "calendar.badge.plus"
+        case .dateOnly:
+            "calendar.circle"
+        case .exact:
+            "clock"
+        case .noDate:
+            "calendar"
+        }
+    }
+
+    private func setEntryDatePrecision(_ precision: EntryDatePrecision) {
+        ensureEntryDateDefaultsToNow()
+        storyDatePrecision = precision == .noDate ? .exact : precision
+        updateStoryDate()
+    }
+
+    private func setEntryDateToCurrentDateTime() {
+        storyDate = Date()
+        storyDatePrecision = .exact
+    }
+
+    private func clearEntryDate() {
+        storyDatePrecision = .noDate
+        isShowingEntryDateSheet = false
+    }
+
+    private func ensureEntryDateDefaultsToNow() {
+        guard storyDatePrecision == .noDate else {
+            return
+        }
+
+        storyDate = Date()
+        storyDatePrecision = .exact
+    }
+
+    private func updateStoryDate(year: Int? = nil, month: Int? = nil, day: Int? = nil) {
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: storyDate)
+        components.year = year ?? components.year
+        components.month = month ?? components.month
+        components.day = day ?? components.day
+
+        let firstOfMonth = DateComponents(year: components.year, month: components.month, day: 1)
+        if let date = calendar.date(from: firstOfMonth),
+           let dayRange = calendar.range(of: .day, in: .month, for: date),
+           let day = components.day {
+            components.day = min(day, dayRange.upperBound - 1)
+        }
+
+        storyDate = calendar.date(from: components) ?? storyDate
+    }
+
+    private var entryLocationSheet: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                entryLocationSheetHeader
+
+                HStack(spacing: 12) {
+                    Image(systemName: "location")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
+                        .frame(width: 22)
+
+                    TextField("Add a location", text: $storyLocation)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.storyInk)
+                        .tint(Color.storyPurple)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: storyLocation) { newValue in
+                            locationSearch.updateQuery(newValue)
+                        }
+
+                }
                 .padding(.horizontal, 14)
                 .frame(height: 54)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -3674,52 +4250,128 @@ struct CreateEntryView: View {
                         .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
                 )
 
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 20)
-    }
+                if !recentEntryLocations.isEmpty {
+                    EntryLocationRecentsList(
+                        locations: recentEntryLocations,
+                        accentColor: Color.storyPurple,
+                        onSelect: { location in
+                            storyLocation = location
+                            locationSearch.clear()
+                            isShowingEntryLocationSheet = false
+                        },
+                        onClear: {
+                            EntryLocationRecentStore.clear()
+                            recentEntryLocations = []
+                        }
+                    )
+                }
 
-    private var entryLocationSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            sheetHeader(title: "Entry Location", systemName: "location")
+                if locationSearch.isSearching {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.74)
 
-            HStack(spacing: 12) {
-                Image(systemName: "location")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.storyPurple)
-                    .frame(width: 22)
-
-                TextField("Add a location", text: $storyLocation)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.storyInk)
-                    .tint(Color.storyPurple)
-                    .textInputAutocapitalization(.words)
-
-                if !storyLocation.isEmpty {
-                    Button {
-                        storyLocation = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Color.storyGray.opacity(0.48))
+                        Text("Finding places...")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.homeMutedText)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear location")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+                }
+
+                if !locationSearch.suggestions.isEmpty {
+                    locationSuggestionList
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 54)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-            )
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 18)
+            .padding(.top, 28)
+            .padding(.bottom, 28)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 20)
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear {
+            recentEntryLocations = EntryLocationRecentStore.all
+            locationSearch.updateQuery(storyLocation)
+        }
+        .onDisappear {
+            locationSearch.clear()
+        }
+    }
+
+    private var entryLocationSheetHeader: some View {
+        HStack(spacing: 10) {
+            sheetHeader(title: "Entry Location", systemName: "location")
+
+            Spacer()
+
+            Button {
+                clearEntryLocation()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.storyGray.opacity(storyLocation.isEmpty ? 0.3 : 0.58))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(storyLocation.isEmpty)
+            .accessibilityLabel("Clear entry location")
+        }
+    }
+
+    private func clearEntryLocation() {
+        storyLocation = ""
+        locationSearch.clear()
+    }
+
+    private var locationSuggestionList: some View {
+        VStack(spacing: 0) {
+            ForEach(locationSearch.suggestions) { suggestion in
+                Button {
+                    storyLocation = suggestion.displayText
+                    EntryLocationRecentStore.add(storyLocation)
+                    recentEntryLocations = EntryLocationRecentStore.all
+                    locationSearch.clear()
+                    isShowingEntryLocationSheet = false
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(suggestion.title)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+                                .lineLimit(1)
+
+                            if !suggestion.subtitle.isEmpty {
+                                Text(suggestion.subtitle)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Color.homeMutedText)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if suggestion.id != locationSearch.suggestions.last?.id {
+                    Divider()
+                        .padding(.leading, 48)
+                }
+            }
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+        )
     }
 
     private func sheetHeader(title: String, systemName: String) -> some View {
