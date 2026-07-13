@@ -13,6 +13,8 @@ enum NotebookTextFormattingCommand: Equatable {
     case underline
     case strikethrough
     case bulletList
+    case indent
+    case outdent
     case textStyle(NotebookTextRunStyle)
 }
 
@@ -30,17 +32,17 @@ enum NotebookTextRunStyle: String, Codable, Equatable, CaseIterable {
         case .body:
             1
         case .heading1:
-            1.55
+            1.45
         case .heading2:
-            1.42
+            1.34
         case .heading3:
-            1.30
+            1.23
         case .heading4:
-            1.20
+            1.14
         case .heading5:
-            1.12
+            1.08
         case .heading6:
-            1.06
+            1.02
         }
     }
 
@@ -253,7 +255,8 @@ struct NotebookTextSelectionState: Equatable {
 
 enum NotebookMetrics {
     static let ruleSpacing: CGFloat = 35
-    static let bodyFontSize: CGFloat = 15
+    static let naturalBodyLineSpacing: CGFloat = 5
+    static let bodyFontSize: CGFloat = 16
     static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
     static let marginLeading: CGFloat = 54
     static let textLeadingInset: CGFloat = 5
@@ -280,10 +283,16 @@ enum NotebookMetrics {
     }
 
     static func typingParagraphStyle(alignment: NSTextAlignment) -> NSParagraphStyle {
+        typingParagraphStyle(alignment: alignment, lineHeight: ruleSpacing)
+    }
+
+    static func typingParagraphStyle(alignment: NSTextAlignment, lineHeight: CGFloat?) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.minimumLineHeight = ruleSpacing
-        style.maximumLineHeight = ruleSpacing
-        style.lineSpacing = 0
+        if let lineHeight {
+            style.minimumLineHeight = lineHeight
+            style.maximumLineHeight = lineHeight
+        }
+        style.lineSpacing = lineHeight == nil ? naturalBodyLineSpacing : 0
         style.paragraphSpacing = 0
         style.lineBreakMode = .byWordWrapping
         style.alignment = alignment
@@ -396,7 +405,7 @@ enum NotebookMetrics {
         var attributes: [NSAttributedString.Key: Any] = [
             .font: uiBodyFont(for: style, isBold: isBold, isItalic: isItalic),
             .foregroundColor: usesTexturedPaperEffect ? UIColor.clear : style.uiColor,
-            .paragraphStyle: typingParagraphStyle
+            .paragraphStyle: typingParagraphStyle(alignment: .natural, lineHeight: style.bodyLineHeight)
         ]
 
         if isBold {
@@ -445,22 +454,19 @@ enum NotebookMetrics {
     }
 
     /// Vertical inset so placeholder text matches the text view's first-line position.
-    static var firstLineTextTopInset: CGFloat {
-        max(0, (ruleSpacing - bodyFont.lineHeight) / 2 + 8)
-    }
+    static func firstLineTextTopInset(for style: NotebookTextStyle) -> CGFloat {
+        guard let bodyLineHeight = style.bodyLineHeight else {
+            return 0
+        }
 
-    static var bodyCaretHeight: CGFloat {
-        min(ruleSpacing, titleFont.lineHeight + 4)
-    }
-
-    static var bodyCaretYOffset: CGFloat {
-        (bodyCaretHeight - bodyFont.lineHeight) / 2 + 6
+        return max(0, (bodyLineHeight - uiBodyFont(for: style).lineHeight) / 2 + 8)
     }
 
     static var titleLineTextTopInset: CGFloat {
         max(0, (ruleSpacing - titleFont.lineHeight) / 2)
     }
 
+    static let titleBodySpacing: CGFloat = 10
     static let contentTopPadding: CGFloat = 14
     static let contentBottomPadding: CGFloat = 18
 
@@ -468,8 +474,8 @@ enum NotebookMetrics {
         contentTopPadding + ruleSpacing
     }
 
-    static func bodyAreaMinHeight(forPageHeight pageHeight: CGFloat) -> CGFloat {
-        let availableHeight = pageHeight - contentTopPadding - contentBottomPadding - ruleSpacing
+    static func bodyAreaMinHeight(forPageHeight pageHeight: CGFloat, titleBodySpacing: CGFloat = 0) -> CGFloat {
+        let availableHeight = pageHeight - contentTopPadding - contentBottomPadding - ruleSpacing - titleBodySpacing
         return max(ruleSpacing * 3, availableHeight)
     }
 
@@ -496,6 +502,7 @@ struct NotebookTextStyle: Equatable {
     var customFontSizeScale: CGFloat = 1
     var bodyFontWeight: Font.Weight = .regular
     var bodyFontSize: CGFloat = NotebookMetrics.bodyFontSize
+    var bodyLineHeight: CGFloat? = NotebookMetrics.ruleSpacing
     var color: Color = Color(NotebookMetrics.bodyTextUIColor)
     var uiColor: UIColor = NotebookMetrics.bodyTextUIColor
 
@@ -557,6 +564,7 @@ enum TexturedPaperTextEffect {
 
 final class LinedTextView: UITextView {
     private static let bulletPrefix = "• "
+    private static let indentPrefix = "    "
 
     var ruleSpacing: CGFloat = NotebookMetrics.ruleSpacing
     var notebookTextStyle: NotebookTextStyle = .default {
@@ -706,13 +714,36 @@ final class LinedTextView: UITextView {
 
     override func caretRect(for position: UITextPosition) -> CGRect {
         let rect = super.caretRect(for: position)
-        let height = NotebookMetrics.bodyCaretHeight
+        guard notebookTextStyle.bodyLineHeight == NotebookMetrics.ruleSpacing,
+              let bodyLineHeight = notebookTextStyle.bodyLineHeight else {
+            return rect
+        }
+
+        let font = activeCaretFont()
+        let lineHeight = max(bodyLineHeight, font.lineHeight)
+        let height = min(lineHeight, max(font.lineHeight + 6, lineHeight - 1))
+        let lineCenteredY = rect.minY + max(0, (lineHeight - height) / 2)
+        let textCenteredY = lineCenteredY + max(0, (height - font.lineHeight) / 2)
 
         return CGRect(
             x: rect.minX,
-            y: rect.minY + NotebookMetrics.bodyCaretYOffset,
+            y: textCenteredY,
             width: rect.width,
             height: height
+        )
+    }
+
+    private func activeCaretFont() -> UIFont {
+        if let typingFont = typingAttributes[.font] as? UIFont {
+            return typingFont
+        }
+
+        var adjustedStyle = notebookTextStyle
+        adjustedStyle.bodyFontSize = notebookTextStyle.bodyFontSize * typingTextRunStyle.fontScale
+        return NotebookMetrics.uiBodyFont(
+            for: adjustedStyle,
+            isBold: isTypingBold || typingTextRunStyle.usesHeadingWeight,
+            isItalic: isTypingItalic
         )
     }
 
@@ -768,6 +799,16 @@ final class LinedTextView: UITextView {
             return
         }
 
+        if command == .indent {
+            applyIndentToSelectedLines()
+            return
+        }
+
+        if command == .outdent {
+            applyOutdentToSelectedLines()
+            return
+        }
+
         if case .textStyle(let textRunStyle) = command {
             applyTextRunStyleToCurrentParagraph(textRunStyle)
             return
@@ -809,6 +850,8 @@ final class LinedTextView: UITextView {
         case .strikethrough:
             mutableText.toggleIntegerStyle(.strikethroughStyle, in: range)
         case .bulletList:
+            break
+        case .indent, .outdent:
             break
         case .textStyle:
             break
@@ -954,6 +997,167 @@ final class LinedTextView: UITextView {
         setNeedsDisplay()
     }
 
+    private func applyIndentToSelectedLines() {
+        let range = selectedRange
+        guard range.location != NSNotFound else {
+            return
+        }
+
+        let plain = text ?? ""
+        let nsPlain = plain as NSString
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        let paragraphRange = selectedParagraphRange(in: nsPlain, selectedRange: range)
+        let lineStarts = selectedLineStartLocations(in: nsPlain, paragraphRange: paragraphRange)
+        guard !lineStarts.isEmpty else {
+            return
+        }
+
+        let attributes = currentTypingAttributes()
+        for lineStart in lineStarts.reversed() {
+            mutableText.insert(
+                NSAttributedString(string: Self.indentPrefix, attributes: attributes),
+                at: lineStart
+            )
+        }
+
+        attributedText = mutableText
+        updateStoredRichTextDocument()
+        selectedRange = adjustedRangeAfterInsertions(
+            at: lineStarts,
+            insertedLength: Self.indentPrefix.count,
+            originalRange: range
+        )
+        typingAttributes = attributes
+        notifyTextDidChange()
+        setNeedsDisplay()
+    }
+
+    private func applyOutdentToSelectedLines() {
+        let range = selectedRange
+        guard range.location != NSNotFound else {
+            return
+        }
+
+        let plain = text ?? ""
+        let nsPlain = plain as NSString
+        let mutableText = NSMutableAttributedString(attributedString: attributedText)
+        let paragraphRange = selectedParagraphRange(in: nsPlain, selectedRange: range)
+        let deletionRanges = selectedLineStartLocations(in: nsPlain, paragraphRange: paragraphRange)
+            .compactMap { outdentDeletionRange(in: nsPlain, lineStart: $0) }
+        guard !deletionRanges.isEmpty else {
+            return
+        }
+
+        for deletionRange in deletionRanges.reversed() {
+            mutableText.deleteCharacters(in: deletionRange)
+        }
+
+        let attributes = currentTypingAttributes()
+        attributedText = mutableText
+        updateStoredRichTextDocument()
+        selectedRange = adjustedRangeAfterDeletions(deletionRanges, originalRange: range)
+        typingAttributes = attributes
+        notifyTextDidChange()
+        setNeedsDisplay()
+    }
+
+    private func selectedLineStartLocations(in plainText: NSString, paragraphRange: NSRange) -> [Int] {
+        let upperBound = min(paragraphRange.location + paragraphRange.length, plainText.length)
+        guard paragraphRange.location <= upperBound else {
+            return []
+        }
+
+        var locations: [Int] = []
+        var location = paragraphRange.location
+
+        repeat {
+            locations.append(location)
+            guard location < upperBound else {
+                break
+            }
+
+            let lineRange = plainText.lineRange(for: NSRange(location: location, length: 0))
+            let nextLocation = lineRange.location + lineRange.length
+            guard nextLocation > location else {
+                break
+            }
+
+            location = nextLocation
+        } while location < upperBound
+
+        return locations
+    }
+
+    private func outdentDeletionRange(in plainText: NSString, lineStart: Int) -> NSRange? {
+        guard lineStart < plainText.length else {
+            return nil
+        }
+
+        let lineRange = plainText.lineRange(for: NSRange(location: lineStart, length: 0))
+        let lineEnd = min(lineRange.location + lineRange.length, plainText.length)
+        guard lineStart < lineEnd else {
+            return nil
+        }
+
+        let firstCharacter = plainText.character(at: lineStart)
+        if firstCharacter == 9 {
+            return NSRange(location: lineStart, length: 1)
+        }
+
+        var spacesToRemove = 0
+        while spacesToRemove < Self.indentPrefix.count,
+              lineStart + spacesToRemove < lineEnd,
+              plainText.character(at: lineStart + spacesToRemove) == 32 {
+            spacesToRemove += 1
+        }
+
+        return spacesToRemove > 0 ? NSRange(location: lineStart, length: spacesToRemove) : nil
+    }
+
+    private func adjustedRangeAfterInsertions(
+        at insertionLocations: [Int],
+        insertedLength: Int,
+        originalRange: NSRange
+    ) -> NSRange {
+        let originalStart = originalRange.location
+        let originalEnd = originalRange.location + originalRange.length
+        let adjustedStart = originalStart + insertionLocations.filter { $0 <= originalStart }.count * insertedLength
+        let adjustedEnd = originalEnd + insertionLocations.filter { $0 < originalEnd || originalRange.length == 0 && $0 <= originalEnd }.count * insertedLength
+        return NSRange(location: adjustedStart, length: max(0, adjustedEnd - adjustedStart))
+    }
+
+    private func adjustedRangeAfterDeletions(
+        _ deletionRanges: [NSRange],
+        originalRange: NSRange
+    ) -> NSRange {
+        let originalStart = originalRange.location
+        let originalEnd = originalRange.location + originalRange.length
+        let adjustedStart = adjustedPositionAfterDeletions(originalStart, deletionRanges: deletionRanges)
+        let adjustedEnd = adjustedPositionAfterDeletions(originalEnd, deletionRanges: deletionRanges)
+        return NSRange(location: adjustedStart, length: max(0, adjustedEnd - adjustedStart))
+    }
+
+    private func adjustedPositionAfterDeletions(
+        _ position: Int,
+        deletionRanges: [NSRange]
+    ) -> Int {
+        var deletedBeforePosition = 0
+
+        for deletionRange in deletionRanges {
+            let deletionEnd = deletionRange.location + deletionRange.length
+            if position >= deletionEnd {
+                deletedBeforePosition += deletionRange.length
+                continue
+            }
+
+            if position > deletionRange.location {
+                return max(0, deletionRange.location - deletedBeforePosition)
+            }
+        }
+
+        return max(0, position - deletedBeforePosition)
+    }
+
     func handleReturnKey(in range: NSRange) -> Bool {
         guard range.location != NSNotFound else {
             return true
@@ -1028,7 +1232,7 @@ final class LinedTextView: UITextView {
             isTypingBold.toggle()
         case .italic:
             isTypingItalic.toggle()
-        case .underline, .strikethrough, .bulletList, .textStyle:
+        case .underline, .strikethrough, .bulletList, .indent, .outdent, .textStyle:
             return
         }
 
@@ -1895,13 +2099,18 @@ struct NotebookEditorContent: View {
             return NotebookMetrics.minimumBodyHeight
         }
 
-        return NotebookMetrics.bodyAreaMinHeight(forPageHeight: pageHeight)
+        return NotebookMetrics.bodyAreaMinHeight(forPageHeight: pageHeight, titleBodySpacing: titleBodySpacing)
+    }
+
+    private var titleBodySpacing: CGFloat {
+        textStyle.bodyLineHeight == nil ? NotebookMetrics.titleBodySpacing : 0
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             titleRow
             bodyEditor
+                .padding(.top, titleBodySpacing)
         }
         .padding(.leading, leadingContentPadding)
         .padding(.trailing, 18)
@@ -1992,7 +2201,7 @@ struct NotebookEditorContent: View {
                     .font(NotebookMetrics.bodyPlaceholderFont(for: textStyle))
                     .foregroundStyle(Color.storyGray.opacity(0.46))
                     .padding(.leading, leadingTextPadding)
-                    .padding(.top, NotebookMetrics.firstLineTextTopInset)
+                    .padding(.top, NotebookMetrics.firstLineTextTopInset(for: textStyle))
                     .allowsHitTesting(false)
             }
         }

@@ -374,6 +374,25 @@ private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
         }
     }
 
+    var primaryToolbarTitle: String {
+        switch self {
+        case .body:
+            "Body"
+        case .heading1:
+            "Header 1"
+        case .heading2:
+            "Header 2"
+        case .heading3:
+            "Header 3"
+        case .heading4:
+            "Header 4"
+        case .heading5:
+            "Header 5"
+        case .heading6:
+            "Header 6"
+        }
+    }
+
     var textRunStyle: NotebookTextRunStyle {
         switch self {
         case .body:
@@ -396,19 +415,19 @@ private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
     var sampleSize: CGFloat {
         switch self {
         case .body:
-            15
-        case .heading1:
-            22
-        case .heading2:
-            19
-        case .heading3:
-            17
-        case .heading4:
             16
+        case .heading1:
+            23
+        case .heading2:
+            21
+        case .heading3:
+            20
+        case .heading4:
+            18
         case .heading5:
-            15
+            17
         case .heading6:
-            14
+            16
         }
     }
 }
@@ -678,6 +697,10 @@ fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
             0
         }
     }
+
+    var bodyLineHeight: CGFloat? {
+        showsRuledLines ? NotebookMetrics.ruleSpacing : nil
+    }
 }
 
 private struct CreateColorOption {
@@ -711,7 +734,13 @@ private enum CreateFormattingPalette {
 }
 
 private enum CreateEntryTextSize {
-    static let defaultSliderValue: Double = 0.125
+    static let defaultSliderValue: Double = 0.25
+    static let minimumFontSize: CGFloat = 14
+    static let fontSizeRange: CGFloat = 8
+
+    static func fontSize(for sliderValue: Double) -> CGFloat {
+        minimumFontSize + CGFloat(sliderValue) * fontSizeRange
+    }
 }
 
 @MainActor
@@ -751,7 +780,7 @@ enum DraftThumbnailRenderer {
             fontChoice: fontChoice,
             textColor: textColor,
             textUIColor: CreateFormattingPalette.textColors[normalizedTextColorIndex].uiColor,
-            textSize: CGFloat(14 + normalizedTextSize * 8),
+            textSize: CreateEntryTextSize.fontSize(for: normalizedTextSize),
             paperStyle: paperStyle,
             paperColor: paperStyle.showsPaperColorOptions ? paperColor : .homePageBackground,
             isBold: isBold,
@@ -817,6 +846,7 @@ private struct DraftPageThumbnail: View {
             customFontSizeScale: fontChoice.bodySizeScale,
             bodyFontWeight: fontChoice.bodyWeight,
             bodyFontSize: min(textSize, 19),
+            bodyLineHeight: paperStyle.bodyLineHeight,
             color: textColor,
             uiColor: textUIColor
         )
@@ -1100,7 +1130,8 @@ struct CreateEntryView: View {
             customFontUsesVariableWeight: selectedFontChoice.usesVariableWeight,
             customFontSizeScale: selectedFontChoice.bodySizeScale,
             bodyFontWeight: selectedFontChoice.bodyWeight,
-            bodyFontSize: CGFloat(14 + previewTextSize * 8),
+            bodyFontSize: CreateEntryTextSize.fontSize(for: previewTextSize),
+            bodyLineHeight: selectedPaperStyleChoice.bodyLineHeight,
             color: textColor.color,
             uiColor: textColor.uiColor
         )
@@ -2273,7 +2304,7 @@ struct CreateEntryView: View {
 
     private var entryDraftKeyboardAccessory: some View {
         Group {
-            if isKeyboardFormattingToolbarVisible || activeKeyboardFormattingMode != nil {
+            if isKeyboardFormattingToolbarVisible {
                 formattingKeyboardToolbar
             } else {
                 normalKeyboardToolbar
@@ -2308,18 +2339,24 @@ struct CreateEntryView: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 1) {
-                keyboardFormattingButton(
-                    title: "Aa",
-                    accessibilityLabel: "Font options",
-                    isSelected: false
-                ) {
-                    showKeyboardFormattingToolbar()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 1) {
+                    keyboardFormattingButton(
+                        title: "Aa",
+                        accessibilityLabel: "Font options",
+                        isSelected: false
+                    ) {
+                        showKeyboardFormattingToolbar()
+                    }
+
+                    keyboardToolbarDivider
+
+                    keyboardPrimaryTextTypeButton
+
+                    keyboardToolbarDivider
+
+                    keyboardInlineStyleButtons
                 }
-
-                keyboardToolbarDivider
-
-                keyboardInlineStyleButtons
             }
 
             Spacer(minLength: 0)
@@ -2354,13 +2391,8 @@ struct CreateEntryView: View {
                     keyboardPanelChip(
                         title: selectedFontChoice.title,
                         mode: .font,
-                        width: 112
-                    )
-
-                    keyboardPanelChip(
-                        title: selectedKeyboardTextType.title,
-                        mode: .textType,
-                        width: 104
+                        width: 112,
+                        font: selectedFontChoice.swiftUIFont(size: 14, weight: .bold)
                     )
 
                     keyboardTextSizeButton
@@ -2375,7 +2407,7 @@ struct CreateEntryView: View {
     }
 
     private var keyboardInlineStyleButtons: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: 4) {
             keyboardFormattingButton(
                 title: "B",
                 accessibilityLabel: "Bold",
@@ -2418,7 +2450,51 @@ struct CreateEntryView: View {
             ) {
                 sendTextFormattingCommand(.bulletList)
             }
+
+            keyboardToolButton(
+                systemName: "increase.indent",
+                accessibilityLabel: "Indent",
+                isSelected: false
+            ) {
+                sendTextFormattingCommand(.indent)
+            }
+
+            keyboardToolButton(
+                systemName: "decrease.indent",
+                accessibilityLabel: "Outdent",
+                isSelected: false
+            ) {
+                sendTextFormattingCommand(.outdent)
+            }
         }
+    }
+
+    private var keyboardPrimaryTextTypeButton: some View {
+        Button {
+            showPrimaryKeyboardTextTypePanel()
+        } label: {
+            HStack(spacing: 7) {
+                Text("A")
+                    .font(.system(size: 16, weight: .bold, design: .serif))
+
+                Text(selectedKeyboardTextType.primaryToolbarTitle)
+                    .font(.system(size: 14, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .foregroundStyle(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.72) : Color.storyPurple)
+            .frame(width: 106, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.06) : Color.storyPurple.opacity(0.12))
+            )
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Headings")
+        .accessibilityValue(selectedKeyboardTextType.title)
+        .accessibilityAddTraits(selectedKeyboardTextType == .body ? [] : .isSelected)
     }
 
     private func updateEditorSelectionState(_ state: NotebookTextSelectionState) {
@@ -2438,7 +2514,7 @@ struct CreateEntryView: View {
             return editorSelectionState.hasSelection && editorSelectionState.isUnderlined
         case .strikethrough:
             return editorSelectionState.hasSelection && editorSelectionState.isStrikethrough
-        case .bulletList, .textStyle:
+        case .bulletList, .indent, .outdent, .textStyle:
             return false
         }
     }
@@ -2463,6 +2539,12 @@ struct CreateEntryView: View {
         activeKeyboardFormattingMode = mode
     }
 
+    private func showPrimaryKeyboardTextTypePanel() {
+        isTitleFocused = false
+        isKeyboardFormattingToolbarVisible = false
+        activeKeyboardFormattingMode = .textType
+    }
+
     private func closeKeyboardFormattingToolbar() {
         isKeyboardFormattingToolbarVisible = false
         activeKeyboardFormattingMode = nil
@@ -2476,13 +2558,14 @@ struct CreateEntryView: View {
     private func keyboardPanelChip(
         title: String,
         mode: CreateKeyboardFormattingMode,
-        width: CGFloat
+        width: CGFloat,
+        font: Font = .system(size: 14, weight: .bold)
     ) -> some View {
         Button {
             showKeyboardFormattingPanel(mode)
         } label: {
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(font)
                 .foregroundStyle(Color.storyInk.opacity(0.9))
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
@@ -2522,11 +2605,30 @@ struct CreateEntryView: View {
 
     private var keyboardColorCircleChip: some View {
         Circle()
-            .fill(selectedKeyboardTextColor)
+            .fill(
+                AngularGradient(
+                    colors: [
+                        .red,
+                        .orange,
+                        .yellow,
+                        .green,
+                        .cyan,
+                        .blue,
+                        .purple,
+                        .pink,
+                        .red
+                    ],
+                    center: .center
+                )
+            )
             .frame(width: 21, height: 21)
             .overlay(
                 Circle()
-                    .stroke(Color.storyInk.opacity(0.16), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.82), lineWidth: 1)
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color.storyInk.opacity(0.12), lineWidth: 0.7)
             )
             .frame(width: 39, height: 39)
             .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -2679,7 +2781,7 @@ struct CreateEntryView: View {
             }
 
             Text("The little story found its voice.")
-                .font(selectedFontChoice.swiftUIBodyFont(size: CGFloat(14 + previewTextSize * 8)))
+                .font(selectedFontChoice.swiftUIBodyFont(size: CreateEntryTextSize.fontSize(for: previewTextSize)))
                 .foregroundStyle(selectedKeyboardTextColor)
                 .lineLimit(2)
                 .minimumScaleFactor(0.78)
@@ -4992,7 +5094,7 @@ private struct CreateFormattingSheet: View {
     }
 
     private var selectedPreviewFontSize: CGFloat {
-        CGFloat(14 + previewTextSize * 8)
+        CreateEntryTextSize.fontSize(for: previewTextSize)
     }
 
     var body: some View {
