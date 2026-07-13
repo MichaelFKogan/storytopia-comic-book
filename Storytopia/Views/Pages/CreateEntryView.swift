@@ -304,11 +304,15 @@ struct EntryLocationRecentsList: View {
 
                 Spacer()
 
-                Button("Clear") {
+                Button {
                     onClear()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.storyGray.opacity(0.58))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(accentColor)
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear recent locations")
             }
@@ -1210,6 +1214,8 @@ struct CreateEntryView: View {
     @StateObject private var locationSearch = EntryLocationSearchModel()
     @State private var storyDate = Date()
     @State private var storyDatePrecision: EntryDatePrecision = .exact
+    @State private var didEditEntryDate = false
+    @State private var didEditEntryLocation = false
     @State private var savesDraft = true
     @State private var isPrivateEntry = false
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
@@ -1431,7 +1437,7 @@ struct CreateEntryView: View {
                 onCamera: presentCameraFromPhotoSourceSheet,
                 onPhotoLibrary: presentPhotoLibraryFromPhotoSourceSheet
             )
-            .presentationDetents([.height(210)])
+            .presentationDetents([.height(280), .medium])
             .presentationDragIndicator(.visible)
             .presentationBackground(Color.homePageBackground)
         }
@@ -1585,7 +1591,8 @@ struct CreateEntryView: View {
             if !isFullScreenEditorVisible {
                 createToolbarItems(
                     title: presentation.editorToolbarTitle,
-                    showsCloseButton: true
+                    showsCloseButton: true,
+                    showsEntryDateButton: true
                 )
             }
         }
@@ -1734,7 +1741,11 @@ struct CreateEntryView: View {
     }
 
     @ToolbarContentBuilder
-    private func createToolbarItems(title: String, showsCloseButton: Bool) -> some ToolbarContent {
+    private func createToolbarItems(
+        title: String,
+        showsCloseButton: Bool,
+        showsEntryDateButton: Bool = false
+    ) -> some ToolbarContent {
         if showsCloseButton {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -1753,9 +1764,30 @@ struct CreateEntryView: View {
         }
 
         ToolbarItem(placement: .principal) {
-            Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .serif))
-                .foregroundColor(Color.storyGray.opacity(0.46))
+            if showsEntryDateButton {
+                Button {
+                    openEntryDateSheet()
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(entryDateMetadataText)
+                            .font(selectedFontChoice.swiftUIBodyFont(size: 15))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(Color.storyInk.opacity(0.62))
+                    .frame(maxWidth: 210)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Entry date, \(entryDateMetadataText)")
+            } else {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .foregroundColor(Color.storyGray.opacity(0.46))
+            }
         }
 
         if showsToolbarSaveButton {
@@ -1803,7 +1835,15 @@ struct CreateEntryView: View {
     }
 
     private var hasDraftContent: Bool {
-        !storyTitle.isEmpty || !entryText.isEmpty || storyboardPhotos.contains { $0 != nil }
+        !storyTitle.isEmpty
+            || !entryText.isEmpty
+            || storyboardPhotos.contains { $0 != nil }
+            || hasUnsavedEntryMetadata
+    }
+
+    private var hasUnsavedEntryMetadata: Bool {
+        didEditEntryDate
+            || !storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasUnsavedDraftChanges: Bool {
@@ -2014,6 +2054,8 @@ struct CreateEntryView: View {
         storyLocation = ""
         storyDate = Date()
         storyDatePrecision = .exact
+        didEditEntryDate = false
+        didEditEntryLocation = false
         savesDraft = true
         isPrivateEntry = false
         selectedFontChoice = .sans
@@ -2063,6 +2105,8 @@ struct CreateEntryView: View {
         storyLocation = draft.location
         storyDate = draft.date
         storyDatePrecision = draft.datePrecision
+        didEditEntryDate = false
+        didEditEntryLocation = false
         savesDraft = draft.savesDraft
         isPrivateEntry = draft.isPrivate
         selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
@@ -2200,11 +2244,11 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 10) {
+            entryMetadataChips
+
             if hasStoryboardPhotos {
                 photosAttachedTab
             }
-
-            entryMetadataChips
 
             unifiedEditorToolbar
 
@@ -2257,31 +2301,43 @@ struct CreateEntryView: View {
                     isPhotoPanelExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.74))
-                        .frame(width: 28, height: 28)
-                        .background(Color.storyInk.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                if isPhotoPanelExpanded {
+                    HStack {
+                        Spacer()
 
-                    Text(photosAttachedTitle)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.78))
-                        .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.64))
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .contentShape(Rectangle())
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.74))
+                            .frame(width: 28, height: 28)
+                            .background(Color.storyInk.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-                    Spacer(minLength: 10)
+                        Text(photosAttachedTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.78))
+                            .lineLimit(1)
 
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.64))
-                        .rotationEffect(.degrees(isPhotoPanelExpanded ? 90 : 0))
+                        Spacer(minLength: 10)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.64))
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 46)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 46)
-                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(photosAttachedTitle)
+            .accessibilityLabel(isPhotoPanelExpanded ? "Collapse attached photos" : photosAttachedTitle)
         }
         .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
@@ -2299,8 +2355,11 @@ struct CreateEntryView: View {
 
     private var entryMetadataChips: some View {
         HStack(spacing: 8) {
-            entryMetadataTextButton(title: entryDateMetadataText, systemName: "calendar") {
-                openEntryDateSheet()
+            entryMetadataTextButton(
+                title: displayedAddToJournalTitle ?? "Journal",
+                systemName: displayedAddToJournalTitle == nil ? "book.closed" : "book.closed.fill"
+            ) {
+                openAddToJournalPage()
             }
 
             Text("•")
@@ -2363,12 +2422,12 @@ struct CreateEntryView: View {
 
     private var unifiedEditorToolbar: some View {
         HStack(spacing: 0) {
-            toolbarActionButton(title: "Font", systemName: "textformat") {
-                openFontOptions()
-            }
-
             toolbarActionButton(title: "Photos", systemName: "photo.on.rectangle.angled", isSelected: isPhotoPanelExpanded) {
                 handlePhotosToolbarTapped()
+            }
+
+            toolbarActionButton(title: "Font", systemName: "textformat") {
+                openFontOptions()
             }
 
             toolbarActionButton(title: "Paper", systemName: "doc.text") {
@@ -4180,17 +4239,20 @@ struct CreateEntryView: View {
     }
 
     private func setEntryDatePrecision(_ precision: EntryDatePrecision) {
+        didEditEntryDate = true
         ensureEntryDateDefaultsToNow()
         storyDatePrecision = precision == .noDate ? .exact : precision
         updateStoryDate()
     }
 
     private func setEntryDateToCurrentDateTime() {
+        didEditEntryDate = true
         storyDate = Date()
         storyDatePrecision = .exact
     }
 
     private func clearEntryDate() {
+        didEditEntryDate = true
         storyDatePrecision = .noDate
         isShowingEntryDateSheet = false
     }
@@ -4205,6 +4267,7 @@ struct CreateEntryView: View {
     }
 
     private func updateStoryDate(year: Int? = nil, month: Int? = nil, day: Int? = nil) {
+        didEditEntryDate = true
         let calendar = Calendar.current
         var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: storyDate)
         components.year = year ?? components.year
@@ -4238,6 +4301,7 @@ struct CreateEntryView: View {
                         .tint(Color.storyPurple)
                         .textInputAutocapitalization(.words)
                         .onChange(of: storyLocation) { newValue in
+                            didEditEntryLocation = true
                             locationSearch.updateQuery(newValue)
                         }
 
@@ -4255,6 +4319,7 @@ struct CreateEntryView: View {
                         locations: recentEntryLocations,
                         accentColor: Color.storyPurple,
                         onSelect: { location in
+                            didEditEntryLocation = true
                             storyLocation = location
                             locationSearch.clear()
                             isShowingEntryLocationSheet = false
@@ -4303,30 +4368,30 @@ struct CreateEntryView: View {
 
             Spacer()
 
-            Button {
-                clearEntryLocation()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color.storyGray.opacity(storyLocation.isEmpty ? 0.3 : 0.58))
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle())
+            if !storyLocation.isEmpty {
+                Button("Clear") {
+                    clearEntryLocation()
+                }
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear entry location")
             }
-            .buttonStyle(.plain)
-            .disabled(storyLocation.isEmpty)
-            .accessibilityLabel("Clear entry location")
         }
     }
 
     private func clearEntryLocation() {
+        didEditEntryLocation = true
         storyLocation = ""
         locationSearch.clear()
+        isShowingEntryLocationSheet = false
     }
 
     private var locationSuggestionList: some View {
         VStack(spacing: 0) {
             ForEach(locationSearch.suggestions) { suggestion in
                 Button {
+                    didEditEntryLocation = true
                     storyLocation = suggestion.displayText
                     EntryLocationRecentStore.add(storyLocation)
                     recentEntryLocations = EntryLocationRecentStore.all
@@ -4881,6 +4946,7 @@ private struct AddEntryToJournalPage: View {
                     } else if let selectedJournalTitle {
                         onDeselect(selectedJournalTitle)
                     }
+                    dismiss()
                 }
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(canUseDoneButton ? Color.storyPurple : Color.storyGray.opacity(0.42))
@@ -4998,6 +5064,7 @@ private struct AddEntryToJournalPage: View {
         pendingJournalTitle = journal.title
         newJournalName = ""
         onSelect(journal.title)
+        dismiss()
     }
 }
 
