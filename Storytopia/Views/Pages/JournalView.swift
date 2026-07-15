@@ -6574,11 +6574,8 @@ private struct PrototypeEntryDetailView: View {
     let chapter: PrototypeChapter
     let title: String
 
-    private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
-
     @State private var isFavorite = false
     @State private var selectedImageName: String?
-    @State private var selectedArtStyle = "Anime"
 
     var body: some View {
         ZStack {
@@ -6592,8 +6589,6 @@ private struct PrototypeEntryDetailView: View {
                         }
 
                         entryIntroduction
-                        artStylePickerSection
-                        comicGridSection
                         journalPage
                         entryDetails
                         referencePhotosSection
@@ -6758,96 +6753,6 @@ private struct PrototypeEntryDetailView: View {
         }
 
         return image.size.width / image.size.height
-    }
-
-    private var artStylePickerSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("Choose Art Style")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 14) {
-                    ForEach(artStyles, id: \.self) { style in
-                        Button {
-                            selectedArtStyle = style
-                        } label: {
-                            InlineArtStyleOption(
-                                title: style,
-                                isSelected: selectedArtStyle == style
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(style)
-                        .accessibilityAddTraits(selectedArtStyle == style ? .isSelected : [])
-                    }
-                }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 1)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.54), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
-    }
-
-    private var comicGridSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text("Comic Preview")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.storyInk)
-
-                Image(systemName: "sparkles")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.storyGold)
-
-                Spacer()
-
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.storyPurple)
-            }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    comicGridPanel(index: 0)
-                    comicGridPanel(index: 1)
-                }
-                .frame(height: 132)
-
-                comicGridPanel(index: 2)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 106)
-
-                HStack(spacing: 8) {
-                    comicGridPanel(index: 3)
-                    comicGridPanel(index: 4)
-                }
-                .frame(height: 108)
-            }
-        }
-        .padding(14)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-    }
-
-    private func comicGridPanel(index: Int) -> some View {
-        StoryboardPhotoPanel(
-            image: nil,
-            placeholderImageName: "storyboard_placeholder_\(index + 1)",
-            number: index + 1
-        )
     }
 
     private var journalPage: some View {

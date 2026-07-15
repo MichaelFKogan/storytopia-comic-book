@@ -1618,14 +1618,15 @@ struct CreateEntryView: View {
     }
 
     private var entryOptionsPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ScrollView(showsIndicators: false) {
             entryOptionsStepContent
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(pageTapBackground)
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(pageTapBackground)
         .background(Color.homePageBackground)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -3116,13 +3117,23 @@ struct CreateEntryView: View {
 
     private var entryOptionsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
+            storyboardPreviewTopSection
             journalDestinationCard
-            // artStylePickerSection
+            artStylePickerSection
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var storyboardPreviewTopSection: some View {
+        GeometryReader { proxy in
+            storyboardPreviewSection
+                .frame(width: proxy.size.width * 0.86, alignment: .topLeading)
+                .scaleEffect(0.58, anchor: .topLeading)
+        }
+        .frame(height: 260)
     }
 
     private var selectedEntryJournalTitle: String? {
