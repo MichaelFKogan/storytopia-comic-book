@@ -122,11 +122,6 @@ enum CreateEntryPresentation {
     }
 }
 
-private enum CreateEntryDestination {
-    case daily
-    case custom
-}
-
 private struct JournalEntryPrompt: Identifiable {
     let title: String
     let text: String
@@ -463,7 +458,7 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
         case .fontStyle:
             "Font Style"
         case .paperStyle:
-            "Background"
+            "Page Style"
         }
     }
 
@@ -514,17 +509,17 @@ private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
         case .body:
             "Body"
         case .heading1:
-            "Header 1"
+            "H1"
         case .heading2:
-            "Header 2"
+            "H2"
         case .heading3:
-            "Header 3"
+            "H3"
         case .heading4:
-            "Header 4"
+            "H4"
         case .heading5:
-            "Header 5"
+            "H5"
         case .heading6:
-            "Header 6"
+            "H6"
         }
     }
 
@@ -763,11 +758,13 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 }
 
 fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
-    case blank
     case collegeRuled
+    case blank
     case watercolorPaper
     case cottonPaper
     case recycledPaper
+
+    static let defaultChoice: CreatePaperStyleChoice = .collegeRuled
 
     var id: String { rawValue }
 
@@ -900,7 +897,7 @@ enum DraftThumbnailRenderer {
         let fontChoice = CreateFontChoice.savedValue(fontChoiceRawValue)
         let normalizedTextColorIndex = min(max(textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         let normalizedTextSize = min(max(textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
-        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
+        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .defaultChoice
         let normalizedPaperColorIndex = min(max(paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         let paperColor = CreateFormattingPalette.paperColors[normalizedPaperColorIndex]
         let textColor = CreateFormattingPalette.textColors[normalizedTextColorIndex].color
@@ -1133,6 +1130,10 @@ private struct DraftPageThumbnail: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .stroke(Color.storyInk.opacity(0.08), lineWidth: 0.6)
         )
+        .overlay(alignment: .top) {
+            StoryPhotoTape(width: 30, height: 10, rotation: -2)
+                .offset(y: -4)
+        }
         .rotationEffect(.degrees(polaroidRotation(for: index)))
     }
 
@@ -1197,14 +1198,13 @@ struct CreateEntryView: View {
     @State private var isShowingJournalDestinationSheet = false
     @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
     @State private var selectedFontChoice: CreateFontChoice = .sans
-    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .blank
+    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .defaultChoice
     @State private var selectedTextColorIndex = 0
     @State private var selectedPaperColorIndex = 0
     @State private var entryRichText: NotebookRichTextDocument?
     @State private var previewTextSize: Double = CreateEntryTextSize.defaultSliderValue
     @State private var textFormattingRequestID = 0
     @State private var textFormattingRequest: NotebookTextFormattingRequest?
-    @State private var entryDestination: CreateEntryDestination = .daily
     @State private var selectedCustomJournalTitle: String?
     @State private var addedJournalTitle: String?
     @State private var isShowingAddToJournalPage = false
@@ -1230,7 +1230,7 @@ struct CreateEntryView: View {
     @State private var editorBlurRequestID = 0
     @State private var isKeyboardVisible = false
     @State private var isBodyEditorEditing = false
-    @State private var isKeyboardFormattingToolbarVisible = false
+    @State private var isKeyboardMoreToolbarVisible = false
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
@@ -1417,7 +1417,6 @@ struct CreateEntryView: View {
         .sheet(isPresented: $isShowingJournalDestinationSheet) {
             AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
                 selectedCustomJournalTitle = journalTitle
-                entryDestination = .custom
                 isShowingJournalDestinationSheet = false
             }
             .presentationDetents([.large])
@@ -1563,7 +1562,7 @@ struct CreateEntryView: View {
                     self.activeDraftID = nil
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
                     isGeneratingStoryboard = false
-                    addedJournalTitle = entryDestination == .daily ? "Daily Journal" : journalTitle
+                    addedJournalTitle = journalTitle
                 }
             } catch {
                 await MainActor.run {
@@ -2062,9 +2061,10 @@ struct CreateEntryView: View {
         selectedTextColorIndex = 0
         previewTextSize = CreateEntryTextSize.defaultSliderValue
         textFormattingRequest = nil
-        selectedPaperStyleChoice = .blank
+        selectedPaperStyleChoice = .defaultChoice
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
+        selectedCustomJournalTitle = nil
         loadedDraftSnapshot = nil
         linkedJournalTitle = nil
         resetKeyboardFormattingState()
@@ -2110,7 +2110,7 @@ struct CreateEntryView: View {
         selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
         selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         previewTextSize = min(max(draft.textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
-        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
+        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .defaultChoice
         selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         loadedDraftSnapshot = currentDraftSnapshot(id: draft.id)
     }
@@ -2212,8 +2212,7 @@ struct CreateEntryView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !isKeyboardVisible
                     && !isBodyEditorEditing
-                    && activeKeyboardFormattingMode == nil
-                    && !isKeyboardFormattingToolbarVisible {
+                    && activeKeyboardFormattingMode == nil {
                     entryDraftBottomBar
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -2329,24 +2328,20 @@ struct CreateEntryView: View {
     }
 
     private var unifiedEditorToolbar: some View {
-        HStack(spacing: 2) {
-            toolbarActionButton(title: "Photos", systemName: "photo.on.rectangle.angled") {
+        HStack(spacing: 8) {
+            toolbarActionButton(title: "Photo", systemName: "photo.on.rectangle.angled") {
                 handlePhotosToolbarTapped()
             }
 
-            toolbarActionButton(title: "Font", systemName: "textformat") {
+            toolbarActionButton(title: "Style", systemName: "paintpalette") {
                 openFontOptions()
             }
 
-            toolbarActionButton(title: "Background", systemName: "doc.text") {
-                openPaperStyleOptions()
-            }
-
-            toolbarActionButton(title: "Topics", systemName: "tag") {
+            toolbarActionButton(title: "Topics", systemName: "pencil.and.list.clipboard") {
                 openJournalPromptsSheet()
             }
 
-            Spacer(minLength: 10)
+            Spacer(minLength: 4)
 
             if showsComposeFlowControls {
                 bottomToolbarNextButton
@@ -2354,7 +2349,7 @@ struct CreateEntryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(.bottom, 0)
         .frame(maxWidth: .infinity)
         .background(Color.white)
         .overlay(alignment: .top) {
@@ -2369,28 +2364,30 @@ struct CreateEntryView: View {
         systemName: String,
         isSelected: Bool = false,
         foregroundColor: Color = Color.storyInk.opacity(0.82),
+        accessibilityLabel: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: systemName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(foregroundColor.opacity(0.92))
-                    .frame(height: 18)
+                    .frame(height: 20)
 
                 Text(title)
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(foregroundColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.62)
             }
-            .frame(width: 58)
-            .frame(height: 44)
+            .frame(width: 50)
+            .frame(height: 48)
             .background(isSelected ? Color.storyInk.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .accessibilityLabel(accessibilityLabel ?? title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -2465,8 +2462,8 @@ struct CreateEntryView: View {
 
     private var entryDraftKeyboardAccessory: some View {
         Group {
-            if isKeyboardFormattingToolbarVisible {
-                formattingKeyboardToolbar
+            if isKeyboardMoreToolbarVisible {
+                moreKeyboardToolbar
             } else {
                 normalKeyboardToolbar
             }
@@ -2503,9 +2500,9 @@ struct CreateEntryView: View {
                     keyboardFormattingButton(
                         title: "Aa",
                         accessibilityLabel: "Font options",
-                        isSelected: false
+                        isSelected: activeKeyboardFormattingMode == .font
                     ) {
-                        showKeyboardFormattingToolbar()
+                        toggleKeyboardFormattingPanel(.font)
                     }
 
                     keyboardToolbarDivider
@@ -2531,10 +2528,10 @@ struct CreateEntryView: View {
         .padding(.vertical, 4)
     }
 
-    private var formattingKeyboardToolbar: some View {
+    private var moreKeyboardToolbar: some View {
         HStack(spacing: 8) {
             Button {
-                closeKeyboardFormattingToolbar()
+                closeKeyboardMoreToolbar()
             } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 20, weight: .medium))
@@ -2545,21 +2542,7 @@ struct CreateEntryView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Back to keyboard")
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    keyboardPanelChip(
-                        title: selectedFontChoice.title,
-                        mode: .font,
-                        width: 112,
-                        font: selectedFontChoice.swiftUIFont(size: 14, weight: .bold)
-                    )
-
-                    keyboardTextSizeButton
-
-                    keyboardColorButton
-                }
-                .padding(.trailing, 12)
-            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -2593,14 +2576,9 @@ struct CreateEntryView: View {
                 sendTextFormattingCommand(.underline)
             }
 
-            keyboardFormattingButton(
-                title: "S",
-                accessibilityLabel: "Strikethrough",
-                isSelected: isKeyboardInlineStyleSelected(.strikethrough),
-                isStrikethrough: true
-            ) {
-                sendTextFormattingCommand(.strikethrough)
-            }
+            keyboardToolbarDivider
+
+            keyboardColorButton
 
             keyboardToolButton(
                 systemName: "list.bullet",
@@ -2625,28 +2603,29 @@ struct CreateEntryView: View {
             ) {
                 sendTextFormattingCommand(.outdent)
             }
+
+            keyboardToolButton(
+                systemName: "ellipsis",
+                accessibilityLabel: "More",
+                isSelected: false
+            ) {
+                showKeyboardMoreToolbar()
+            }
         }
     }
 
     private var keyboardPrimaryTextTypeButton: some View {
         Button {
-            showPrimaryKeyboardTextTypePanel()
+            togglePrimaryKeyboardTextTypePanel()
         } label: {
-            HStack(spacing: 7) {
-                Text("A")
-                    .font(.system(size: 16, weight: .bold, design: .serif))
-
+            HStack(spacing: 0) {
                 Text(selectedKeyboardTextType.primaryToolbarTitle)
                     .font(.system(size: 14, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
-            .foregroundStyle(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.72) : Color.storyPurple)
-            .frame(width: 106, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.06) : Color.storyPurple.opacity(0.12))
-            )
+            .foregroundStyle(Color.storyInk.opacity(0.72))
+            .frame(width: 44, height: 34)
             .frame(height: 44)
             .contentShape(Rectangle())
         }
@@ -2687,30 +2666,40 @@ struct CreateEntryView: View {
         )
     }
 
-    private func showKeyboardFormattingToolbar() {
-        isKeyboardFormattingToolbarVisible = true
-        activeKeyboardFormattingMode = nil
-    }
-
     private func showKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
         isTitleFocused = false
-        isKeyboardFormattingToolbarVisible = true
+        isKeyboardMoreToolbarVisible = false
         activeKeyboardFormattingMode = mode
     }
 
-    private func showPrimaryKeyboardTextTypePanel() {
+    private func toggleKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
         isTitleFocused = false
-        isKeyboardFormattingToolbarVisible = false
-        activeKeyboardFormattingMode = .textType
+        isKeyboardMoreToolbarVisible = false
+        activeKeyboardFormattingMode = activeKeyboardFormattingMode == mode ? nil : mode
     }
 
-    private func closeKeyboardFormattingToolbar() {
-        isKeyboardFormattingToolbarVisible = false
+    private func showKeyboardMoreToolbar() {
+        isTitleFocused = false
+        isKeyboardMoreToolbarVisible = true
         activeKeyboardFormattingMode = nil
     }
 
+    private func togglePrimaryKeyboardTextTypePanel() {
+        isTitleFocused = false
+        if activeKeyboardFormattingMode == .textType {
+            activeKeyboardFormattingMode = nil
+        } else {
+            isKeyboardMoreToolbarVisible = false
+            activeKeyboardFormattingMode = .textType
+        }
+    }
+
+    private func closeKeyboardMoreToolbar() {
+        isKeyboardMoreToolbarVisible = false
+    }
+
     private func resetKeyboardFormattingState() {
-        isKeyboardFormattingToolbarVisible = false
+        isKeyboardMoreToolbarVisible = false
         activeKeyboardFormattingMode = nil
     }
 
@@ -2742,7 +2731,7 @@ struct CreateEntryView: View {
 
     private var keyboardColorButton: some View {
         Button {
-            showKeyboardFormattingPanel(.color)
+            toggleKeyboardFormattingPanel(.color)
         } label: {
             keyboardColorCircleChip
         }
@@ -2789,12 +2778,8 @@ struct CreateEntryView: View {
                 Circle()
                     .stroke(Color.storyInk.opacity(0.12), lineWidth: 0.7)
             )
-            .frame(width: 39, height: 39)
-            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(activeKeyboardFormattingMode == .color ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: activeKeyboardFormattingMode == .color ? 1.8 : 1)
-            )
+            .frame(width: 34, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var keyboardSizeChip: some View {
@@ -3019,8 +3004,8 @@ struct CreateEntryView: View {
 
     private var keyboardToolbarDivider: some View {
         Rectangle()
-            .fill(Color.storyInk.opacity(0.26))
-            .frame(width: 0.5, height: 24)
+            .fill(Color.storyInk.opacity(0.32))
+            .frame(width: 1, height: 24)
             .padding(.horizontal, 4)
     }
 
@@ -3088,12 +3073,6 @@ struct CreateEntryView: View {
         isShowingFormattingSheet = true
     }
 
-    private func openPaperStyleOptions() {
-        dismissKeyboard()
-        selectedFormattingTab = .paperStyle
-        isShowingFormattingSheet = true
-    }
-
     private func openEntryDateSheet() {
         dismissKeyboard()
         isShowingEntryDateSheet = true
@@ -3118,8 +3097,8 @@ struct CreateEntryView: View {
     private var entryOptionsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             storyboardPreviewTopSection
-            journalDestinationCard
             artStylePickerSection
+            journalDestinationCard
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
@@ -3141,12 +3120,7 @@ struct CreateEntryView: View {
             return directJournalTitle
         }
 
-        switch entryDestination {
-        case .daily:
-            return DailyJournalData.allChapters().first?.title
-        case .custom:
-            return selectedCustomJournalTitle
-        }
+        return selectedCustomJournalTitle
     }
 
     private var hasStoryboardPhotos: Bool {
@@ -3328,22 +3302,10 @@ struct CreateEntryView: View {
 
             VStack(spacing: 8) {
                 journalDestinationButton(
-                    title: "Daily Journal",
-                    subtitle: "Add to today's daily journal",
-                    icon: "calendar",
-                    isSelected: entryDestination == .daily
+                    title: selectedCustomJournalTitle ?? "Add to Journal",
+                    subtitle: selectedCustomJournalTitle == nil ? "Choose an existing journal or create a new one" : "Tap to change journal",
+                    icon: "book"
                 ) {
-                    entryDestination = .daily
-                    dismissKeyboard()
-                }
-
-                journalDestinationButton(
-                    title: "Custom Journal",
-                    subtitle: selectedCustomJournalTitle.map { "Adding to \($0)" } ?? "Add to an existing or new journal",
-                    icon: "book",
-                    isSelected: entryDestination == .custom
-                ) {
-                    entryDestination = .custom
                     isShowingJournalDestinationSheet = true
                     dismissKeyboard()
                 }
@@ -3362,10 +3324,11 @@ struct CreateEntryView: View {
         title: String,
         subtitle: String,
         icon: String,
-        isSelected: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let hasSelectedJournal = selectedCustomJournalTitle != nil
+
+        return Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 21, weight: .medium))
@@ -3386,16 +3349,25 @@ struct CreateEntryView: View {
 
                 Spacer()
 
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyBorder)
+                if hasSelectedJournal {
+                    Text("Selected")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                        .padding(.horizontal, 7)
+                        .frame(height: 22)
+                        .background(Color.storyPurple.opacity(0.1), in: Capsule())
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.72))
             }
             .padding(.horizontal, 12)
             .frame(height: 58)
-            .background(Color.white.opacity(isSelected ? 0.96 : 0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Color.white.opacity(hasSelectedJournal ? 0.96 : 0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.storyPurple.opacity(0.34) : Color.storyBorder.opacity(0.62), lineWidth: 1)
+                    .stroke(hasSelectedJournal ? Color.storyPurple.opacity(0.34) : Color.storyBorder.opacity(0.62), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -4429,6 +4401,10 @@ struct CreateEntryView: View {
     private var artStylePickerSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .center) {
+                Image(systemName: "paintpalette")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
                 Text("Choose Art Style")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Color.storyInk)
@@ -5826,7 +5802,7 @@ private struct CreateFormattingSheet: View {
 
     private var paperStyleContent: some View {
         VStack(alignment: .leading, spacing: 22) {
-            sheetSectionTitle("Background")
+            sheetSectionTitle("Page Style")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -6231,7 +6207,7 @@ struct StoryboardPhotoStripThumbnail: View {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
                                 .stroke(Color.storyInk.opacity(0.45), lineWidth: 0.8)
                         )
-                        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("View reference photo")
@@ -6256,6 +6232,29 @@ struct StoryboardPhotoStripThumbnail: View {
             .accessibilityLabel("Remove reference photo")
         }
         .frame(width: size + overflow, height: size + bottomPadding + overflow)
+        .overlay(alignment: .top) {
+            StoryPhotoTape(width: 34, height: 11, rotation: -2)
+                .offset(x: -(overflow / 2), y: overflow - 4.5)
+        }
+    }
+}
+
+struct StoryPhotoTape: View {
+    let width: CGFloat
+    let height: CGFloat
+    let rotation: Double
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            .fill(Color(red: 0.83, green: 0.76, blue: 0.62).opacity(0.72))
+            .frame(width: width, height: height)
+            .overlay(
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 0.5)
+            )
+            .shadow(color: Color.storyInk.opacity(0.11), radius: 1.5, x: 0, y: 1)
+            .rotationEffect(.degrees(rotation))
+            .allowsHitTesting(false)
     }
 }
 

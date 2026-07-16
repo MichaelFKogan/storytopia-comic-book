@@ -4522,7 +4522,7 @@ struct EntriesView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
-    private let thumbnailRendererVersion = 8
+    private let thumbnailRendererVersion = 9
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
 
     @State private var showsPrototypeData = true
@@ -5370,8 +5370,12 @@ private struct EntryGridPreviewCard: View {
             previewImage
                 .aspectRatio(260.0 / 340.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+                .overlay(alignment: .top) {
+                    StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                        .offset(y: -7)
+                }
 
             if isEditing {
                 Button(role: .destructive) {
