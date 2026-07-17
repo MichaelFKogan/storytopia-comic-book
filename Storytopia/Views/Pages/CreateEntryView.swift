@@ -453,16 +453,16 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var sheetTitle: String {
         switch self {
         case .fontStyle:
-            "Font Style"
+            "Font"
         case .paperStyle:
-            "Page Style"
+            "Paper"
         }
     }
 
-    var symbol: String {
+    var sheetSymbol: String {
         switch self {
         case .fontStyle:
             "textformat"
@@ -771,7 +771,7 @@ fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .collegeRuled:
-            "College Ruled"
+            "Notebook"
         case .blank:
             "Blank"
         case .watercolorPaper:
@@ -1192,11 +1192,11 @@ struct CreateEntryView: View {
     @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
     @State private var isShowingJournalPromptsSheet = false
-    @State private var isShowingFormattingSheet = false
+    @State private var isShowingFontFormattingSheet = false
+    @State private var isShowingPaperFormattingSheet = false
     @State private var isShowingEntryDateSheet = false
     @State private var isShowingEntryLocationSheet = false
     @State private var isShowingJournalDestinationSheet = false
-    @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
     @State private var selectedFontChoice: CreateFontChoice = .sans
     @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .defaultChoice
     @State private var selectedTextColorIndex = 0
@@ -1232,6 +1232,11 @@ struct CreateEntryView: View {
     @State private var isKeyboardVisible = false
     @State private var isBodyEditorEditing = false
     @State private var isKeyboardMoreToolbarVisible = false
+    @State private var toolbarSavedSnapshot: LoadedCreateEntryDraftSnapshot?
+    @State private var toolbarSavedJournalEntryID: UUID?
+    @State private var showsToolbarSavedFeedback = false
+    @State private var isToolbarSaveInProgress = false
+    @State private var toolbarSaveFeedbackVersion = 0
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
@@ -1379,9 +1384,22 @@ struct CreateEntryView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isShowingFormattingSheet) {
+        .sheet(isPresented: $isShowingFontFormattingSheet) {
             CreateFormattingSheet(
-                selectedTab: $selectedFormattingTab,
+                mode: .fontStyle,
+                selectedFont: $selectedFontChoice,
+                selectedPaperStyle: $selectedPaperStyleChoice,
+                selectedTextColorIndex: $selectedTextColorIndex,
+                selectedPaperColorIndex: $selectedPaperColorIndex,
+                previewTextSize: $previewTextSize
+            )
+            .presentationDetents([.height(430), .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingPaperFormattingSheet) {
+            CreateFormattingSheet(
+                mode: .paperStyle,
                 selectedFont: $selectedFontChoice,
                 selectedPaperStyle: $selectedPaperStyleChoice,
                 selectedTextColorIndex: $selectedTextColorIndex,
@@ -1795,24 +1813,51 @@ struct CreateEntryView: View {
                 Button {
                     performToolbarSave()
                 } label: {
-                    Text("Save")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(toolbarSaveButtonColor)
+                    HStack(spacing: 4) {
+                        Text(toolbarSaveButtonTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+
+                        if isToolbarSaveInProgress {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(Color.storyPurple)
+                        }
+
+                        if showsToolbarSavedState {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                    .frame(width: 74, alignment: .trailing)
+                    .foregroundStyle(toolbarSaveButtonColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(!canUseToolbarSaveButton)
+                .disabled(!canUseToolbarSaveButton && !isToolbarSaveInProgress)
             }
             .hideSharedBackgroundIfAvailable()
         }
     }
 
     private var showsToolbarSaveButton: Bool {
-        showsComposeFlowControls
+        presentation.showsNextButton
             || presentation.isEditDraft
             || presentation.savesDirectlyToJournal
     }
 
     private var canUseToolbarSaveButton: Bool {
+        if isToolbarSaveInProgress {
+            return false
+        }
+
+        if showsToolbarSavedState {
+            return true
+        }
+
+        if isToolbarContentSaved {
+            return false
+        }
+
         if presentation.isEditDraft {
             return hasUnsavedDraftChanges
         }
@@ -1821,16 +1866,46 @@ struct CreateEntryView: View {
     }
 
     private var toolbarSaveButtonColor: Color {
-        canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
+        if isToolbarSaveInProgress {
+            return Color.storyPurple
+        }
+
+        if showsToolbarSavedState {
+            return .green
+        }
+
+        return canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
+    }
+
+    private var toolbarSaveButtonTitle: String {
+        showsToolbarSavedState ? "Saved" : "Save"
+    }
+
+    private var showsToolbarSavedState: Bool {
+        showsToolbarSavedFeedback && isToolbarContentSaved
+    }
+
+    private var isToolbarContentSaved: Bool {
+        guard let toolbarSavedSnapshot else {
+            return false
+        }
+
+        return currentDraftSnapshot(id: toolbarSavedSnapshot.id) == toolbarSavedSnapshot
     }
 
     private func performToolbarSave() {
+        guard !isToolbarSaveInProgress else {
+            return
+        }
+
+        beginToolbarSavedFeedback()
+
         if presentation.isEditDraft {
             saveEditedDraftChanges()
         } else if presentation.savesDirectlyToJournal {
-            saveDirectJournalEntryAndExit()
+            saveDirectJournalEntryInPlace()
         } else {
-            saveDraftAndExit()
+            saveDraftInPlace()
         }
     }
 
@@ -1924,12 +1999,65 @@ struct CreateEntryView: View {
         dismissKeyboard()
 
         guard let savedDraftID = makePendingDraftSave(forceSave: true).flatMap(persistDraftSave) else {
+            cancelToolbarSavedFeedback()
             return
         }
 
+        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
+        loadedDraftSnapshot = savedSnapshot
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
         activeDraftID = savedDraftID
-        loadedDraftSnapshot = currentDraftSnapshot(id: savedDraftID)
         isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
+    private func saveDraftInPlace() {
+        dismissKeyboard()
+
+        guard let savedDraftID = makePendingDraftSave(forceSave: false).flatMap(persistDraftSave) else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
+        loadedDraftSnapshot = savedSnapshot
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
+        activeDraftID = savedDraftID
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
+    private func beginToolbarSavedFeedback() {
+        toolbarSaveFeedbackVersion += 1
+        isToolbarSaveInProgress = true
+        showsToolbarSavedFeedback = false
+    }
+
+    private func completeToolbarSavedFeedback(for snapshot: LoadedCreateEntryDraftSnapshot) {
+        let feedbackVersion = toolbarSaveFeedbackVersion
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            guard toolbarSaveFeedbackVersion == feedbackVersion, toolbarSavedSnapshot == snapshot else {
+                return
+            }
+
+            isToolbarSaveInProgress = false
+            showsToolbarSavedFeedback = isToolbarContentSaved
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                guard toolbarSaveFeedbackVersion == feedbackVersion, toolbarSavedSnapshot == snapshot else {
+                    return
+                }
+
+                showsToolbarSavedFeedback = false
+            }
+        }
+    }
+
+    private func cancelToolbarSavedFeedback() {
+        toolbarSaveFeedbackVersion += 1
+        isToolbarSaveInProgress = false
+        showsToolbarSavedFeedback = false
     }
 
     private func saveFromExitConfirmation() {
@@ -2050,6 +2178,11 @@ struct CreateEntryView: View {
         entryText = ""
         entryRichText = nil
         storyboardPhotos = Array(repeating: nil, count: 5)
+        toolbarSavedSnapshot = nil
+        toolbarSavedJournalEntryID = nil
+        showsToolbarSavedFeedback = false
+        isToolbarSaveInProgress = false
+        toolbarSaveFeedbackVersion += 1
         selectedArtStyle = "Anime"
         storyLocation = ""
         storyDate = Date()
@@ -2312,11 +2445,14 @@ struct CreateEntryView: View {
                 Button {
                     handlePhotosTabTapped()
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "camera")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Color.storyPurple)
-                            .frame(width: 24)
+                    HStack(spacing: 6) {
+                        StoryboardPhotoStripAddButton(
+                            systemName: "camera",
+                            iconColor: Color.storyPurple,
+                            size: 34,
+                            iconWeight: .semibold,
+                            showsDashedBorder: false
+                        )
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Add Reference Photos")
@@ -2332,12 +2468,23 @@ struct CreateEntryView: View {
 
                         Spacer(minLength: 8)
 
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color.storyInk.opacity(0.72))
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 11, weight: .semibold))
+
+                            Text("Up to 5 photos")
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.storyPurple.opacity(0.86))
+                        }
+                        .foregroundStyle(Color.storyInk.opacity(0.58))
                     }
-                    .padding(.horizontal, 16)
-                    .frame(height: 58)
+                    .padding(.horizontal, 14)
+                    .frame(height: 70)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -2345,7 +2492,7 @@ struct CreateEntryView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.92))
+        .background(Color.white.opacity(0.72))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.storyBorder.opacity(0.46))
@@ -2402,15 +2549,22 @@ struct CreateEntryView: View {
 
     private var unifiedEditorToolbar: some View {
         HStack(spacing: 8) {
-            toolbarActionButton(title: "Style", systemName: "paintpalette") {
-                openFontOptions()
-            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    toolbarActionButton(title: "Font", systemName: "textformat") {
+                        openFontOptions()
+                    }
 
-            toolbarActionButton(title: "Topics", systemName: "pencil.and.list.clipboard") {
-                openJournalPromptsSheet()
-            }
+                    toolbarActionButton(title: "Paper", systemName: "doc.text", accessibilityLabel: "Background") {
+                        openPaperOptions()
+                    }
 
-            Spacer(minLength: 4)
+                    toolbarActionButton(title: "Prompts", systemName: "lightbulb") {
+                        openJournalPromptsSheet()
+                    }
+                }
+                .padding(.trailing, 2)
+            }
 
             if showsComposeFlowControls {
                 bottomToolbarNextButton
@@ -2434,6 +2588,7 @@ struct CreateEntryView: View {
         isSelected: Bool = false,
         foregroundColor: Color = Color.storyInk.opacity(0.82),
         accessibilityLabel: String? = nil,
+        showsTitle: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -2443,20 +2598,23 @@ struct CreateEntryView: View {
                     .foregroundStyle(foregroundColor.opacity(0.92))
                     .frame(width: 17, height: 17)
 
-                Text(title)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(foregroundColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                if showsTitle {
+                    Text(title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(foregroundColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
             }
-            .padding(.horizontal, 13)
-            .frame(height: 34)
-            .background(Color.white, in: Capsule())
+            .padding(.horizontal, showsTitle ? 13 : 10)
+            .frame(width: showsTitle ? nil : 38)
+            .frame(height: 38)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.storyPurple.opacity(0.5) : Color.storyBorder.opacity(0.72), lineWidth: isSelected ? 1.3 : 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isSelected ? Color.storyPurple.opacity(0.5) : Color.storyBorder.opacity(0.72), lineWidth: isSelected ? 1.3 : 1)
             )
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel ?? title)
@@ -3141,8 +3299,12 @@ struct CreateEntryView: View {
 
     private func openFontOptions() {
         dismissKeyboard()
-        selectedFormattingTab = .fontStyle
-        isShowingFormattingSheet = true
+        isShowingFontFormattingSheet = true
+    }
+
+    private func openPaperOptions() {
+        dismissKeyboard()
+        isShowingPaperFormattingSheet = true
     }
 
     private func openEntryDateSheet() {
@@ -3200,8 +3362,8 @@ struct CreateEntryView: View {
     }
 
     @discardableResult
-    private func addCurrentEntry(to journalTitle: String) -> PrototypeEntry? {
-        guard let entry = currentJournalEntry() else {
+    private func addCurrentEntry(to journalTitle: String, id: UUID = UUID()) -> PrototypeEntry? {
+        guard let entry = currentJournalEntry(id: id) else {
             return nil
         }
 
@@ -3210,7 +3372,7 @@ struct CreateEntryView: View {
         return entry
     }
 
-    private func currentJournalEntry() -> PrototypeEntry? {
+    private func currentJournalEntry(id: UUID = UUID()) -> PrototypeEntry? {
         let trimmedTitle = storyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBody = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty || !trimmedBody.isEmpty else {
@@ -3232,6 +3394,7 @@ struct CreateEntryView: View {
         let trimmedRichText = currentEntryRichText()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return PrototypeEntry(
+            id: id,
             weekday: weekdayFormatter.string(from: storyDate).uppercased(),
             day: dayFormatter.string(from: storyDate),
             title: trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle,
@@ -3350,6 +3513,29 @@ struct CreateEntryView: View {
         activeDraftID = nil
         isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         dismissCreate()
+    }
+
+    private func saveDirectJournalEntryInPlace() {
+        guard let journalTitle = presentation.directJournalTitle, hasDraftContent else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        dismissKeyboard()
+
+        let entryID = toolbarSavedJournalEntryID ?? UUID()
+        guard let entry = currentJournalEntry(id: entryID) else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        StoryEntryStore.upsert(entry, to: journalTitle)
+        onJournalEntryCreated(journalTitle, entry)
+        toolbarSavedJournalEntryID = entry.id
+        let savedSnapshot = currentDraftSnapshot(id: entry.id)
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
     }
 
     private var journalDestinationCard: some View {
@@ -4634,9 +4820,15 @@ private struct JournalEntryPromptsSheet: View {
             .hideSharedBackgroundIfAvailable()
 
             ToolbarItem(placement: .principal) {
-                Text("Journal Suggestions")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
+                HStack(spacing: 7) {
+                    Image(systemName: "lightbulb")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
+
+                    Text("Journal Suggestions")
+                        .font(.system(size: 18, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
             }
         }
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
@@ -5764,7 +5956,7 @@ struct NotebookPaperBackground: View {
 }
 
 private struct CreateFormattingSheet: View {
-    @Binding var selectedTab: CreateFormattingTab
+    let mode: CreateFormattingTab
     @Binding var selectedFont: CreateFontChoice
     @Binding var selectedPaperStyle: CreatePaperStyleChoice
     @Binding var selectedTextColorIndex: Int
@@ -5807,16 +5999,20 @@ private struct CreateFormattingSheet: View {
                 .accessibilityLabel("Close formatting options")
             }
             .overlay {
-                Text(selectedTab.title)
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-            }
+                HStack(spacing: 7) {
+                    Image(systemName: mode.sheetSymbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
 
-            CreateFormattingTabSwitcher(selectedTab: $selectedTab)
+                    Text(mode.sheetTitle)
+                        .font(.system(size: 19, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
+            }
 
             ScrollView(showsIndicators: false) {
                 Group {
-                    switch selectedTab {
+                    switch mode {
                     case .fontStyle:
                         fontStyleContent
                     case .paperStyle:
@@ -5833,98 +6029,46 @@ private struct CreateFormattingSheet: View {
 
     private var fontStyleContent: some View {
         VStack(alignment: .leading, spacing: 22) {
-            sheetSectionTitle("Font")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(CreateFontChoice.allCases) { font in
-                        Button {
-                            selectedFont = font
-                        } label: {
-                            CreateFontOptionCard(font: font, isSelected: selectedFont == font)
-                        }
-                        .buttonStyle(.plain)
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2),
+                spacing: 12
+            ) {
+                ForEach(CreateFontChoice.allCases) { font in
+                    Button {
+                        selectedFont = font
+                    } label: {
+                        CreateFontOptionCard(font: font, isSelected: selectedFont == font)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(font.title)
+                    .accessibilityAddTraits(selectedFont == font ? .isSelected : [])
                 }
-                .padding(.trailing, 8)
-                .padding(.bottom, 9)
-                .padding(.top, 1)
             }
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Text Size")
-
-            HStack(spacing: 14) {
-                Text("A")
-                    .font(selectedFont.swiftUIFont(size: 18, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-
-                Slider(value: $previewTextSize, in: 0...1)
-                    .tint(Color.storyPurple)
-
-                Text("A")
-                    .font(selectedFont.swiftUIFont(size: 34, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-            }
-
-            sheetSectionTitle("Text Color")
-            CreateColorSwatchRow(
-                colors: CreateFormattingPalette.textColors.map(\.color),
-                selectedIndex: $selectedTextColorIndex,
-                selectedCheckColor: .white,
-                emphasizedBorderIndex: nil,
-                showsMoreButton: false
-            )
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Preview")
-            formattingPreview
+            .padding(.top, 1)
         }
     }
 
     private var paperStyleContent: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            sheetSectionTitle("Page Style")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(CreatePaperStyleChoice.allCases) { paperStyle in
-                        Button {
-                            selectedPaperStyle = paperStyle
-                        } label: {
-                            CreatePaperStyleOption(
-                                style: paperStyle,
-                                paperColor: CreateFormattingPalette.paperColors[selectedPaperColorIndex],
-                                isSelected: selectedPaperStyle == paperStyle
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+            alignment: .center,
+            spacing: 24
+        ) {
+            ForEach(CreatePaperStyleChoice.allCases) { paperStyle in
+                Button {
+                    selectedPaperStyle = paperStyle
+                } label: {
+                    CreatePaperStyleOption(
+                        style: paperStyle,
+                        paperColor: CreateFormattingPalette.paperColors[selectedPaperColorIndex],
+                        isSelected: selectedPaperStyle == paperStyle
+                    )
                 }
-                .padding(.vertical, 1)
+                .buttonStyle(.plain)
             }
-
-            if selectedPaperStyle.showsPaperColorOptions {
-                sheetSectionTitle("Paper Color")
-                CreateColorSwatchRow(
-                    colors: CreateFormattingPalette.paperColors,
-                    selectedIndex: $selectedPaperColorIndex,
-                    selectedCheckColor: Color.storyPurple,
-                    emphasizedBorderIndex: 1,
-                    showsMoreButton: false
-                )
-            }
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Preview")
-            formattingPreview
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
     }
 
     private var formattingPreview: some View {
@@ -5952,81 +6096,33 @@ private struct CreateFormattingSheet: View {
     }
 }
 
-private struct CreateFormattingTabSwitcher: View {
-    @Binding var selectedTab: CreateFormattingTab
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(CreateFormattingTab.allCases) { tab in
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        selectedTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: tab.symbol)
-                            .font(.system(size: 15, weight: .semibold))
-
-                        Text(tab.title)
-                            .font(.system(size: 15, weight: .bold, design: .serif))
-                    }
-                    .foregroundStyle(selectedTab == tab ? Color.storyPurple : Color.storyInk.opacity(0.68))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(selectedTab == tab ? Color.white : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(selectedTab == tab ? Color.storyPurple : Color.clear, lineWidth: 1.4)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-            }
-        }
-        .padding(2)
-        .background(Color.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.45), lineWidth: 1)
-        )
-    }
-}
-
 private struct CreateFontOptionCard: View {
     let font: CreateFontChoice
     let isSelected: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Aa")
-                .font(font.swiftUIBodyFont(size: 27))
-                .foregroundStyle(Color.storyInk.opacity(0.9))
-
+        HStack(spacing: 10) {
             Text(font.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.homeMutedText)
+                .font(font.swiftUIBodyFont(size: 16))
+                .foregroundStyle(Color.storyInk)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-        .frame(width: 116, height: 96)
-        .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
-        )
-        .overlay(alignment: .bottomTrailing) {
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             if isSelected {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(Color.storyPurple, in: Circle())
-                    .offset(x: 8, y: 8)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
             }
         }
+        .padding(.horizontal, 16)
+        .frame(height: 62)
+        .frame(maxWidth: .infinity)
+        .background(isSelected ? Color.storyPurple.opacity(0.12) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: isSelected ? 1.8 : 1)
+        )
     }
 }
 
@@ -6038,11 +6134,12 @@ private struct CreatePaperStyleOption: View {
     var body: some View {
         VStack(spacing: 8) {
             CreatePaperPreview(style: style, paperColor: paperColor)
-                .frame(width: 82, height: 82)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
+                        .strokeBorder(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
                 )
                 .overlay(alignment: .bottomTrailing) {
                     if isSelected {
@@ -6058,10 +6155,11 @@ private struct CreatePaperStyleOption: View {
             Text(style.title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.homeMutedText)
-                .frame(width: 92)
+                .frame(maxWidth: .infinity)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -6409,17 +6507,26 @@ struct ReferencePhotoViewer: View {
 }
 
 struct StoryboardPhotoStripAddButton: View {
+    var systemName: String = "plus"
+    var iconColor: Color = Color.storyInk.opacity(0.82)
+    var size: CGFloat = 52
+    var iconWeight: Font.Weight = .light
+    var showsDashedBorder: Bool = true
+
     var body: some View {
         VStack {
-            Image(systemName: "plus")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(Color.storyInk.opacity(0.82))
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: iconWeight))
+                .foregroundStyle(iconColor)
         }
-        .frame(width: 52, height: 52)
+        .frame(width: size, height: size)
         .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.storyPurple.opacity(0.34), style: StrokeStyle(lineWidth: 1.1, dash: [4, 3]))
+                .stroke(
+                    showsDashedBorder ? Color.storyPurple.opacity(0.34) : Color.clear,
+                    style: StrokeStyle(lineWidth: 1.1, dash: [4, 3])
+                )
         )
         .accessibilityLabel("Add Reference photos")
     }
