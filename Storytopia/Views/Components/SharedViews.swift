@@ -156,15 +156,20 @@ struct CreateNavItem: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 54, height: 54)
-                .background(selectedColor, in: Circle())
-                .shadow(color: selectedColor.opacity(0.28), radius: 7, y: 3)
+            VStack(spacing: 4) {
+                Image(systemName: isSelected ? "plus.circle.fill" : "plus.circle")
+                    .font(.system(size: 21, weight: isSelected ? .bold : .regular))
+
+                Text("Create")
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .foregroundStyle(isSelected ? selectedColor : Color.storyInk.opacity(0.82))
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
         }
         .frame(maxWidth: .infinity)
-        .offset(y: -4)
         .accessibilityLabel("Create")
     }
 }

@@ -122,11 +122,6 @@ enum CreateEntryPresentation {
     }
 }
 
-private enum CreateEntryDestination {
-    case daily
-    case custom
-}
-
 private struct JournalEntryPrompt: Identifiable {
     let title: String
     let text: String
@@ -458,16 +453,16 @@ private enum CreateFormattingTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var sheetTitle: String {
         switch self {
         case .fontStyle:
-            "Font Style"
+            "Font"
         case .paperStyle:
-            "Paper Style"
+            "Paper"
         }
     }
 
-    var symbol: String {
+    var sheetSymbol: String {
         switch self {
         case .fontStyle:
             "textformat"
@@ -514,17 +509,17 @@ private enum CreateKeyboardTextType: String, CaseIterable, Identifiable {
         case .body:
             "Body"
         case .heading1:
-            "Header 1"
+            "H1"
         case .heading2:
-            "Header 2"
+            "H2"
         case .heading3:
-            "Header 3"
+            "H3"
         case .heading4:
-            "Header 4"
+            "H4"
         case .heading5:
-            "Header 5"
+            "H5"
         case .heading6:
-            "Header 6"
+            "H6"
         }
     }
 
@@ -763,18 +758,20 @@ private enum CreateFontChoice: String, CaseIterable, Identifiable {
 }
 
 fileprivate enum CreatePaperStyleChoice: String, CaseIterable, Identifiable {
-    case blank
     case collegeRuled
+    case blank
     case watercolorPaper
     case cottonPaper
     case recycledPaper
+
+    static let defaultChoice: CreatePaperStyleChoice = .collegeRuled
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .collegeRuled:
-            "College Ruled"
+            "Notebook"
         case .blank:
             "Blank"
         case .watercolorPaper:
@@ -900,7 +897,7 @@ enum DraftThumbnailRenderer {
         let fontChoice = CreateFontChoice.savedValue(fontChoiceRawValue)
         let normalizedTextColorIndex = min(max(textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         let normalizedTextSize = min(max(textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
-        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
+        let paperStyle = paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .defaultChoice
         let normalizedPaperColorIndex = min(max(paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         let paperColor = CreateFormattingPalette.paperColors[normalizedPaperColorIndex]
         let textColor = CreateFormattingPalette.textColors[normalizedTextColorIndex].color
@@ -1133,6 +1130,10 @@ private struct DraftPageThumbnail: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .stroke(Color.storyInk.opacity(0.08), lineWidth: 0.6)
         )
+        .overlay(alignment: .top) {
+            StoryPhotoTape(width: 30, height: 10, rotation: -2)
+                .offset(y: -4)
+        }
         .rotationEffect(.degrees(polaroidRotation(for: index)))
     }
 
@@ -1179,7 +1180,8 @@ struct CreateEntryView: View {
     var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
 
     @State private var selectedArtStyle = "Anime"
-    private let previewLayout = StoryboardLayoutOption.fiveClassic
+    @State private var selectedStoryboardLayout = StoryboardLayoutOption.fiveClassic
+    @State private var isSmartGenerationEnabled = true
 
     @State private var selectedPhotoSlot: Int?
     @State private var isShowingPhotoSourceSheet = false
@@ -1191,20 +1193,19 @@ struct CreateEntryView: View {
     @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
     @State private var isShowingJournalPromptsSheet = false
-    @State private var isShowingFormattingSheet = false
+    @State private var isShowingFontFormattingSheet = false
+    @State private var isShowingPaperFormattingSheet = false
     @State private var isShowingEntryDateSheet = false
     @State private var isShowingEntryLocationSheet = false
     @State private var isShowingJournalDestinationSheet = false
-    @State private var selectedFormattingTab: CreateFormattingTab = .fontStyle
     @State private var selectedFontChoice: CreateFontChoice = .sans
-    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .blank
+    @State private var selectedPaperStyleChoice: CreatePaperStyleChoice = .defaultChoice
     @State private var selectedTextColorIndex = 0
     @State private var selectedPaperColorIndex = 0
     @State private var entryRichText: NotebookRichTextDocument?
     @State private var previewTextSize: Double = CreateEntryTextSize.defaultSliderValue
     @State private var textFormattingRequestID = 0
     @State private var textFormattingRequest: NotebookTextFormattingRequest?
-    @State private var entryDestination: CreateEntryDestination = .daily
     @State private var selectedCustomJournalTitle: String?
     @State private var addedJournalTitle: String?
     @State private var isShowingAddToJournalPage = false
@@ -1221,17 +1222,20 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var previewedStoryboardPhoto: UIImage?
-    @State private var isPhotoPanelExpanded = false
+    @State private var isPhotoTabCollapsed = false
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
-    @GestureState private var exitDragOffset: CGFloat = 0
-    @State private var didDismissKeyboardForExitDrag = false
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
     @State private var editorBlurRequestID = 0
     @State private var isKeyboardVisible = false
     @State private var isBodyEditorEditing = false
-    @State private var isKeyboardFormattingToolbarVisible = false
+    @State private var isKeyboardMoreToolbarVisible = false
+    @State private var toolbarSavedSnapshot: LoadedCreateEntryDraftSnapshot?
+    @State private var toolbarSavedJournalEntryID: UUID?
+    @State private var showsToolbarSavedFeedback = false
+    @State private var isToolbarSaveInProgress = false
+    @State private var toolbarSaveFeedbackVersion = 0
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
@@ -1328,9 +1332,6 @@ struct CreateEntryView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .offset(x: exitDragOffset)
-        .simultaneousGesture(exitSwipeGesture)
-        .animation(.snappy(duration: 0.22), value: exitDragOffset)
         .onDisappear {
             dismissKeyboard()
             UIApplication.shared.connectedScenes
@@ -1379,9 +1380,22 @@ struct CreateEntryView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isShowingFormattingSheet) {
+        .sheet(isPresented: $isShowingFontFormattingSheet) {
             CreateFormattingSheet(
-                selectedTab: $selectedFormattingTab,
+                mode: .fontStyle,
+                selectedFont: $selectedFontChoice,
+                selectedPaperStyle: $selectedPaperStyleChoice,
+                selectedTextColorIndex: $selectedTextColorIndex,
+                selectedPaperColorIndex: $selectedPaperColorIndex,
+                previewTextSize: $previewTextSize
+            )
+            .presentationDetents([.height(430), .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingPaperFormattingSheet) {
+            CreateFormattingSheet(
+                mode: .paperStyle,
                 selectedFont: $selectedFontChoice,
                 selectedPaperStyle: $selectedPaperStyleChoice,
                 selectedTextColorIndex: $selectedTextColorIndex,
@@ -1418,7 +1432,6 @@ struct CreateEntryView: View {
         .sheet(isPresented: $isShowingJournalDestinationSheet) {
             AddToJournalSheet(selectedJournalTitle: $selectedCustomJournalTitle) { journalTitle in
                 selectedCustomJournalTitle = journalTitle
-                entryDestination = .custom
                 isShowingJournalDestinationSheet = false
             }
             .presentationDetents([.large])
@@ -1533,7 +1546,7 @@ struct CreateEntryView: View {
         }
 
         let photos = storyboardPhotos.compactMap { $0 }
-        let layout = StoryboardLayoutOption.fiveClassic
+        let layout = effectiveStoryboardLayout
         isGeneratingStoryboard = true
 
         Task {
@@ -1564,7 +1577,7 @@ struct CreateEntryView: View {
                     self.activeDraftID = nil
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
                     isGeneratingStoryboard = false
-                    addedJournalTitle = entryDestination == .daily ? "Daily Journal" : journalTitle
+                    addedJournalTitle = journalTitle
                 }
             } catch {
                 await MainActor.run {
@@ -1619,17 +1632,34 @@ struct CreateEntryView: View {
     }
 
     private var entryOptionsPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ScrollView(showsIndicators: false) {
             entryOptionsStepContent
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(pageTapBackground)
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(pageTapBackground)
         .background(Color.homePageBackground)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isShowingEntryOptionsPage = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.72))
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+            }
+            .hideSharedBackgroundIfAvailable()
+
             createToolbarItems(title: "Entry Details", showsCloseButton: false)
         }
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
@@ -1752,11 +1782,12 @@ struct CreateEntryView: View {
                     requestExit()
                 } label: {
                     Image(systemName: presentation.closeButtonSystemName)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.72))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
                 }
+                .frame(width: showsToolbarSaveButton ? 74 : 30, alignment: .leading)
                 .buttonStyle(.plain)
                 .accessibilityLabel(presentation.closeButtonAccessibilityLabel)
             }
@@ -1769,15 +1800,20 @@ struct CreateEntryView: View {
                     openEntryDateSheet()
                 } label: {
                     HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.homeAccent)
+
                         Text(entryDateMetadataText)
-                            .font(selectedFontChoice.swiftUIBodyFont(size: 15))
+                            .font(.system(size: 14, weight: .medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
+                            .foregroundStyle(Color.storyInk.opacity(0.62))
 
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.62))
                     }
-                    .foregroundStyle(Color.storyInk.opacity(0.62))
                     .frame(maxWidth: 210)
                     .contentShape(Rectangle())
                 }
@@ -1795,24 +1831,51 @@ struct CreateEntryView: View {
                 Button {
                     performToolbarSave()
                 } label: {
-                    Text("Save")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(toolbarSaveButtonColor)
+                    HStack(spacing: 4) {
+                        Text(toolbarSaveButtonTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+
+                        if isToolbarSaveInProgress {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(Color.storyPurple)
+                        }
+
+                        if showsToolbarSavedState {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                    .frame(width: 74, alignment: .trailing)
+                    .foregroundStyle(toolbarSaveButtonColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(!canUseToolbarSaveButton)
+                .disabled(!canUseToolbarSaveButton && !isToolbarSaveInProgress)
             }
             .hideSharedBackgroundIfAvailable()
         }
     }
 
     private var showsToolbarSaveButton: Bool {
-        showsComposeFlowControls
+        presentation.showsNextButton
             || presentation.isEditDraft
             || presentation.savesDirectlyToJournal
     }
 
     private var canUseToolbarSaveButton: Bool {
+        if isToolbarSaveInProgress {
+            return false
+        }
+
+        if showsToolbarSavedState {
+            return true
+        }
+
+        if isToolbarContentSaved {
+            return false
+        }
+
         if presentation.isEditDraft {
             return hasUnsavedDraftChanges
         }
@@ -1821,16 +1884,46 @@ struct CreateEntryView: View {
     }
 
     private var toolbarSaveButtonColor: Color {
-        canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
+        if isToolbarSaveInProgress {
+            return Color.storyPurple
+        }
+
+        if showsToolbarSavedState {
+            return .green
+        }
+
+        return canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
+    }
+
+    private var toolbarSaveButtonTitle: String {
+        showsToolbarSavedState ? "Saved" : "Save"
+    }
+
+    private var showsToolbarSavedState: Bool {
+        showsToolbarSavedFeedback && isToolbarContentSaved
+    }
+
+    private var isToolbarContentSaved: Bool {
+        guard let toolbarSavedSnapshot else {
+            return false
+        }
+
+        return currentDraftSnapshot(id: toolbarSavedSnapshot.id) == toolbarSavedSnapshot
     }
 
     private func performToolbarSave() {
+        guard !isToolbarSaveInProgress else {
+            return
+        }
+
+        beginToolbarSavedFeedback()
+
         if presentation.isEditDraft {
             saveEditedDraftChanges()
         } else if presentation.savesDirectlyToJournal {
-            saveDirectJournalEntryAndExit()
+            saveDirectJournalEntryInPlace()
         } else {
-            saveDraftAndExit()
+            saveDraftInPlace()
         }
     }
 
@@ -1852,48 +1945,6 @@ struct CreateEntryView: View {
         }
 
         return currentDraftSnapshot(id: loadedDraftSnapshot.id) != loadedDraftSnapshot
-    }
-
-    private var exitSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 18, coordinateSpace: .local)
-            .onChanged { value in
-                guard isExitSwipe(value) else {
-                    return
-                }
-
-                guard !didDismissKeyboardForExitDrag else {
-                    return
-                }
-
-                didDismissKeyboardForExitDrag = true
-                DispatchQueue.main.async {
-                    dismissKeyboard()
-                }
-            }
-            .updating($exitDragOffset) { value, state, _ in
-                guard isExitSwipe(value) else {
-                    return
-                }
-
-                state = value.translation.width
-            }
-            .onEnded { value in
-                defer {
-                    didDismissKeyboardForExitDrag = false
-                }
-
-                let shouldExit = value.translation.width > 96
-                    || value.predictedEndTranslation.width > 180
-
-                if shouldExit && isExitSwipe(value) {
-                    requestExit()
-                }
-            }
-    }
-
-    private func isExitSwipe(_ value: DragGesture.Value) -> Bool {
-        value.translation.width > 0
-            && abs(value.translation.height) < max(24, value.translation.width * 0.65)
     }
 
     private func requestExit() {
@@ -1924,12 +1975,65 @@ struct CreateEntryView: View {
         dismissKeyboard()
 
         guard let savedDraftID = makePendingDraftSave(forceSave: true).flatMap(persistDraftSave) else {
+            cancelToolbarSavedFeedback()
             return
         }
 
+        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
+        loadedDraftSnapshot = savedSnapshot
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
         activeDraftID = savedDraftID
-        loadedDraftSnapshot = currentDraftSnapshot(id: savedDraftID)
         isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
+    private func saveDraftInPlace() {
+        dismissKeyboard()
+
+        guard let savedDraftID = makePendingDraftSave(forceSave: false).flatMap(persistDraftSave) else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
+        loadedDraftSnapshot = savedSnapshot
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
+        activeDraftID = savedDraftID
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
+    private func beginToolbarSavedFeedback() {
+        toolbarSaveFeedbackVersion += 1
+        isToolbarSaveInProgress = true
+        showsToolbarSavedFeedback = false
+    }
+
+    private func completeToolbarSavedFeedback(for snapshot: LoadedCreateEntryDraftSnapshot) {
+        let feedbackVersion = toolbarSaveFeedbackVersion
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            guard toolbarSaveFeedbackVersion == feedbackVersion, toolbarSavedSnapshot == snapshot else {
+                return
+            }
+
+            isToolbarSaveInProgress = false
+            showsToolbarSavedFeedback = isToolbarContentSaved
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                guard toolbarSaveFeedbackVersion == feedbackVersion, toolbarSavedSnapshot == snapshot else {
+                    return
+                }
+
+                showsToolbarSavedFeedback = false
+            }
+        }
+    }
+
+    private func cancelToolbarSavedFeedback() {
+        toolbarSaveFeedbackVersion += 1
+        isToolbarSaveInProgress = false
+        showsToolbarSavedFeedback = false
     }
 
     private func saveFromExitConfirmation() {
@@ -2050,6 +2154,11 @@ struct CreateEntryView: View {
         entryText = ""
         entryRichText = nil
         storyboardPhotos = Array(repeating: nil, count: 5)
+        toolbarSavedSnapshot = nil
+        toolbarSavedJournalEntryID = nil
+        showsToolbarSavedFeedback = false
+        isToolbarSaveInProgress = false
+        toolbarSaveFeedbackVersion += 1
         selectedArtStyle = "Anime"
         storyLocation = ""
         storyDate = Date()
@@ -2062,12 +2171,12 @@ struct CreateEntryView: View {
         selectedTextColorIndex = 0
         previewTextSize = CreateEntryTextSize.defaultSliderValue
         textFormattingRequest = nil
-        selectedPaperStyleChoice = .blank
+        selectedPaperStyleChoice = .defaultChoice
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
+        selectedCustomJournalTitle = nil
         loadedDraftSnapshot = nil
         linkedJournalTitle = nil
-        isPhotoPanelExpanded = false
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         isKeyboardVisible = false
@@ -2100,7 +2209,6 @@ struct CreateEntryView: View {
         let photos = Array(draft.photos.prefix(5))
         storyboardPhotos = photos.map(Optional.some)
             + Array(repeating: nil, count: max(0, 5 - photos.count))
-        isPhotoPanelExpanded = !photos.isEmpty
         selectedArtStyle = draft.artStyle
         storyLocation = draft.location
         storyDate = draft.date
@@ -2112,7 +2220,7 @@ struct CreateEntryView: View {
         selectedFontChoice = CreateFontChoice.savedValue(draft.fontChoiceRawValue)
         selectedTextColorIndex = min(max(draft.textColorIndex ?? 0, 0), CreateFormattingPalette.textColors.count - 1)
         previewTextSize = min(max(draft.textSize ?? CreateEntryTextSize.defaultSliderValue, 0), 1)
-        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .blank
+        selectedPaperStyleChoice = draft.paperStyleRawValue.flatMap(CreatePaperStyleChoice.init(rawValue:)) ?? .defaultChoice
         selectedPaperColorIndex = min(max(draft.paperColorIndex ?? 0, 0), CreateFormattingPalette.paperColors.count - 1)
         loadedDraftSnapshot = currentDraftSnapshot(id: draft.id)
     }
@@ -2214,8 +2322,7 @@ struct CreateEntryView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !isKeyboardVisible
                     && !isBodyEditorEditing
-                    && activeKeyboardFormattingMode == nil
-                    && !isKeyboardFormattingToolbarVisible {
+                    && activeKeyboardFormattingMode == nil {
                     entryDraftBottomBar
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -2243,138 +2350,159 @@ struct CreateEntryView: View {
     }
 
     private var entryDraftBottomBar: some View {
-        VStack(spacing: 10) {
-            entryMetadataChips
-
-            if hasStoryboardPhotos {
-                photosAttachedTab
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
+                entryLocationMetadataButton
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+
+            photosAttachedTab
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
             unifiedEditorToolbar
-
-            if showsComposeFlowControls {
-                nextEntryOptionsButton
-            }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 24)
-    }
-
-    private var displayedAddToJournalTitle: String? {
-        if let directJournalTitle = presentation.directJournalTitle {
-            return directJournalTitle
-        }
-
-        return linkedJournalTitle ?? selectedCustomJournalTitle
     }
 
     private var photosAttachedTab: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        photoStripHeader
+        Group {
+            if hasStoryboardPhotos {
+                if isPhotoTabCollapsed {
+                    Button {
+                        togglePhotoTabCollapsed()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.storyPurple)
+                                .frame(width: 22, height: 22)
+
+                            Text(attachedPhotoSummaryText)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+
+                            Spacer(minLength: 8)
+
+                            photoCollapseChevron(systemName: "chevron.up")
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(height: 54)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(attachedPhotoSummaryText), expand photos")
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            photoStripHeader
+
+                            Spacer(minLength: 8)
+
+                            Button {
+                                togglePhotoTabCollapsed()
+                            } label: {
+                                photoCollapseChevron(systemName: "chevron.down")
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Collapse photos")
+                        }
+                        .padding(.horizontal, 16)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            photoStripContent
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 4)
+                        }
+                        .frame(height: 76)
+                    }
+                    .padding(.top, 10)
+                    .padding(.bottom, 12)
+                }
+            } else {
+                Button {
+                    handlePhotosTabTapped()
+                } label: {
+                    HStack(spacing: 6) {
+                        StoryboardPhotoStripAddButton(
+                            systemName: "camera",
+                            iconColor: Color.storyPurple,
+                            size: 34,
+                            iconWeight: .semibold,
+                            showsDashedBorder: false
+                        )
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Add Reference Photos")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Color.storyPurple)
+
+                            Text("Photos help create better comics")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.storyInk.opacity(0.66))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.76)
+                        }
 
                         Spacer(minLength: 8)
 
-                        photoLimitText
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 11, weight: .semibold))
+
+                            Text("Up to 5 photos")
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.storyPurple.opacity(0.86))
+                        }
+                        .foregroundStyle(Color.storyInk.opacity(0.58))
                     }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        photoStripContent
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 4)
-                    }
-                    .frame(height: 76)
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
-            }
-            .padding(.top, isPhotoPanelExpanded ? 4 : 0)
-            .frame(maxHeight: isPhotoPanelExpanded ? 120 : 0, alignment: .top)
-            .opacity(isPhotoPanelExpanded ? 1 : 0)
-            .clipped()
-
-            Button {
-                dismissKeyboard()
-                withAnimation(.snappy(duration: 0.24)) {
-                    isPhotoPanelExpanded.toggle()
-                }
-            } label: {
-                if isPhotoPanelExpanded {
-                    HStack {
-                        Spacer()
-
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color.storyInk.opacity(0.64))
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .contentShape(Rectangle())
-                } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyInk.opacity(0.74))
-                            .frame(width: 28, height: 28)
-                            .background(Color.storyInk.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-                        Text(photosAttachedTitle)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color.storyInk.opacity(0.78))
-                            .lineLimit(1)
-
-                        Spacer(minLength: 10)
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color.storyInk.opacity(0.64))
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(height: 46)
+                    .padding(.horizontal, 14)
+                    .frame(height: 70)
                     .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(nextAvailablePhotoSlot == nil)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isPhotoPanelExpanded ? "Collapse attached photos" : photosAttachedTitle)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
-        .animation(.snappy(duration: 0.28, extraBounce: 0), value: isPhotoPanelExpanded)
     }
 
-    private var photosAttachedTitle: String {
-        let count = storyboardPhotos.compactMap { $0 }.count
-        return "\(count) Photo\(count == 1 ? "" : "s") Attached"
-    }
+    private var entryLocationMetadataButton: some View {
+        Button {
+            openEntryLocationSheet()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill")
+                    .font(.system(size: 11, weight: .medium))
 
-    private var entryMetadataChips: some View {
-        HStack(spacing: 8) {
-            entryMetadataTextButton(
-                title: displayedAddToJournalTitle ?? "Journal",
-                systemName: displayedAddToJournalTitle == nil ? "book.closed" : "book.closed.fill"
-            ) {
-                openAddToJournalPage()
+                Text(entryPlaceMetadataText)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
-
-            Text("•")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color.storyInk.opacity(0.28))
-
-            entryMetadataTextButton(
-                title: entryPlaceMetadataText,
-                systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill"
-            ) {
-                openEntryLocationSheet()
-            }
+            .foregroundStyle(Color.storyInk.opacity(0.48))
+            .frame(height: 24)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 24)
+        .buttonStyle(.plain)
+        .accessibilityLabel(entryPlaceMetadataText)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var entryPlaceMetadataText: String {
+        let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedLocation.isEmpty ? "Location" : trimmedLocation
     }
 
     private var entryDateMetadataText: String {
@@ -2392,64 +2520,39 @@ struct CreateEntryView: View {
         }
     }
 
-    private var entryPlaceMetadataText: String {
-        let trimmedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedLocation.isEmpty ? "Location" : trimmedLocation
-    }
-
-    private func entryMetadataTextButton(
-        title: String,
-        systemName: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemName)
-                    .font(.system(size: 11, weight: .medium))
-
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-            .foregroundStyle(Color.storyInk.opacity(0.48))
-            .frame(height: 24)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-
     private var unifiedEditorToolbar: some View {
-        HStack(spacing: 0) {
-            toolbarActionButton(title: "Photos", systemName: "photo.on.rectangle.angled", isSelected: isPhotoPanelExpanded) {
-                handlePhotosToolbarTapped()
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    toolbarActionButton(title: "Font", systemName: "textformat") {
+                        openFontOptions()
+                    }
+
+                    toolbarActionButton(title: "Paper", systemName: "doc.text", accessibilityLabel: "Background") {
+                        openPaperOptions()
+                    }
+
+                    toolbarActionButton(title: "Prompts", systemName: "lightbulb") {
+                        openJournalPromptsSheet()
+                    }
+                }
+                .padding(.trailing, 2)
             }
 
-            toolbarActionButton(title: "Font", systemName: "textformat") {
-                openFontOptions()
-            }
-
-            toolbarActionButton(title: "Paper", systemName: "doc.text") {
-                openPaperStyleOptions()
-            }
-
-            toolbarActionButton(title: "Prompts", systemName: "text.bubble") {
-                openJournalPromptsSheet()
-            }
-
-            toolbarActionButton(title: "Add to\nJournal", systemName: "plus.square") {
-                openAddToJournalPage()
+            if showsComposeFlowControls {
+                bottomToolbarNextButton
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.52), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.09), radius: 16, y: 7)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 0)
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.storyBorder.opacity(0.46))
+                .frame(height: 0.5)
+        }
     }
 
     private func toolbarActionButton(
@@ -2457,44 +2560,62 @@ struct CreateEntryView: View {
         systemName: String,
         isSelected: Bool = false,
         foregroundColor: Color = Color.storyInk.opacity(0.82),
+        accessibilityLabel: String? = nil,
+        showsTitle: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: systemName)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(foregroundColor.opacity(0.92))
-                    .frame(height: 22)
+                    .frame(width: 17, height: 17)
 
-                Text(title)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(foregroundColor)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(0)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                    .frame(height: 20)
+                if showsTitle {
+                    Text(title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(foregroundColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(isSelected ? Color.storyInk.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .contentShape(Rectangle())
+            .padding(.horizontal, showsTitle ? 13 : 10)
+            .frame(width: showsTitle ? nil : 38)
+            .frame(height: 38)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isSelected ? Color.storyPurple.opacity(0.5) : Color.storyBorder.opacity(0.72), lineWidth: isSelected ? 1.3 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .accessibilityLabel(accessibilityLabel ?? title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func handlePhotosToolbarTapped() {
-        dismissKeyboard()
-        if hasStoryboardPhotos {
-            withAnimation(.snappy(duration: 0.24)) {
-                isPhotoPanelExpanded.toggle()
+    private var bottomToolbarNextButton: some View {
+        Button {
+            showEntryOptionsPage()
+        } label: {
+            HStack(spacing: 5) {
+                Text("Next")
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .bold))
             }
-        } else {
-            openPhotoSourceSheet()
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(Color.storyPurple)
+            .frame(minWidth: 66, minHeight: 44, alignment: .trailing)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Next")
+    }
+
+    private func handlePhotosTabTapped() {
+        dismissKeyboard()
+        openPhotoSourceSheet()
     }
 
     private func openPhotoSourceSheet() {
@@ -2518,12 +2639,6 @@ struct CreateEntryView: View {
         DispatchQueue.main.async {
             isShowingPhotoLibrary = true
         }
-    }
-
-    private func openAddToJournalPage() {
-        dismissKeyboard()
-        selectedCustomJournalTitle = displayedAddToJournalTitle
-        isShowingAddToJournalPage = true
     }
 
     private func openJournalPromptsSheet() {
@@ -2550,8 +2665,8 @@ struct CreateEntryView: View {
 
     private var entryDraftKeyboardAccessory: some View {
         Group {
-            if isKeyboardFormattingToolbarVisible {
-                formattingKeyboardToolbar
+            if isKeyboardMoreToolbarVisible {
+                moreKeyboardToolbar
             } else {
                 normalKeyboardToolbar
             }
@@ -2581,8 +2696,6 @@ struct CreateEntryView: View {
 
     private var normalKeyboardToolbar: some View {
         HStack(spacing: 8) {
-            keyboardPhotoButton
-
             Spacer(minLength: 0)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -2590,9 +2703,9 @@ struct CreateEntryView: View {
                     keyboardFormattingButton(
                         title: "Aa",
                         accessibilityLabel: "Font options",
-                        isSelected: false
+                        isSelected: activeKeyboardFormattingMode == .font
                     ) {
-                        showKeyboardFormattingToolbar()
+                        toggleKeyboardFormattingPanel(.font)
                     }
 
                     keyboardToolbarDivider
@@ -2618,10 +2731,10 @@ struct CreateEntryView: View {
         .padding(.vertical, 4)
     }
 
-    private var formattingKeyboardToolbar: some View {
+    private var moreKeyboardToolbar: some View {
         HStack(spacing: 8) {
             Button {
-                closeKeyboardFormattingToolbar()
+                closeKeyboardMoreToolbar()
             } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 20, weight: .medium))
@@ -2632,21 +2745,7 @@ struct CreateEntryView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Back to keyboard")
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    keyboardPanelChip(
-                        title: selectedFontChoice.title,
-                        mode: .font,
-                        width: 112,
-                        font: selectedFontChoice.swiftUIFont(size: 14, weight: .bold)
-                    )
-
-                    keyboardTextSizeButton
-
-                    keyboardColorButton
-                }
-                .padding(.trailing, 12)
-            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -2680,14 +2779,9 @@ struct CreateEntryView: View {
                 sendTextFormattingCommand(.underline)
             }
 
-            keyboardFormattingButton(
-                title: "S",
-                accessibilityLabel: "Strikethrough",
-                isSelected: isKeyboardInlineStyleSelected(.strikethrough),
-                isStrikethrough: true
-            ) {
-                sendTextFormattingCommand(.strikethrough)
-            }
+            keyboardToolbarDivider
+
+            keyboardColorButton
 
             keyboardToolButton(
                 systemName: "list.bullet",
@@ -2712,28 +2806,29 @@ struct CreateEntryView: View {
             ) {
                 sendTextFormattingCommand(.outdent)
             }
+
+            keyboardToolButton(
+                systemName: "ellipsis",
+                accessibilityLabel: "More",
+                isSelected: false
+            ) {
+                showKeyboardMoreToolbar()
+            }
         }
     }
 
     private var keyboardPrimaryTextTypeButton: some View {
         Button {
-            showPrimaryKeyboardTextTypePanel()
+            togglePrimaryKeyboardTextTypePanel()
         } label: {
-            HStack(spacing: 7) {
-                Text("A")
-                    .font(.system(size: 16, weight: .bold, design: .serif))
-
+            HStack(spacing: 0) {
                 Text(selectedKeyboardTextType.primaryToolbarTitle)
                     .font(.system(size: 14, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
-            .foregroundStyle(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.72) : Color.storyPurple)
-            .frame(width: 106, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selectedKeyboardTextType == .body ? Color.storyInk.opacity(0.06) : Color.storyPurple.opacity(0.12))
-            )
+            .foregroundStyle(Color.storyInk.opacity(0.72))
+            .frame(width: 44, height: 34)
             .frame(height: 44)
             .contentShape(Rectangle())
         }
@@ -2774,30 +2869,40 @@ struct CreateEntryView: View {
         )
     }
 
-    private func showKeyboardFormattingToolbar() {
-        isKeyboardFormattingToolbarVisible = true
-        activeKeyboardFormattingMode = nil
-    }
-
     private func showKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
         isTitleFocused = false
-        isKeyboardFormattingToolbarVisible = true
+        isKeyboardMoreToolbarVisible = false
         activeKeyboardFormattingMode = mode
     }
 
-    private func showPrimaryKeyboardTextTypePanel() {
+    private func toggleKeyboardFormattingPanel(_ mode: CreateKeyboardFormattingMode) {
         isTitleFocused = false
-        isKeyboardFormattingToolbarVisible = false
-        activeKeyboardFormattingMode = .textType
+        isKeyboardMoreToolbarVisible = false
+        activeKeyboardFormattingMode = activeKeyboardFormattingMode == mode ? nil : mode
     }
 
-    private func closeKeyboardFormattingToolbar() {
-        isKeyboardFormattingToolbarVisible = false
+    private func showKeyboardMoreToolbar() {
+        isTitleFocused = false
+        isKeyboardMoreToolbarVisible = true
         activeKeyboardFormattingMode = nil
     }
 
+    private func togglePrimaryKeyboardTextTypePanel() {
+        isTitleFocused = false
+        if activeKeyboardFormattingMode == .textType {
+            activeKeyboardFormattingMode = nil
+        } else {
+            isKeyboardMoreToolbarVisible = false
+            activeKeyboardFormattingMode = .textType
+        }
+    }
+
+    private func closeKeyboardMoreToolbar() {
+        isKeyboardMoreToolbarVisible = false
+    }
+
     private func resetKeyboardFormattingState() {
-        isKeyboardFormattingToolbarVisible = false
+        isKeyboardMoreToolbarVisible = false
         activeKeyboardFormattingMode = nil
     }
 
@@ -2829,7 +2934,7 @@ struct CreateEntryView: View {
 
     private var keyboardColorButton: some View {
         Button {
-            showKeyboardFormattingPanel(.color)
+            toggleKeyboardFormattingPanel(.color)
         } label: {
             keyboardColorCircleChip
         }
@@ -2876,12 +2981,8 @@ struct CreateEntryView: View {
                 Circle()
                     .stroke(Color.storyInk.opacity(0.12), lineWidth: 0.7)
             )
-            .frame(width: 39, height: 39)
-            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(activeKeyboardFormattingMode == .color ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: activeKeyboardFormattingMode == .color ? 1.8 : 1)
-            )
+            .frame(width: 34, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var keyboardSizeChip: some View {
@@ -3106,8 +3207,8 @@ struct CreateEntryView: View {
 
     private var keyboardToolbarDivider: some View {
         Rectangle()
-            .fill(Color.storyInk.opacity(0.26))
-            .frame(width: 0.5, height: 24)
+            .fill(Color.storyInk.opacity(0.32))
+            .frame(width: 1, height: 24)
             .padding(.horizontal, 4)
     }
 
@@ -3169,29 +3270,14 @@ struct CreateEntryView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var keyboardPhotoButton: some View {
-        Button {
-            dismissKeyboard()
-            openPhotoSourceSheet()
-        } label: {
-            KeyboardPhotoAddButton(hasPhotos: hasStoryboardPhotos)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Add reference photos")
-        .disabled(nextAvailablePhotoSlot == nil)
-        .opacity(nextAvailablePhotoSlot == nil ? 0.42 : 1)
-    }
-
     private func openFontOptions() {
         dismissKeyboard()
-        selectedFormattingTab = .fontStyle
-        isShowingFormattingSheet = true
+        isShowingFontFormattingSheet = true
     }
 
-    private func openPaperStyleOptions() {
+    private func openPaperOptions() {
         dismissKeyboard()
-        selectedFormattingTab = .paperStyle
-        isShowingFormattingSheet = true
+        isShowingPaperFormattingSheet = true
     }
 
     private func openEntryDateSheet() {
@@ -3217,8 +3303,14 @@ struct CreateEntryView: View {
 
     private var entryOptionsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
+            smartGenerationCard
+
+            if !isSmartGenerationEnabled {
+                storyboardLayoutPickerSection
+            }
+
+            artStylePickerSection
             journalDestinationCard
-            // artStylePickerSection
             storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
@@ -3226,47 +3318,40 @@ struct CreateEntryView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private var nextEntryOptionsButton: some View {
-        Button {
-            showEntryOptionsPage()
-        } label: {
-            HStack(spacing: 8) {
-                Text("Next")
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(Color.storyPurple, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Next")
-    }
-
     private var selectedEntryJournalTitle: String? {
         if let directJournalTitle = presentation.directJournalTitle {
             return directJournalTitle
         }
 
-        switch entryDestination {
-        case .daily:
-            return DailyJournalData.allChapters().first?.title
-        case .custom:
-            return selectedCustomJournalTitle
-        }
+        return selectedCustomJournalTitle
     }
 
     private var hasStoryboardPhotos: Bool {
         storyboardPhotos.contains { $0 != nil }
     }
 
+    private var automaticStoryboardLayout: StoryboardLayoutOption {
+        switch storyboardPhotos.compactMap({ $0 }).count {
+        case 1...3:
+            .threePanels
+        case 4:
+            .fourSquares
+        case 5:
+            .fiveClassic
+        case 6...:
+            .sixSquares
+        default:
+            .fiveClassic
+        }
+    }
+
+    private var effectiveStoryboardLayout: StoryboardLayoutOption {
+        isSmartGenerationEnabled ? automaticStoryboardLayout : selectedStoryboardLayout
+    }
+
     @discardableResult
-    private func addCurrentEntry(to journalTitle: String) -> PrototypeEntry? {
-        guard let entry = currentJournalEntry() else {
+    private func addCurrentEntry(to journalTitle: String, id: UUID = UUID()) -> PrototypeEntry? {
+        guard let entry = currentJournalEntry(id: id) else {
             return nil
         }
 
@@ -3275,7 +3360,7 @@ struct CreateEntryView: View {
         return entry
     }
 
-    private func currentJournalEntry() -> PrototypeEntry? {
+    private func currentJournalEntry(id: UUID = UUID()) -> PrototypeEntry? {
         let trimmedTitle = storyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBody = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty || !trimmedBody.isEmpty else {
@@ -3297,6 +3382,7 @@ struct CreateEntryView: View {
         let trimmedRichText = currentEntryRichText()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return PrototypeEntry(
+            id: id,
             weekday: weekdayFormatter.string(from: storyDate).uppercased(),
             day: dayFormatter.string(from: storyDate),
             title: trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle,
@@ -3417,6 +3503,29 @@ struct CreateEntryView: View {
         dismissCreate()
     }
 
+    private func saveDirectJournalEntryInPlace() {
+        guard let journalTitle = presentation.directJournalTitle, hasDraftContent else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        dismissKeyboard()
+
+        let entryID = toolbarSavedJournalEntryID ?? UUID()
+        guard let entry = currentJournalEntry(id: entryID) else {
+            cancelToolbarSavedFeedback()
+            return
+        }
+
+        StoryEntryStore.upsert(entry, to: journalTitle)
+        onJournalEntryCreated(journalTitle, entry)
+        toolbarSavedJournalEntryID = entry.id
+        let savedSnapshot = currentDraftSnapshot(id: entry.id)
+        toolbarSavedSnapshot = savedSnapshot
+        completeToolbarSavedFeedback(for: savedSnapshot)
+        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+    }
+
     private var journalDestinationCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
@@ -3439,22 +3548,10 @@ struct CreateEntryView: View {
 
             VStack(spacing: 8) {
                 journalDestinationButton(
-                    title: "Daily Journal",
-                    subtitle: "Add to today's daily journal",
-                    icon: "calendar",
-                    isSelected: entryDestination == .daily
+                    title: selectedCustomJournalTitle ?? "Add to Journal",
+                    subtitle: selectedCustomJournalTitle == nil ? "Choose an existing journal or create a new one" : "Tap to change journal",
+                    icon: "book"
                 ) {
-                    entryDestination = .daily
-                    dismissKeyboard()
-                }
-
-                journalDestinationButton(
-                    title: "Custom Journal",
-                    subtitle: selectedCustomJournalTitle.map { "Adding to \($0)" } ?? "Add to an existing or new journal",
-                    icon: "book",
-                    isSelected: entryDestination == .custom
-                ) {
-                    entryDestination = .custom
                     isShowingJournalDestinationSheet = true
                     dismissKeyboard()
                 }
@@ -3473,10 +3570,11 @@ struct CreateEntryView: View {
         title: String,
         subtitle: String,
         icon: String,
-        isSelected: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let hasSelectedJournal = selectedCustomJournalTitle != nil
+
+        return Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 21, weight: .medium))
@@ -3497,16 +3595,25 @@ struct CreateEntryView: View {
 
                 Spacer()
 
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.storyPurple : Color.storyBorder)
+                if hasSelectedJournal {
+                    Text("Selected")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+                        .padding(.horizontal, 7)
+                        .frame(height: 22)
+                        .background(Color.storyPurple.opacity(0.1), in: Capsule())
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.homeMutedText.opacity(0.72))
             }
             .padding(.horizontal, 12)
             .frame(height: 58)
-            .background(Color.white.opacity(isSelected ? 0.96 : 0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Color.white.opacity(hasSelectedJournal ? 0.96 : 0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.storyPurple.opacity(0.34) : Color.storyBorder.opacity(0.62), lineWidth: 1)
+                    .stroke(hasSelectedJournal ? Color.storyPurple.opacity(0.34) : Color.storyBorder.opacity(0.62), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -3520,18 +3627,23 @@ struct CreateEntryView: View {
                 .rotationEffect(.degrees(-18))
                 .frame(width: 20, height: 20)
 
-            Text("Photos")
+            Text("Reference Photos")
                 .font(.system(size: 14, weight: .semibold, design: .serif))
                 .foregroundStyle(Color.storyInk)
         }
     }
 
-    private var photoLimitText: some View {
-        Text("Up to 5 photos")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Color.homeMutedText.opacity(0.78))
-            .lineLimit(1)
-            .minimumScaleFactor(0.78)
+    private var attachedPhotoSummaryText: String {
+        let count = storyboardPhotos.compactMap { $0 }.count
+        return "\(count) photo\(count == 1 ? "" : "s") attached"
+    }
+
+    private func photoCollapseChevron(systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(Color.storyInk.opacity(0.7))
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
     }
 
     private var photoStripContent: some View {
@@ -3578,6 +3690,12 @@ struct CreateEntryView: View {
         .accessibilityLabel("Add reference photos")
     }
 
+    private func togglePhotoTabCollapsed() {
+        withAnimation(.snappy(duration: 0.2)) {
+            isPhotoTabCollapsed.toggle()
+        }
+    }
+
     private func photoSourceButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
         Button {
             dismissKeyboard()
@@ -3606,41 +3724,71 @@ struct CreateEntryView: View {
         .accessibilityLabel(title)
     }
 
-    private var storyboardPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text("Storyboard Preview")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyInk)
+    private var smartGenerationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
 
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.storyGold)
-                    }
-
-                    Text("Every storyboard uses 5 panels with text")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.homeMutedText)
-                }
+                Text("Smart Generation")
+                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
 
                 Spacer(minLength: 8)
 
-                HStack(spacing: 5) {
-                    Text("\(previewLayout.title) · 5 panels")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.7))
-
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.storyPurple)
-                }
+                Text("Recommended")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 7)
+                    .frame(height: 20)
+                    .background(Color.storyPurple.opacity(0.1), in: Capsule())
             }
 
-            storyboardPreviewLayout(previewLayout)
+            HStack(alignment: .top, spacing: 14) {
+                compactStoryboardPreview(layout: effectiveStoryboardLayout)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: $isSmartGenerationEnabled.animation(.snappy(duration: 0.2))) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(isSmartGenerationEnabled ? "Auto chooses best layout" : "Manual layout controls")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+
+                            Text(isSmartGenerationEnabled ? "AI chooses layout, panel count, and photo placement." : "Choose your own layout below.")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.homeMutedText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color.storyPurple))
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        smartGenerationBenefit("Best layout")
+                        smartGenerationBenefit("Number of panels")
+                        smartGenerationBenefit("Photo placement")
+                    }
+                    .opacity(isSmartGenerationEnabled ? 1 : 0.64)
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11, weight: .semibold))
+
+                        Text("\(isSmartGenerationEnabled ? "Auto" : effectiveStoryboardLayout.title) · \(effectiveStoryboardLayout.panelCount) panels")
+                            .font(.system(size: 10, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .foregroundStyle(Color.storyPurple)
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(Color.storyPurple.opacity(0.09), in: Capsule())
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
-        .padding(14)
+        .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -3653,6 +3801,339 @@ struct CreateEntryView: View {
                 dismissKeyboard()
             }
         )
+    }
+
+    private func smartGenerationBenefit(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 12)
+
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.76))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+    }
+
+    private func compactStoryboardPreview(layout: StoryboardLayoutOption) -> some View {
+        compactStoryboardImagePreview(layout, width: 76, height: 108)
+            .padding(6)
+            .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.storyBorder.opacity(0.72), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .accessibilityLabel("Storyboard preview")
+    }
+
+    @ViewBuilder
+    private func compactStoryboardImagePreview(_ layout: StoryboardLayoutOption, width: CGFloat, height: CGFloat) -> some View {
+        let gap: CGFloat = 4
+
+        switch layout {
+        case .twoRectangles:
+            VStack(spacing: 4) {
+                compactStoryboardPhotoPanel(index: 0, width: width, height: (height - gap) / 2)
+                compactStoryboardPhotoPanel(index: 1, width: width, height: (height - gap) / 2)
+            }
+            .frame(width: width, height: height)
+        case .threeHorizontalPanels:
+            VStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    compactStoryboardPhotoPanel(index: index, width: width, height: (height - gap * 2) / 3)
+                }
+            }
+            .frame(width: width, height: height)
+        case .threePanels:
+            let topHeight = (height - gap) * 0.56
+            let bottomHeight = height - gap - topHeight
+            let bottomWidth = (width - gap) / 2
+
+            VStack(spacing: 4) {
+                compactStoryboardPhotoPanel(index: 0, width: width, height: topHeight)
+
+                HStack(spacing: 4) {
+                    compactStoryboardPhotoPanel(index: 1, width: bottomWidth, height: bottomHeight)
+                    compactStoryboardPhotoPanel(index: 2, width: bottomWidth, height: bottomHeight)
+                }
+            }
+            .frame(width: width, height: height)
+        case .threeVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    compactStoryboardPhotoPanel(index: index, width: (width - gap * 2) / 3, height: height)
+                }
+            }
+            .frame(width: width, height: height)
+        case .fourSquares:
+            let panelWidth = (width - gap) / 2
+            let panelHeight = (height - gap) / 2
+
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    compactStoryboardPhotoPanel(index: 0, width: panelWidth, height: panelHeight)
+                    compactStoryboardPhotoPanel(index: 1, width: panelWidth, height: panelHeight)
+                }
+
+                HStack(spacing: 4) {
+                    compactStoryboardPhotoPanel(index: 2, width: panelWidth, height: panelHeight)
+                    compactStoryboardPhotoPanel(index: 3, width: panelWidth, height: panelHeight)
+                }
+            }
+            .frame(width: width, height: height)
+        case .fourVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    compactStoryboardPhotoPanel(index: index, width: (width - gap * 3) / 4, height: height)
+                }
+            }
+            .frame(width: width, height: height)
+        case .fourHorizontalRectangles:
+            VStack(spacing: 3) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    compactStoryboardPhotoPanel(index: index, width: width, height: (height - 9) / 4)
+                }
+            }
+            .frame(width: width, height: height)
+        case .fiveHorizontalPanels:
+            VStack(spacing: 3) {
+                ForEach(0..<layout.panelCount, id: \.self) { index in
+                    compactStoryboardPhotoPanel(index: index, width: width, height: (height - 12) / 5)
+                }
+            }
+            .frame(width: width, height: height)
+        case .fiveClassic:
+            let rowHeight = (height - gap * 2) / 3
+            let halfWidth = (width - gap) / 2
+
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    compactStoryboardPhotoPanel(index: 0, width: halfWidth, height: rowHeight)
+                    compactStoryboardPhotoPanel(index: 1, width: halfWidth, height: rowHeight)
+                }
+
+                compactStoryboardPhotoPanel(index: 2, width: width, height: rowHeight)
+
+                HStack(spacing: 4) {
+                    compactStoryboardPhotoPanel(index: 3, width: halfWidth, height: rowHeight)
+                    compactStoryboardPhotoPanel(index: 4, width: halfWidth, height: rowHeight)
+                }
+            }
+            .frame(width: width, height: height)
+        case .sixSquares:
+            let panelWidth = (width - gap) / 2
+            let panelHeight = (height - gap * 2) / 3
+
+            VStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { row in
+                    HStack(spacing: 4) {
+                        compactStoryboardPhotoPanel(index: row * 2, width: panelWidth, height: panelHeight)
+                        compactStoryboardPhotoPanel(index: row * 2 + 1, width: panelWidth, height: panelHeight)
+                    }
+                }
+            }
+            .frame(width: width, height: height)
+        }
+    }
+
+    private func compactStoryboardPhotoPanel(index: Int, width: CGFloat, height: CGFloat) -> some View {
+        ZStack {
+            Image("storyboard_placeholder_\(min(index + 1, 5))")
+                .resizable()
+                .scaledToFill()
+                .opacity(0.72)
+
+            Color.white.opacity(0.2)
+
+            Text("\(index + 1)")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 14, height: 14)
+                .background(Color.white.opacity(0.86), in: Circle())
+        }
+        .frame(width: width, height: height)
+        .clipped()
+        .overlay(
+            Rectangle()
+                .stroke(Color.storyPurple.opacity(0.38), lineWidth: 0.8)
+        )
+    }
+
+    private var storyboardLayoutPickerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
+                Text("Layout")
+                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(StoryboardLayoutOption.allCases) { layout in
+                        storyboardLayoutPickerButton(layout)
+                    }
+                }
+                .padding(.horizontal, 1)
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.68), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
+    }
+
+    private func storyboardLayoutPickerButton(_ layout: StoryboardLayoutOption) -> some View {
+        let isSelected = selectedStoryboardLayout == layout
+
+        return Button {
+            dismissKeyboard()
+            withAnimation(.snappy(duration: 0.18)) {
+                selectedStoryboardLayout = layout
+            }
+        } label: {
+            VStack(spacing: 7) {
+                storyboardLayoutThumbnail(layout)
+                    .frame(width: 54, height: 74)
+                    .frame(width: 72, height: 92)
+                    .background(Color.white.opacity(isSelected ? 0.98 : 0.58), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(isSelected ? Color.storyPurple.opacity(0.72) : Color.storyBorder.opacity(0.62), lineWidth: isSelected ? 1.5 : 1)
+                    )
+                    .shadow(color: isSelected ? Color.storyPurple.opacity(0.14) : .clear, radius: 8, y: 3)
+
+                VStack(spacing: 2) {
+                    Text(layout.title)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
+                    Text("\(layout.panelCount) panels")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .lineLimit(1)
+                }
+                .frame(width: 82)
+            }
+            .frame(width: 82, height: 130, alignment: .top)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(layout.title), \(layout.panelCount) panels")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func storyboardLayoutThumbnail(_ layout: StoryboardLayoutOption) -> some View {
+        let fill = Color.storyPurple.opacity(0.16)
+        let stroke = Color.storyPurple.opacity(0.44)
+
+        switch layout {
+        case .twoRectangles:
+            VStack(spacing: 4) {
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+            }
+        case .threeHorizontalPanels:
+            VStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .threePanels:
+            VStack(spacing: 4) {
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    .frame(height: 28)
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .threeVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourSquares:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourHorizontalRectangles:
+            VStack(spacing: 3) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fiveHorizontalPanels:
+            VStack(spacing: 2.5) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fiveClassic:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .sixSquares:
+            VStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 4) {
+                        storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                        storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    }
+                }
+            }
+        }
+    }
+
+    private func storyboardLayoutThumbnailPanel(fill: Color, stroke: Color) -> some View {
+        Rectangle()
+            .fill(fill)
+            .overlay(
+                Rectangle()
+                    .stroke(stroke, lineWidth: 1)
+            )
     }
 
     @ViewBuilder
@@ -3793,7 +4274,6 @@ struct CreateEntryView: View {
 
         storyboardPhotos[slot] = image
         selectedPhotoSlot = nil
-        isPhotoPanelExpanded = true
     }
 
     private func setStoryboardPhotos(_ images: [UIImage]) {
@@ -3819,7 +4299,6 @@ struct CreateEntryView: View {
 
         storyboardPhotos = updatedPhotos
         selectedPhotoSlot = nil
-        isPhotoPanelExpanded = true
     }
 
     @MainActor
@@ -3853,7 +4332,7 @@ struct CreateEntryView: View {
         existingPhotos.remove(at: index)
         storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
         if existingPhotos.isEmpty {
-            isPhotoPanelExpanded = false
+            isPhotoTabCollapsed = false
         }
     }
 
@@ -4295,7 +4774,12 @@ struct CreateEntryView: View {
                         .foregroundStyle(Color.storyPurple)
                         .frame(width: 22)
 
-                    TextField("Add a location", text: $storyLocation)
+                    TextField(
+                        "",
+                        text: $storyLocation,
+                        prompt: Text("Add a location")
+                            .foregroundColor(Color.homeMutedText.opacity(0.72))
+                    )
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Color.storyInk)
                         .tint(Color.storyPurple)
@@ -4384,7 +4868,6 @@ struct CreateEntryView: View {
         didEditEntryLocation = true
         storyLocation = ""
         locationSearch.clear()
-        isShowingEntryLocationSheet = false
     }
 
     private var locationSuggestionList: some View {
@@ -4541,6 +5024,10 @@ struct CreateEntryView: View {
     private var artStylePickerSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .center) {
+                Image(systemName: "photo.artframe")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
                 Text("Choose Art Style")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Color.storyInk)
@@ -4589,39 +5076,61 @@ struct CreateEntryView: View {
     }
 
     private var generateStoryboardButton: some View {
-        Button {
-            dismissKeyboard()
-            startStoryboardGeneration()
-        } label: {
-            HStack(spacing: 7) {
-                if isGeneratingStoryboard {
-                    ProgressView()
-                        .tint(.white)
+        VStack(spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 22, height: 22)
 
-                    Text("Generating...")
-                } else {
-                    Text("Generate Storyboard")
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                }
+                Text("The AI will analyze your entry and photos to create a comic storyboard. Most users get the best results using Auto settings.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(
-                LinearGradient(
-                    colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.storyPurple.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Button {
+                dismissKeyboard()
+                startStoryboardGeneration()
+            } label: {
+                HStack(spacing: 7) {
+                    if isGeneratingStoryboard {
+                        ProgressView()
+                            .tint(.white)
+
+                        Text("Generating...")
+                    } else {
+                        Text("Generate Storyboard")
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(
+                    LinearGradient(
+                        colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+            }
+            .disabled(isGeneratingStoryboard)
+            .opacity(isGeneratingStoryboard ? 0.76 : 1)
+
+            Text("Estimated time: around 2 minutes")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.46))
         }
         .padding(.top, 2)
-        .disabled(isGeneratingStoryboard)
-        .opacity(isGeneratingStoryboard ? 0.76 : 1)
     }
 }
 
@@ -4644,13 +5153,13 @@ private struct JournalEntryPromptsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Prompt category", selection: $selectedCategory) {
+            HStack(spacing: 6) {
                 ForEach(JournalPromptCategory.allCases) { category in
-                    Text(category.title)
-                        .tag(category)
+                    promptCategoryTab(category)
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(4)
+            .background(Color.homeInputGray, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 10)
@@ -4684,13 +5193,42 @@ private struct JournalEntryPromptsSheet: View {
             .hideSharedBackgroundIfAvailable()
 
             ToolbarItem(placement: .principal) {
-                Text("Journal Prompts")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
+                HStack(spacing: 7) {
+                    Image(systemName: "lightbulb")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
+
+                    Text("Journal Suggestions")
+                        .font(.system(size: 18, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
             }
         }
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    private func promptCategoryTab(_ category: JournalPromptCategory) -> some View {
+        let isSelected = selectedCategory == category
+
+        return Button {
+            selectedCategory = category
+        } label: {
+            Text(category.title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(isSelected ? Color.white : Color.storyInk.opacity(0.72))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+                .background(
+                    isSelected ? Color.storyPurple : Color.white.opacity(0.62),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(category.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var todayPrompts: [JournalEntryPrompt] {
@@ -5456,7 +5994,7 @@ private struct PhotoSourceSheet: View {
             .padding(.bottom, 24)
         }
         .padding(.top, 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.homePageBackground)
     }
 
@@ -5791,7 +6329,7 @@ struct NotebookPaperBackground: View {
 }
 
 private struct CreateFormattingSheet: View {
-    @Binding var selectedTab: CreateFormattingTab
+    let mode: CreateFormattingTab
     @Binding var selectedFont: CreateFontChoice
     @Binding var selectedPaperStyle: CreatePaperStyleChoice
     @Binding var selectedTextColorIndex: Int
@@ -5834,16 +6372,20 @@ private struct CreateFormattingSheet: View {
                 .accessibilityLabel("Close formatting options")
             }
             .overlay {
-                Text(selectedTab.title)
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-            }
+                HStack(spacing: 7) {
+                    Image(systemName: mode.sheetSymbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.storyPurple)
 
-            CreateFormattingTabSwitcher(selectedTab: $selectedTab)
+                    Text(mode.sheetTitle)
+                        .font(.system(size: 19, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                }
+            }
 
             ScrollView(showsIndicators: false) {
                 Group {
-                    switch selectedTab {
+                    switch mode {
                     case .fontStyle:
                         fontStyleContent
                     case .paperStyle:
@@ -5860,98 +6402,46 @@ private struct CreateFormattingSheet: View {
 
     private var fontStyleContent: some View {
         VStack(alignment: .leading, spacing: 22) {
-            sheetSectionTitle("Font")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(CreateFontChoice.allCases) { font in
-                        Button {
-                            selectedFont = font
-                        } label: {
-                            CreateFontOptionCard(font: font, isSelected: selectedFont == font)
-                        }
-                        .buttonStyle(.plain)
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2),
+                spacing: 12
+            ) {
+                ForEach(CreateFontChoice.allCases) { font in
+                    Button {
+                        selectedFont = font
+                    } label: {
+                        CreateFontOptionCard(font: font, isSelected: selectedFont == font)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(font.title)
+                    .accessibilityAddTraits(selectedFont == font ? .isSelected : [])
                 }
-                .padding(.trailing, 8)
-                .padding(.bottom, 9)
-                .padding(.top, 1)
             }
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Text Size")
-
-            HStack(spacing: 14) {
-                Text("A")
-                    .font(selectedFont.swiftUIFont(size: 18, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-
-                Slider(value: $previewTextSize, in: 0...1)
-                    .tint(Color.storyPurple)
-
-                Text("A")
-                    .font(selectedFont.swiftUIFont(size: 34, weight: .bold))
-                    .foregroundStyle(Color.storyInk.opacity(0.82))
-            }
-
-            sheetSectionTitle("Text Color")
-            CreateColorSwatchRow(
-                colors: CreateFormattingPalette.textColors.map(\.color),
-                selectedIndex: $selectedTextColorIndex,
-                selectedCheckColor: .white,
-                emphasizedBorderIndex: nil,
-                showsMoreButton: false
-            )
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Preview")
-            formattingPreview
+            .padding(.top, 1)
         }
     }
 
     private var paperStyleContent: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            sheetSectionTitle("Paper Style")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(CreatePaperStyleChoice.allCases) { paperStyle in
-                        Button {
-                            selectedPaperStyle = paperStyle
-                        } label: {
-                            CreatePaperStyleOption(
-                                style: paperStyle,
-                                paperColor: CreateFormattingPalette.paperColors[selectedPaperColorIndex],
-                                isSelected: selectedPaperStyle == paperStyle
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+            alignment: .center,
+            spacing: 24
+        ) {
+            ForEach(CreatePaperStyleChoice.allCases) { paperStyle in
+                Button {
+                    selectedPaperStyle = paperStyle
+                } label: {
+                    CreatePaperStyleOption(
+                        style: paperStyle,
+                        paperColor: CreateFormattingPalette.paperColors[selectedPaperColorIndex],
+                        isSelected: selectedPaperStyle == paperStyle
+                    )
                 }
-                .padding(.vertical, 1)
+                .buttonStyle(.plain)
             }
-
-            if selectedPaperStyle.showsPaperColorOptions {
-                sheetSectionTitle("Paper Color")
-                CreateColorSwatchRow(
-                    colors: CreateFormattingPalette.paperColors,
-                    selectedIndex: $selectedPaperColorIndex,
-                    selectedCheckColor: Color.storyPurple,
-                    emphasizedBorderIndex: 1,
-                    showsMoreButton: false
-                )
-            }
-
-            Divider()
-                .overlay(Color.storyBorder.opacity(0.42))
-
-            sheetSectionTitle("Preview")
-            formattingPreview
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
     }
 
     private var formattingPreview: some View {
@@ -5979,81 +6469,33 @@ private struct CreateFormattingSheet: View {
     }
 }
 
-private struct CreateFormattingTabSwitcher: View {
-    @Binding var selectedTab: CreateFormattingTab
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(CreateFormattingTab.allCases) { tab in
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        selectedTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: tab.symbol)
-                            .font(.system(size: 15, weight: .semibold))
-
-                        Text(tab.title)
-                            .font(.system(size: 15, weight: .bold, design: .serif))
-                    }
-                    .foregroundStyle(selectedTab == tab ? Color.storyPurple : Color.storyInk.opacity(0.68))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(selectedTab == tab ? Color.white : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(selectedTab == tab ? Color.storyPurple : Color.clear, lineWidth: 1.4)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-            }
-        }
-        .padding(2)
-        .background(Color.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.45), lineWidth: 1)
-        )
-    }
-}
-
 private struct CreateFontOptionCard: View {
     let font: CreateFontChoice
     let isSelected: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Aa")
-                .font(font.swiftUIBodyFont(size: 27))
-                .foregroundStyle(Color.storyInk.opacity(0.9))
-
+        HStack(spacing: 10) {
             Text(font.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.homeMutedText)
+                .font(font.swiftUIBodyFont(size: 16))
+                .foregroundStyle(Color.storyInk)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-        .frame(width: 116, height: 96)
-        .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
-        )
-        .overlay(alignment: .bottomTrailing) {
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             if isSelected {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(Color.storyPurple, in: Circle())
-                    .offset(x: 8, y: 8)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
             }
         }
+        .padding(.horizontal, 16)
+        .frame(height: 62)
+        .frame(maxWidth: .infinity)
+        .background(isSelected ? Color.storyPurple.opacity(0.12) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.46), lineWidth: isSelected ? 1.8 : 1)
+        )
     }
 }
 
@@ -6065,11 +6507,12 @@ private struct CreatePaperStyleOption: View {
     var body: some View {
         VStack(spacing: 8) {
             CreatePaperPreview(style: style, paperColor: paperColor)
-                .frame(width: 82, height: 82)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
+                        .strokeBorder(isSelected ? Color.storyPurple : Color.storyBorder.opacity(0.45), lineWidth: isSelected ? 2 : 1)
                 )
                 .overlay(alignment: .bottomTrailing) {
                     if isSelected {
@@ -6085,10 +6528,11 @@ private struct CreatePaperStyleOption: View {
             Text(style.title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.homeMutedText)
-                .frame(width: 92)
+                .frame(maxWidth: .infinity)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -6320,7 +6764,7 @@ struct StoryboardPhotoStripThumbnail: View {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
                                 .stroke(Color.storyInk.opacity(0.45), lineWidth: 0.8)
                         )
-                        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("View reference photo")
@@ -6345,6 +6789,29 @@ struct StoryboardPhotoStripThumbnail: View {
             .accessibilityLabel("Remove reference photo")
         }
         .frame(width: size + overflow, height: size + bottomPadding + overflow)
+        .overlay(alignment: .top) {
+            StoryPhotoTape(width: 34, height: 11, rotation: -2)
+                .offset(x: -(overflow / 2), y: overflow - 4.5)
+        }
+    }
+}
+
+struct StoryPhotoTape: View {
+    let width: CGFloat
+    let height: CGFloat
+    let rotation: Double
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            .fill(Color(red: 0.83, green: 0.76, blue: 0.62).opacity(0.72))
+            .frame(width: width, height: height)
+            .overlay(
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 0.5)
+            )
+            .shadow(color: Color.storyInk.opacity(0.11), radius: 1.5, x: 0, y: 1)
+            .rotationEffect(.degrees(rotation))
+            .allowsHitTesting(false)
     }
 }
 
@@ -6413,19 +6880,28 @@ struct ReferencePhotoViewer: View {
 }
 
 struct StoryboardPhotoStripAddButton: View {
+    var systemName: String = "plus"
+    var iconColor: Color = Color.storyInk.opacity(0.82)
+    var size: CGFloat = 52
+    var iconWeight: Font.Weight = .light
+    var showsDashedBorder: Bool = true
+
     var body: some View {
         VStack {
-            Image(systemName: "plus")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(Color.storyInk.opacity(0.82))
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: iconWeight))
+                .foregroundStyle(iconColor)
         }
-        .frame(width: 52, height: 52)
+        .frame(width: size, height: size)
         .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.storyPurple.opacity(0.34), style: StrokeStyle(lineWidth: 1.1, dash: [4, 3]))
+                .stroke(
+                    showsDashedBorder ? Color.storyPurple.opacity(0.34) : Color.clear,
+                    style: StrokeStyle(lineWidth: 1.1, dash: [4, 3])
+                )
         )
-        .accessibilityLabel("Add photos")
+        .accessibilityLabel("Add Reference photos")
     }
 }
 

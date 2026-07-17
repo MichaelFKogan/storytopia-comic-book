@@ -601,7 +601,11 @@ struct JournalView: View {
                 return
             }
 
-            chapters[chapterIndex].entries.insert(entry, at: 0)
+            if let existingIndex = chapters[chapterIndex].entries.firstIndex(where: { $0.id == entry.id }) {
+                chapters[chapterIndex].entries[existingIndex] = entry
+            } else {
+                chapters[chapterIndex].entries.insert(entry, at: 0)
+            }
         }
     }
 
@@ -1483,7 +1487,11 @@ struct ClassicJournalView: View {
                 return
             }
 
-            chapters[chapterIndex].entries.insert(entry, at: 0)
+            if let existingIndex = chapters[chapterIndex].entries.firstIndex(where: { $0.id == entry.id }) {
+                chapters[chapterIndex].entries[existingIndex] = entry
+            } else {
+                chapters[chapterIndex].entries.insert(entry, at: 0)
+            }
         }
     }
 
@@ -4473,7 +4481,11 @@ private struct AllJournalEntriesSection: View {
                 return
             }
 
-            chapters[chapterIndex].entries.insert(entry, at: 0)
+            if let existingIndex = chapters[chapterIndex].entries.firstIndex(where: { $0.id == entry.id }) {
+                chapters[chapterIndex].entries[existingIndex] = entry
+            } else {
+                chapters[chapterIndex].entries.insert(entry, at: 0)
+            }
         }
     }
 }
@@ -4522,7 +4534,7 @@ struct EntriesView: View {
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
 
-    private let thumbnailRendererVersion = 8
+    private let thumbnailRendererVersion = 9
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
 
     @State private var showsPrototypeData = true
@@ -4835,7 +4847,7 @@ struct EntriesView: View {
                     .padding(.horizontal, 16)
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, 12)
         }
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
@@ -5370,8 +5382,12 @@ private struct EntryGridPreviewCard: View {
             previewImage
                 .aspectRatio(260.0 / 340.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+                .overlay(alignment: .top) {
+                    StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                        .offset(y: -7)
+                }
 
             if isEditing {
                 Button(role: .destructive) {
@@ -5740,7 +5756,11 @@ private struct PrototypeChapterDetailView: View {
                     isShowingNewStory = false
                 },
                 onJournalEntryCreated: { _, entry in
-                    chapter.entries.insert(entry, at: 0)
+                    if let existingIndex = chapter.entries.firstIndex(where: { $0.id == entry.id }) {
+                        chapter.entries[existingIndex] = entry
+                    } else {
+                        chapter.entries.insert(entry, at: 0)
+                    }
                     selectedSection = "Entries"
                     onCreateStory(entry)
                 }
@@ -7795,6 +7815,36 @@ enum StoryEntryStore {
         )
 
         guard let data = try? JSONEncoder().encode([newRecord] + records) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func upsert(_ entry: PrototypeEntry, to chapterTitle: String) {
+        let newRecord = Record(
+            id: entry.id,
+            chapterTitle: chapterTitle,
+            weekday: entry.weekday,
+            day: entry.day,
+            title: entry.title,
+            body: entry.body,
+            richText: entry.richText,
+            time: entry.time,
+            location: entry.location
+        )
+        var didUpdate = false
+        let updatedRecords = records.map { record in
+            guard record.chapterTitle == chapterTitle, record.id == entry.id else {
+                return record
+            }
+
+            didUpdate = true
+            return newRecord
+        }
+        let recordsToSave = didUpdate ? updatedRecords : [newRecord] + updatedRecords
+
+        guard let data = try? JSONEncoder().encode(recordsToSave) else {
             return
         }
 
