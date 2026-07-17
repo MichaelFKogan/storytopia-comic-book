@@ -1180,7 +1180,8 @@ struct CreateEntryView: View {
     var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
 
     @State private var selectedArtStyle = "Anime"
-    private let previewLayout = StoryboardLayoutOption.fiveClassic
+    @State private var selectedStoryboardLayout = StoryboardLayoutOption.fiveClassic
+    @State private var isSmartGenerationEnabled = true
 
     @State private var selectedPhotoSlot: Int?
     @State private var isShowingPhotoSourceSheet = false
@@ -1224,8 +1225,6 @@ struct CreateEntryView: View {
     @State private var isPhotoTabCollapsed = false
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
-    @GestureState private var exitDragOffset: CGFloat = 0
-    @State private var didDismissKeyboardForExitDrag = false
     @FocusState private var isTitleFocused: Bool
     @State private var editorFocusRequestID = 0
     @State private var editorBlurRequestID = 0
@@ -1333,9 +1332,6 @@ struct CreateEntryView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .offset(x: exitDragOffset)
-        .simultaneousGesture(exitSwipeGesture)
-        .animation(.snappy(duration: 0.22), value: exitDragOffset)
         .onDisappear {
             dismissKeyboard()
             UIApplication.shared.connectedScenes
@@ -1550,7 +1546,7 @@ struct CreateEntryView: View {
         }
 
         let photos = storyboardPhotos.compactMap { $0 }
-        let layout = StoryboardLayoutOption.fiveClassic
+        let layout = selectedStoryboardLayout
         isGeneratingStoryboard = true
 
         Task {
@@ -1647,7 +1643,23 @@ struct CreateEntryView: View {
         .background(pageTapBackground)
         .background(Color.homePageBackground)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isShowingEntryOptionsPage = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.72))
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+            }
+            .hideSharedBackgroundIfAvailable()
+
             createToolbarItems(title: "Entry Details", showsCloseButton: false)
         }
         .toolbarBackground(Color.homePageBackground, for: .navigationBar)
@@ -1775,6 +1787,7 @@ struct CreateEntryView: View {
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
                 }
+                .frame(width: showsToolbarSaveButton ? 74 : 30, alignment: .leading)
                 .buttonStyle(.plain)
                 .accessibilityLabel(presentation.closeButtonAccessibilityLabel)
             }
@@ -1787,15 +1800,20 @@ struct CreateEntryView: View {
                     openEntryDateSheet()
                 } label: {
                     HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.homeAccent)
+
                         Text(entryDateMetadataText)
                             .font(.system(size: 14, weight: .medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
+                            .foregroundStyle(Color.storyInk.opacity(0.62))
 
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.62))
                     }
-                    .foregroundStyle(Color.storyInk.opacity(0.62))
                     .frame(maxWidth: 210)
                     .contentShape(Rectangle())
                 }
@@ -1927,48 +1945,6 @@ struct CreateEntryView: View {
         }
 
         return currentDraftSnapshot(id: loadedDraftSnapshot.id) != loadedDraftSnapshot
-    }
-
-    private var exitSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 18, coordinateSpace: .local)
-            .onChanged { value in
-                guard isExitSwipe(value) else {
-                    return
-                }
-
-                guard !didDismissKeyboardForExitDrag else {
-                    return
-                }
-
-                didDismissKeyboardForExitDrag = true
-                DispatchQueue.main.async {
-                    dismissKeyboard()
-                }
-            }
-            .updating($exitDragOffset) { value, state, _ in
-                guard isExitSwipe(value) else {
-                    return
-                }
-
-                state = value.translation.width
-            }
-            .onEnded { value in
-                defer {
-                    didDismissKeyboardForExitDrag = false
-                }
-
-                let shouldExit = value.translation.width > 96
-                    || value.predictedEndTranslation.width > 180
-
-                if shouldExit && isExitSwipe(value) {
-                    requestExit()
-                }
-            }
-    }
-
-    private func isExitSwipe(_ value: DragGesture.Value) -> Bool {
-        value.translation.width > 0
-            && abs(value.translation.height) < max(24, value.translation.width * 0.65)
     }
 
     private func requestExit() {
@@ -2382,6 +2358,8 @@ struct CreateEntryView: View {
             .padding(.bottom, 10)
 
             photosAttachedTab
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
             unifiedEditorToolbar
         }
@@ -2492,17 +2470,12 @@ struct CreateEntryView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.72))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.storyBorder.opacity(0.46))
-                .frame(height: 0.5)
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.storyBorder.opacity(0.46))
-                .frame(height: 0.5)
-        }
+        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
     }
 
     private var entryLocationMetadataButton: some View {
@@ -3330,7 +3303,12 @@ struct CreateEntryView: View {
 
     private var entryOptionsStepContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            storyboardPreviewTopSection
+            smartGenerationCard
+
+            if !isSmartGenerationEnabled {
+                storyboardLayoutPickerSection
+            }
+
             artStylePickerSection
             journalDestinationCard
             storyDetailsCard
@@ -3338,15 +3316,6 @@ struct CreateEntryView: View {
             generateStoryboardButton
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var storyboardPreviewTopSection: some View {
-        GeometryReader { proxy in
-            storyboardPreviewSection
-                .frame(width: proxy.size.width * 0.86, alignment: .topLeading)
-                .scaleEffect(0.58, anchor: .topLeading)
-        }
-        .frame(height: 260)
     }
 
     private var selectedEntryJournalTitle: String? {
@@ -3736,41 +3705,72 @@ struct CreateEntryView: View {
         .accessibilityLabel(title)
     }
 
-    private var storyboardPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text("Storyboard Preview")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.storyInk)
+    private var smartGenerationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
 
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.storyGold)
-                    }
-
-                    Text("Every storyboard uses 5 panels with text")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.homeMutedText)
-                }
+                Text("Smart Generation")
+                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
 
                 Spacer(minLength: 8)
 
-                HStack(spacing: 5) {
-                    Text("\(previewLayout.title) · 5 panels")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.storyInk.opacity(0.7))
-
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.storyPurple)
-                }
+                Text("Recommended")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 7)
+                    .frame(height: 20)
+                    .background(Color.storyPurple.opacity(0.1), in: Capsule())
             }
 
-            storyboardPreviewLayout(previewLayout)
+            HStack(alignment: .top, spacing: 14) {
+                compactStoryboardPreview(layout: selectedStoryboardLayout)
+                    .frame(width: 132, height: 192)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: $isSmartGenerationEnabled.animation(.snappy(duration: 0.2))) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(isSmartGenerationEnabled ? "Auto chooses best layout" : "Manual layout controls")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+
+                            Text(isSmartGenerationEnabled ? "AI chooses layout, panel count, and photo placement." : "Choose your own layout below.")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.homeMutedText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color.storyPurple))
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        smartGenerationBenefit("Best layout")
+                        smartGenerationBenefit("Number of panels")
+                        smartGenerationBenefit("Photo placement")
+                    }
+                    .opacity(isSmartGenerationEnabled ? 1 : 0.64)
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11, weight: .semibold))
+
+                        Text("\(selectedStoryboardLayout.title) · \(selectedStoryboardLayout.panelCount) panels")
+                            .font(.system(size: 10, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .foregroundStyle(Color.storyPurple)
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(Color.storyPurple.opacity(0.09), in: Capsule())
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
-        .padding(14)
+        .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -3783,6 +3783,211 @@ struct CreateEntryView: View {
                 dismissKeyboard()
             }
         )
+    }
+
+    private func smartGenerationBenefit(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 12)
+
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.76))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+    }
+
+    private func compactStoryboardPreview(layout: StoryboardLayoutOption) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.homePageBackground.opacity(0.72)
+
+            storyboardPreviewLayout(layout)
+                .frame(width: 246)
+                .scaleEffect(0.5, anchor: .topLeading)
+                .padding(5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.storyPurple.opacity(0.28), lineWidth: 1)
+        )
+        .clipped()
+        .accessibilityLabel("Storyboard preview")
+    }
+
+    private var storyboardLayoutPickerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
+                Text("Layout")
+                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(StoryboardLayoutOption.allCases) { layout in
+                        storyboardLayoutPickerButton(layout)
+                    }
+                }
+                .padding(.horizontal, 1)
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.68), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
+    }
+
+    private func storyboardLayoutPickerButton(_ layout: StoryboardLayoutOption) -> some View {
+        let isSelected = selectedStoryboardLayout == layout
+
+        return Button {
+            dismissKeyboard()
+            withAnimation(.snappy(duration: 0.18)) {
+                selectedStoryboardLayout = layout
+            }
+        } label: {
+            VStack(spacing: 7) {
+                storyboardLayoutThumbnail(layout)
+                    .frame(width: 54, height: 74)
+                    .frame(width: 72, height: 92)
+                    .background(Color.white.opacity(isSelected ? 0.98 : 0.58), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(isSelected ? Color.storyPurple.opacity(0.72) : Color.storyBorder.opacity(0.62), lineWidth: isSelected ? 1.5 : 1)
+                    )
+                    .shadow(color: isSelected ? Color.storyPurple.opacity(0.14) : .clear, radius: 8, y: 3)
+
+                VStack(spacing: 2) {
+                    Text(layout.title)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isSelected ? Color.storyPurple : Color.storyInk.opacity(0.72))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
+                    Text("\(layout.panelCount) panels")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .lineLimit(1)
+                }
+                .frame(width: 82)
+            }
+            .frame(width: 82, height: 130, alignment: .top)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(layout.title), \(layout.panelCount) panels")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func storyboardLayoutThumbnail(_ layout: StoryboardLayoutOption) -> some View {
+        let fill = Color.storyPurple.opacity(0.16)
+        let stroke = Color.storyPurple.opacity(0.44)
+
+        switch layout {
+        case .twoRectangles:
+            VStack(spacing: 4) {
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+            }
+        case .threeHorizontalPanels:
+            VStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .threePanels:
+            VStack(spacing: 4) {
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    .frame(height: 28)
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .threeVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourSquares:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourVerticalPanels:
+            HStack(spacing: 4) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fourHorizontalRectangles:
+            VStack(spacing: 3) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fiveHorizontalPanels:
+            VStack(spacing: 2.5) {
+                ForEach(0..<layout.panelCount, id: \.self) { _ in
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .fiveClassic:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+
+                storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+
+                HStack(spacing: 4) {
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                }
+            }
+        case .sixSquares:
+            VStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 4) {
+                        storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                        storyboardLayoutThumbnailPanel(fill: fill, stroke: stroke)
+                    }
+                }
+            }
+        }
+    }
+
+    private func storyboardLayoutThumbnailPanel(fill: Color, stroke: Color) -> some View {
+        Rectangle()
+            .fill(fill)
+            .overlay(
+                Rectangle()
+                    .stroke(stroke, lineWidth: 1)
+            )
     }
 
     @ViewBuilder
@@ -4725,39 +4930,61 @@ struct CreateEntryView: View {
     }
 
     private var generateStoryboardButton: some View {
-        Button {
-            dismissKeyboard()
-            startStoryboardGeneration()
-        } label: {
-            HStack(spacing: 7) {
-                if isGeneratingStoryboard {
-                    ProgressView()
-                        .tint(.white)
+        VStack(spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 22, height: 22)
 
-                    Text("Generating...")
-                } else {
-                    Text("Generate Storyboard")
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                }
+                Text("The AI will analyze your entry and photos to create a comic storyboard. Most users get the best results using Auto settings.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(
-                LinearGradient(
-                    colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.storyPurple.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Button {
+                dismissKeyboard()
+                startStoryboardGeneration()
+            } label: {
+                HStack(spacing: 7) {
+                    if isGeneratingStoryboard {
+                        ProgressView()
+                            .tint(.white)
+
+                        Text("Generating...")
+                    } else {
+                        Text("Generate Storyboard")
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(
+                    LinearGradient(
+                        colors: [Color.storyPurple.opacity(0.95), Color.storyPurple],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .shadow(color: Color.storyPurple.opacity(0.18), radius: 10, y: 5)
+            }
+            .disabled(isGeneratingStoryboard)
+            .opacity(isGeneratingStoryboard ? 0.76 : 1)
+
+            Text("Estimated time: around 2 minutes")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.46))
         }
         .padding(.top, 2)
-        .disabled(isGeneratingStoryboard)
-        .opacity(isGeneratingStoryboard ? 0.76 : 1)
     }
 }
 
@@ -4786,7 +5013,7 @@ private struct JournalEntryPromptsSheet: View {
                 }
             }
             .padding(4)
-            .background(Color.storyBorder.opacity(0.22), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(Color.homeInputGray, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 10)
@@ -5621,7 +5848,7 @@ private struct PhotoSourceSheet: View {
             .padding(.bottom, 24)
         }
         .padding(.top, 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.homePageBackground)
     }
 
