@@ -4533,6 +4533,9 @@ struct EntriesView: View {
     @Binding var selectedPage: StoryPage
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
+    @Binding var completedEntryOpenedStoryboardImage: UIImage?
+    @Binding var isOpeningEntryFromEntries: Bool
+    @Binding var isOpeningCompletedEntryFromEntries: Bool
 
     private let thumbnailRendererVersion = 9
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
@@ -4540,11 +4543,13 @@ struct EntriesView: View {
     @State private var showsPrototypeData = true
     @State private var entries: [CreateEntryDraft] = []
     @State private var sampleEntries: [CreateEntryDraft] = []
+    @State private var completedStoryboards: [GeneratedStoryboard] = []
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
     @State private var sampleEntryBeingPreviewed: CreateEntryDraft?
     @State private var entriesPendingDeletion: [CreateEntryDraft] = []
+    @State private var selectedEntryTab: EntriesTab = .drafts
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
 
     private var selectedEntryLayout: JournalEntryLayout {
@@ -4565,7 +4570,11 @@ struct EntriesView: View {
                 header
                     .padding(.horizontal, 16)
 
-                if selectedEntryLayout == .list {
+                tabSwitcher
+
+                if selectedEntryTab == .completed {
+                    completedEntryGrid
+                } else if selectedEntryLayout == .list {
                     entryList
                 } else {
                     entryGrid
@@ -4640,6 +4649,33 @@ struct EntriesView: View {
         .padding(.top, 12)
     }
 
+    private var tabSwitcher: some View {
+        HStack(spacing: 0) {
+            ForEach(EntriesTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedEntryTab = tab
+                    }
+                } label: {
+                    VStack(spacing: 8) {
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(selectedEntryTab == tab ? Color.homeAccent : Color.homeMutedText.opacity(0.78))
+
+                        Capsule()
+                            .fill(selectedEntryTab == tab ? Color.homeAccent : Color.clear)
+                            .frame(height: 3)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedEntryTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
+    }
+
     private var entryLayoutSwitcher: some View {
         HStack(spacing: 4) {
             entryLayoutButton(.grid)
@@ -4682,6 +4718,9 @@ struct EntriesView: View {
 
     private var entryCreateButton: some View {
         Button {
+            isOpeningEntryFromEntries = false
+            isOpeningCompletedEntryFromEntries = false
+            completedEntryOpenedStoryboardImage = nil
             activeDraftID = nil
             selectedPage = .create
         } label: {
@@ -4775,6 +4814,9 @@ struct EntriesView: View {
         } else {
             ForEach(filteredEntries) { entry in
                 Button {
+                    isOpeningEntryFromEntries = true
+                    isOpeningCompletedEntryFromEntries = false
+                    completedEntryOpenedStoryboardImage = nil
                     activeDraftID = entry.id
                     selectedPage = .create
                 } label: {
@@ -4827,6 +4869,9 @@ struct EntriesView: View {
                                     if showsSampleEntries {
                                         sampleEntryBeingPreviewed = entry
                                     } else {
+                                        isOpeningEntryFromEntries = true
+                                        isOpeningCompletedEntryFromEntries = false
+                                        completedEntryOpenedStoryboardImage = nil
                                         activeDraftID = entry.id
                                         selectedPage = .create
                                     }
@@ -4862,6 +4907,75 @@ struct EntriesView: View {
         ]
     }
 
+    private var completedEntryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if completedEntries.isEmpty {
+                    emptyEntriesState
+                        .padding(.horizontal, 16)
+                } else {
+                    LazyVGrid(columns: entryGridColumns, spacing: 14) {
+                        ForEach(Array(completedEntries.enumerated()), id: \.element.id) { index, entry in
+                            CompletedEntryGridCard(
+                                entry: entry,
+                                title: entryDisplayTitle(entry),
+                                storyboardImage: storyboardImage(for: index),
+                                onOpen: {
+                                    isOpeningEntryFromEntries = true
+                                    isOpeningCompletedEntryFromEntries = true
+                                    completedEntryOpenedStoryboardImage = storyboardUIImage(for: index)
+                                    activeDraftID = entry.id
+                                    selectedPage = .create
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.top, 12)
+        }
+        .background(Color.homePageBackground)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 104)
+        }
+    }
+
+    private var completedEntries: [CreateEntryDraft] {
+        let sourceEntries = showsSampleEntries ? sampleEntries : entries
+        guard !sourceEntries.isEmpty else {
+            return []
+        }
+
+        return Array(sourceEntries.prefix(completedEntryCount(for: sourceEntries.count)))
+    }
+
+    private var draftEntries: [CreateEntryDraft] {
+        let sourceEntries = showsSampleEntries ? sampleEntries : entries
+        let completedIDs = Set(completedEntries.map(\.id))
+        return sourceEntries.filter { !completedIDs.contains($0.id) }
+    }
+
+    private func completedEntryCount(for entryCount: Int) -> Int {
+        min(max(entryCount / 3, 1), 4)
+    }
+
+    private func storyboardImage(for index: Int) -> CompletedStoryboardImage {
+        if completedStoryboards.indices.contains(index) {
+            return .uiImage(completedStoryboards[index].image)
+        }
+
+        return .asset(CompletedStoryboardSample.imageName(for: index))
+    }
+
+    private func storyboardUIImage(for index: Int) -> UIImage? {
+        if completedStoryboards.indices.contains(index) {
+            return completedStoryboards[index].image
+        }
+
+        return UIImage(named: CompletedStoryboardSample.imageName(for: index))
+    }
+
     private var emptyEntriesState: some View {
         VStack(spacing: 10) {
             Image(systemName: "doc.badge.plus")
@@ -4886,7 +5000,12 @@ struct EntriesView: View {
     }
 
     private var filteredEntries: [CreateEntryDraft] {
-        showsSampleEntries ? sampleEntries : entries
+        switch selectedEntryTab {
+        case .drafts:
+            return draftEntries
+        case .completed:
+            return completedEntries
+        }
     }
 
     private var showsSampleEntries: Bool {
@@ -5028,6 +5147,7 @@ struct EntriesView: View {
 
     private func refreshEntries() {
         entries = CreateEntryDraftStore.loadAll()
+        completedStoryboards = GeneratedStoryboardStore.load()
         if entries.isEmpty && showsPrototypeData && sampleEntries.isEmpty {
             sampleEntries = EntriesSampleData.entries()
         }
@@ -5453,6 +5573,174 @@ private struct EntryGridPreviewCard: View {
     }
 }
 
+private enum CompletedStoryboardImage {
+    case asset(String)
+    case uiImage(UIImage)
+}
+
+private struct CompletedEntryGridCard: View {
+    let entry: CreateEntryDraft
+    let title: String
+    let storyboardImage: CompletedStoryboardImage
+    let onOpen: () -> Void
+    let accessibilityLabel: String
+
+    init(
+        entry: CreateEntryDraft,
+        title: String,
+        storyboardImage: CompletedStoryboardImage,
+        onOpen: @escaping () -> Void
+    ) {
+        self.entry = entry
+        self.title = title
+        self.storyboardImage = storyboardImage
+        self.onOpen = onOpen
+        accessibilityLabel = "Completed \(title)"
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                entryPreviewImage
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(alignment: .top) {
+                        StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                            .offset(y: -7)
+                    }
+                    .zIndex(0)
+
+                storyboardOverlay(in: proxy.size)
+                    .zIndex(1)
+            }
+        }
+            .aspectRatio(260.0 / 340.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onOpen()
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(.isButton)
+    }
+
+    @ViewBuilder
+    private var entryPreviewImage: some View {
+        if let thumbnail = entry.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color(red: 0.985, green: 0.978, blue: 0.955)
+
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.08), lineWidth: 1)
+                    .padding(12)
+
+                Image(systemName: "doc.text")
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(Color.storyInk.opacity(0.34))
+            }
+        }
+    }
+
+    private func storyboardOverlay(in size: CGSize) -> some View {
+        let overlayHeight = size.height * 0.58
+        let overlayWidth = overlayHeight * 0.72
+
+        return ZStack(alignment: .top) {
+            storyboardPreviewImage
+                .frame(width: overlayWidth, height: overlayHeight)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.white.opacity(0.75), lineWidth: 1)
+                )
+                .shadow(color: Color.storyInk.opacity(0.08), radius: 3, y: 1)
+
+            StoryPhotoTape(width: 40, height: 12, rotation: 0)
+                .offset(y: -6)
+                .zIndex(1)
+        }
+        .frame(width: overlayWidth, height: overlayHeight)
+        .shadow(color: Color.storyInk.opacity(0.16), radius: 7, y: 4)
+        .position(x: size.width * 0.68, y: size.height * 0.66)
+    }
+
+    @ViewBuilder
+    private var storyboardPreviewImage: some View {
+        switch storyboardImage {
+        case .asset(let imageName):
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+        case .uiImage(let uiImage):
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFit()
+        }
+    }
+}
+
+private enum CompletedStoryboardSample: Int, CaseIterable, Identifiable {
+    case first = 1
+    case second
+    case third
+    case fourth
+    case fifth
+    case sixth
+    case seventh
+    case eighth
+    case ninth
+    case tenth
+    case eleventh
+    case twelfth
+    case thirteenth
+    case fourteenth
+    case fifteenth
+    case sixteenth
+
+    var id: Int {
+        rawValue
+    }
+
+    var imageName: String {
+        "storyboard\(rawValue)"
+    }
+
+    var accessibilityLabel: String {
+        "Completed storyboard example \(rawValue)"
+    }
+
+    static func imageName(for index: Int) -> String {
+        let wrappedIndex = index % allCases.count
+        return "storyboard\(wrappedIndex + 1)"
+    }
+}
+
+private enum EntriesTab: String, CaseIterable, Identifiable {
+    case drafts
+    case completed
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .drafts:
+            return "Drafts"
+        case .completed:
+            return "Completed"
+        }
+    }
+}
+
 private enum JournalEntryLayout: String {
     case grid
     case list
@@ -5752,6 +6040,7 @@ private struct PrototypeChapterDetailView: View {
                     set: { _ in }
                 ),
                 generatedStoryboards: $generatedStoryboards,
+                completedEntryOpenedStoryboardImage: .constant(nil),
                 dismissCreate: {
                     isShowingNewStory = false
                 },

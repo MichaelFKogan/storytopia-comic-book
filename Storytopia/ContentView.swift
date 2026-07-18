@@ -17,6 +17,9 @@ struct ContentView: View {
     @State private var isDraftSaved: Bool
     @State private var activeDraftID: UUID?
     @State private var generatedStoryboards: [GeneratedStoryboard]
+    @State private var completedEntryOpenedStoryboardImage: UIImage?
+    @State private var isOpeningEntryFromEntries: Bool
+    @State private var isOpeningCompletedEntryFromEntries: Bool
 
     init() {
         let drafts = CreateEntryDraftStore.loadAll()
@@ -26,6 +29,9 @@ struct ContentView: View {
         _isDraftSaved = State(initialValue: !drafts.isEmpty)
         _activeDraftID = State(initialValue: nil)
         _generatedStoryboards = State(initialValue: GeneratedStoryboardStore.load())
+        _completedEntryOpenedStoryboardImage = State(initialValue: nil)
+        _isOpeningEntryFromEntries = State(initialValue: false)
+        _isOpeningCompletedEntryFromEntries = State(initialValue: false)
     }
 
     var body: some View {
@@ -49,8 +55,18 @@ struct ContentView: View {
                     if selectedPage != .create {
                         pageBehindCreate = selectedPage
                     }
+
+                    if !isOpeningEntryFromEntries {
+                        activeDraftID = nil
+                        completedEntryOpenedStoryboardImage = nil
+                    } else if !isOpeningCompletedEntryFromEntries {
+                        completedEntryOpenedStoryboardImage = nil
+                    }
                 } else {
                     pageBehindCreate = newPage
+                    isOpeningEntryFromEntries = false
+                    isOpeningCompletedEntryFromEntries = false
+                    completedEntryOpenedStoryboardImage = nil
                 }
 
                 selectedPage = newPage
@@ -77,7 +93,10 @@ struct ContentView: View {
             EntriesView(
                 selectedPage: pageSelection,
                 isDraftSaved: $isDraftSaved,
-                activeDraftID: $activeDraftID
+                activeDraftID: $activeDraftID,
+                completedEntryOpenedStoryboardImage: $completedEntryOpenedStoryboardImage,
+                isOpeningEntryFromEntries: $isOpeningEntryFromEntries,
+                isOpeningCompletedEntryFromEntries: $isOpeningCompletedEntryFromEntries
             )
                 .transition(.identity)
                 .zIndex(0)
@@ -125,8 +144,12 @@ struct ContentView: View {
             activeDraftID: $activeDraftID,
             selectedPage: pageSelection,
             generatedStoryboards: $generatedStoryboards,
+            completedEntryOpenedStoryboardImage: $completedEntryOpenedStoryboardImage,
             dismissCreate: {
                 selectedPage = pageBehindCreate
+                isOpeningEntryFromEntries = false
+                isOpeningCompletedEntryFromEntries = false
+                completedEntryOpenedStoryboardImage = nil
             }
         )
     }

@@ -1176,6 +1176,7 @@ struct CreateEntryView: View {
     @Binding var activeDraftID: UUID?
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
+    @Binding var completedEntryOpenedStoryboardImage: UIImage?
     let dismissCreate: () -> Void
     var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
 
@@ -2282,38 +2283,43 @@ struct CreateEntryView: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: scrollContentHeight, maxHeight: .infinity)
 
-                    NotebookEditorContent(
-                        storyTitle: $storyTitle,
-                        entryText: $entryText,
-                        entryRichText: $entryRichText,
-                        isTitleFocused: $isTitleFocused,
-                        editorFocusRequestID: editorFocusRequestID,
-                        editorBlurRequestID: editorBlurRequestID,
-                        formattingRequest: textFormattingRequest,
-                        bodyPlaceholder: "Start writing...",
-                        scrollsInternally: false,
-                        pageHeight: scrollContentHeight,
-                        textStyle: selectedTextStyle,
-                        showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
-                        leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
-                        leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
-                        showsKeyboardAccessory: showsDraftKeyboardAccessory,
-                        keyboardInputMode: draftKeyboardInputMode,
-                        keyboardAccessoryContent: AnyView(entryDraftKeyboardAccessory),
-                        keyboardPanelContent: AnyView(keyboardFormattingPanelContent),
-                        usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
-                        onSelectionStateChange: updateEditorSelectionState,
-                        onEditingEnded: {
-                            isBodyEditorEditing = false
-                            resetKeyboardFormattingState()
-                        },
-                        onEditingBegan: {
-                            isBodyEditorEditing = true
-                        },
-                        onTitleSubmit: {
-                            editorFocusRequestID += 1
-                        }
-                    )
+                    VStack(alignment: .leading, spacing: 0) {
+                        completedEntryStoryboardHeader(containerWidth: proxy.size.width)
+
+                        NotebookEditorContent(
+                            storyTitle: $storyTitle,
+                            entryText: $entryText,
+                            entryRichText: $entryRichText,
+                            isTitleFocused: $isTitleFocused,
+                            editorFocusRequestID: editorFocusRequestID,
+                            editorBlurRequestID: editorBlurRequestID,
+                            formattingRequest: textFormattingRequest,
+                            bodyPlaceholder: "Start writing...",
+                            scrollsInternally: false,
+                            pageHeight: scrollContentHeight,
+                            textStyle: selectedTextStyle,
+                            showsTitleRule: selectedPaperStyleChoice.showsNotebookChrome,
+                            leadingContentPadding: selectedPaperStyleChoice.leadingContentPadding,
+                            leadingTextPadding: selectedPaperStyleChoice.leadingTextPadding,
+                            showsKeyboardAccessory: showsDraftKeyboardAccessory,
+                            keyboardInputMode: draftKeyboardInputMode,
+                            keyboardAccessoryContent: AnyView(entryDraftKeyboardAccessory),
+                            keyboardPanelContent: AnyView(keyboardFormattingPanelContent),
+                            usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
+                            onSelectionStateChange: updateEditorSelectionState,
+                            onEditingEnded: {
+                                isBodyEditorEditing = false
+                                resetKeyboardFormattingState()
+                            },
+                            onEditingBegan: {
+                                isBodyEditorEditing = true
+                            },
+                            onTitleSubmit: {
+                                editorFocusRequestID += 1
+                            }
+                        )
+                    }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .frame(maxWidth: .infinity, minHeight: scrollContentHeight)
             }
@@ -2339,6 +2345,50 @@ struct CreateEntryView: View {
             return .formattingPanel(activeKeyboardFormattingMode)
         }
         return .systemKeyboard
+    }
+
+    @ViewBuilder
+    private func completedEntryStoryboardHeader(containerWidth: CGFloat) -> some View {
+        if let completedEntryOpenedStoryboardImage {
+            let imageWidth = containerWidth * 0.75
+            let aspectRatio = max(completedEntryOpenedStoryboardImage.size.width / completedEntryOpenedStoryboardImage.size.height, 0.1)
+            let imageHeight = imageWidth / aspectRatio
+            let desiredHeight = imageHeight + 40
+            let alignedHeight = ceil(desiredHeight / NotebookMetrics.ruleSpacing) * NotebookMetrics.ruleSpacing
+
+            ZStack {
+                Image(uiImage: completedEntryOpenedStoryboardImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: imageWidth, height: imageHeight)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.white.opacity(0.78), lineWidth: 1)
+                    )
+
+                ZStack {
+                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
+                        .position(x: 12, y: 12)
+
+                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
+                        .position(x: imageWidth - 12, y: 12)
+
+                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
+                        .position(x: 12, y: imageHeight - 12)
+
+                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
+                        .position(x: imageWidth - 12, y: imageHeight - 12)
+                }
+                .frame(width: imageWidth, height: imageHeight)
+            }
+            .shadow(color: Color.storyInk.opacity(0.16), radius: 7, y: 4)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 28)
+            .frame(height: alignedHeight, alignment: .top)
+            .allowsHitTesting(false)
+        }
     }
 
     private var showsDraftKeyboardAccessory: Bool {
@@ -3311,7 +3361,6 @@ struct CreateEntryView: View {
 
             artStylePickerSection
             journalDestinationCard
-            storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
         }
@@ -4339,50 +4388,6 @@ struct CreateEntryView: View {
     private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
         let trimmedPhotos = Array(photos.prefix(storyboardPhotos.count))
         return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
-    }
-
-    private var storyDetailsCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Story Details")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color.storyInk)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-
-            storyTextFieldRow(
-                icon: "location",
-                title: "Location",
-                placeholder: "Add a location",
-                text: $storyLocation
-            )
-
-            Divider()
-                .padding(.leading, 44)
-
-            DatePicker(selection: $storyDate, displayedComponents: [.date, .hourAndMinute]) {
-                HStack(spacing: 12) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.storyPurple)
-                        .frame(width: 20)
-
-                    Text("Date/time")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.storyInk.opacity(0.9))
-                }
-            }
-            .font(.system(size: 13, weight: .medium))
-            .tint(Color.storyPurple)
-            .padding(.horizontal, 12)
-            .frame(height: 48)
-        }
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
     }
 
     private var entryDateSheet: some View {
