@@ -154,7 +154,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photoIDs: [ObjectIdentifier]
+    let photoIDs: [UUID]
     let artStyle: String
     let location: String
     let date: Date
@@ -172,7 +172,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         title: String,
         text: String,
         richText: NotebookRichTextDocument?,
-        photos: [UIImage],
+        photos: [CreateEntryReferencePhoto],
         artStyle: String,
         location: String,
         date: Date,
@@ -189,7 +189,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.title = title
         self.text = text
         self.richText = richText?.normalized(for: text)
-        self.photoIDs = photos.map { ObjectIdentifier($0) }
+        self.photoIDs = photos.map(\.id)
         self.artStyle = artStyle
         self.location = location
         self.date = date
@@ -209,7 +209,7 @@ private struct PendingCreateEntryDraftSave {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photos: [UIImage]
+    let photos: [CreateEntryReferencePhoto]
     let artStyle: String
     let location: String
     let date: Date
@@ -221,6 +221,12 @@ private struct PendingCreateEntryDraftSave {
     let textSize: Double
     let paperStyleRawValue: String
     let paperColorIndex: Int
+    let isBold: Bool
+    let isItalic: Bool
+    let isUnderlined: Bool
+    let isStrikethrough: Bool
+    let isHighlighted: Bool
+    let textAlignmentRawValue: String
 }
 
 private struct EntryLocationSuggestion: Identifiable, Equatable {
@@ -1171,14 +1177,16 @@ struct CreateEntryView: View {
 
     @Binding var entryText: String
     @Binding var storyTitle: String
-    @Binding var storyboardPhotos: [UIImage?]
+    @Binding var storyboardPhotos: [CreateEntryReferencePhoto?]
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
     @Binding var completedEntryOpenedStoryboardImage: UIImage?
+    @Binding var isOpeningCompletedEntryFromEntries: Bool
     let dismissCreate: () -> Void
     var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
+    @EnvironmentObject private var authStore: SupabaseAuthStore
 
     @State private var selectedArtStyle = "Anime"
     @State private var selectedStoryboardLayout = StoryboardLayoutOption.fiveClassic
@@ -1238,6 +1246,8 @@ struct CreateEntryView: View {
     @State private var showsToolbarSavedFeedback = false
     @State private var isToolbarSaveInProgress = false
     @State private var toolbarSaveFeedbackVersion = 0
+    @State private var cloudSaveState: EntryCloudSaveState = .idle
+    @State private var currentEntryStatus: JournalEntryStatus = .draft
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
@@ -1255,8 +1265,20 @@ struct CreateEntryView: View {
             return
         }
 
+        guard !isToolbarSaveInProgress else {
+            return
+        }
+
         dismissKeyboard()
-        isShowingEntryOptionsPage = true
+        guard hasDraftContent else {
+            isShowingEntryOptionsPage = true
+            return
+        }
+
+        beginToolbarSavedFeedback()
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: true)
+        }
     }
 
     private var selectedTextStyle: NotebookTextStyle {
@@ -1329,6 +1351,11 @@ struct CreateEntryView: View {
         .overlay(alignment: .bottom) {
             if let addedJournalTitle {
                 addedToJournalToast(journalTitle: addedJournalTitle)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let cloudSaveMessage = cloudSaveState.message {
+                cloudSaveStatusBanner(message: cloudSaveMessage)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1499,6 +1526,7 @@ struct CreateEntryView: View {
             configureDirectJournalEntryIfNeeded()
             loadLinkedJournalTitle(for: activeDraftID)
             loadSavedDraftIfNeeded()
+            currentEntryStatus = isOpeningCompletedEntryFromEntries ? .completed : .draft
         }
         .onChange(of: activeDraftID) { newDraftID in
             handleActiveDraftChange(newDraftID)
@@ -1529,6 +1557,7 @@ struct CreateEntryView: View {
 
         loadLinkedJournalTitle(for: draftID)
         loadSavedDraftIfNeeded()
+        currentEntryStatus = isOpeningCompletedEntryFromEntries ? .completed : .draft
     }
 
     private func startStoryboardGeneration() {
@@ -1548,6 +1577,7 @@ struct CreateEntryView: View {
         }
 
         let photos = storyboardPhotos.compactMap { $0 }
+        let photoImages = photos.map(\.image)
         let layout = effectiveStoryboardLayout
         isGeneratingStoryboard = true
 
@@ -1558,14 +1588,14 @@ struct CreateEntryView: View {
                     text: entryText,
                     artStyle: selectedArtStyle,
                     layout: layout,
-                    images: photos
+                    images: photoImages
                 )
 
                 let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
                     image: image,
                     promptText: entryText,
                     artStyle: selectedArtStyle,
-                    sourcePhotoCount: photos.count
+                    sourcePhotoCount: photoImages.count
                 )
 
                 await MainActor.run {
@@ -1852,7 +1882,7 @@ struct CreateEntryView: View {
                     .foregroundStyle(toolbarSaveButtonColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(!canUseToolbarSaveButton && !isToolbarSaveInProgress)
+                .disabled(!canUseToolbarSaveButton || isToolbarSaveInProgress)
             }
             .hideSharedBackgroundIfAvailable()
         }
@@ -1917,11 +1947,10 @@ struct CreateEntryView: View {
             return
         }
 
-        beginToolbarSavedFeedback()
-
         if presentation.isEditDraft {
             saveEditedDraftChanges()
         } else if presentation.savesDirectlyToJournal {
+            beginToolbarSavedFeedback()
             saveDirectJournalEntryInPlace()
         } else {
             saveDraftInPlace()
@@ -1974,34 +2003,20 @@ struct CreateEntryView: View {
 
     private func saveEditedDraftChanges() {
         dismissKeyboard()
+        beginToolbarSavedFeedback()
 
-        guard let savedDraftID = makePendingDraftSave(forceSave: true).flatMap(persistDraftSave) else {
-            cancelToolbarSavedFeedback()
-            return
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
         }
-
-        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
-        loadedDraftSnapshot = savedSnapshot
-        toolbarSavedSnapshot = savedSnapshot
-        completeToolbarSavedFeedback(for: savedSnapshot)
-        activeDraftID = savedDraftID
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
     }
 
     private func saveDraftInPlace() {
         dismissKeyboard()
+        beginToolbarSavedFeedback()
 
-        guard let savedDraftID = makePendingDraftSave(forceSave: false).flatMap(persistDraftSave) else {
-            cancelToolbarSavedFeedback()
-            return
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: false)
         }
-
-        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
-        loadedDraftSnapshot = savedSnapshot
-        toolbarSavedSnapshot = savedSnapshot
-        completeToolbarSavedFeedback(for: savedSnapshot)
-        activeDraftID = savedDraftID
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
     }
 
     private func beginToolbarSavedFeedback() {
@@ -2049,20 +2064,20 @@ struct CreateEntryView: View {
     private func saveDraftAndExit(forceSave: Bool) {
         dismissKeyboard()
 
-        let pendingSave = makePendingDraftSave(forceSave: forceSave)
-        if let pendingSave {
-            persistDraftSave(pendingSave)
-            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
-        }
+        Task {
+            if hasDraftContent || forceSave {
+                await saveDraftToLocalAndCloud(forceSave: forceSave, navigatesToOptions: false)
+            }
 
-        withAnimation(.snappy(duration: 0.32)) {
-            dismissCreate()
-        }
+            withAnimation(.snappy(duration: 0.32)) {
+                dismissCreate()
+            }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            if selectedPage != .create {
-                clearEditor()
-                activeDraftID = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if selectedPage != .create {
+                    clearEditor()
+                    activeDraftID = nil
+                }
             }
         }
     }
@@ -2071,6 +2086,8 @@ struct CreateEntryView: View {
         guard hasDraftContent || forceSave else {
             return nil
         }
+
+        let existingDraft = activeDraftID.flatMap(CreateEntryDraftStore.load)
 
         return PendingCreateEntryDraftSave(
             id: activeDraftID,
@@ -2088,7 +2105,13 @@ struct CreateEntryView: View {
             textColorIndex: selectedTextColorIndex,
             textSize: previewTextSize,
             paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-            paperColorIndex: selectedPaperColorIndex
+            paperColorIndex: selectedPaperColorIndex,
+            isBold: existingDraft?.isBold ?? false,
+            isItalic: existingDraft?.isItalic ?? false,
+            isUnderlined: existingDraft?.isUnderlined ?? false,
+            isStrikethrough: existingDraft?.isStrikethrough ?? false,
+            isHighlighted: existingDraft?.isHighlighted ?? false,
+            textAlignmentRawValue: existingDraft?.textAlignmentRawValue ?? "leading"
         )
     }
 
@@ -2098,15 +2121,59 @@ struct CreateEntryView: View {
             title: pendingSave.title,
             text: pendingSave.text,
             richText: pendingSave.richText,
-            photos: pendingSave.photos,
+            photos: pendingSave.photos.map(\.image),
             fontChoiceRawValue: pendingSave.fontChoiceRawValue,
             textColorIndex: pendingSave.textColorIndex,
             textSize: pendingSave.textSize,
             paperStyleRawValue: pendingSave.paperStyleRawValue,
-            paperColorIndex: pendingSave.paperColorIndex
+            paperColorIndex: pendingSave.paperColorIndex,
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue
         )
 
         if let savedDraftID = CreateEntryDraftStore.save(
+            id: pendingSave.id,
+            title: pendingSave.title,
+            text: pendingSave.text,
+            richText: pendingSave.richText,
+            referencePhotos: pendingSave.photos,
+            artStyle: pendingSave.artStyle,
+            location: pendingSave.location,
+            date: pendingSave.date,
+            datePrecision: pendingSave.datePrecision,
+            savesDraft: pendingSave.savesDraft,
+            isPrivate: pendingSave.isPrivate,
+            fontChoiceRawValue: pendingSave.fontChoiceRawValue,
+            textColorIndex: pendingSave.textColorIndex,
+            textSize: pendingSave.textSize,
+            paperStyleRawValue: pendingSave.paperStyleRawValue,
+            paperColorIndex: pendingSave.paperColorIndex,
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue,
+            thumbnail: draftThumbnail
+        ) {
+            EntryLocationRecentStore.add(pendingSave.location)
+            recentEntryLocations = EntryLocationRecentStore.all
+            return savedDraftID
+        }
+
+        return nil
+    }
+
+    private func makeEntryDraftSavePayload(forceSave: Bool) -> EntryDraftSavePayload? {
+        guard let pendingSave = makePendingDraftSave(forceSave: forceSave) else {
+            return nil
+        }
+
+        return EntryDraftSavePayload(
             id: pendingSave.id,
             title: pendingSave.title,
             text: pendingSave.text,
@@ -2123,14 +2190,59 @@ struct CreateEntryView: View {
             textSize: pendingSave.textSize,
             paperStyleRawValue: pendingSave.paperStyleRawValue,
             paperColorIndex: pendingSave.paperColorIndex,
-            thumbnail: draftThumbnail
-        ) {
-            EntryLocationRecentStore.add(pendingSave.location)
-            recentEntryLocations = EntryLocationRecentStore.all
-            return savedDraftID
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue
+        )
+    }
+
+    private func saveDraftToLocalAndCloud(forceSave: Bool, navigatesToOptions: Bool) async {
+        guard let payload = makeEntryDraftSavePayload(forceSave: forceSave) else {
+            cancelToolbarSavedFeedback()
+            if navigatesToOptions {
+                isShowingEntryOptionsPage = true
+            }
+            return
         }
 
-        return nil
+        cloudSaveState = payload.photos.isEmpty ? .saving : .uploadingPhotos
+
+        do {
+            let result = try await EntrySaveService().ensureEntryAndReferencePhotosSynced(
+                payload: payload,
+                isSignedIn: authStore.userID != nil,
+                status: currentEntryStatus
+            )
+            activeDraftID = result.localDraftID
+            let savedSnapshot = currentDraftSnapshot(id: result.localDraftID)
+            loadedDraftSnapshot = savedSnapshot
+            toolbarSavedSnapshot = savedSnapshot
+            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+            recentEntryLocations = EntryLocationRecentStore.all
+            cloudSaveState = result.state
+            completeToolbarSavedFeedback(for: savedSnapshot)
+
+            if navigatesToOptions {
+                isShowingEntryOptionsPage = true
+            }
+        } catch {
+            cloudSaveState = .failed("Could not save this entry locally.")
+            cancelToolbarSavedFeedback()
+        }
+    }
+
+    private func retryCloudSave() {
+        guard !isToolbarSaveInProgress else {
+            return
+        }
+
+        beginToolbarSavedFeedback()
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
+        }
     }
 
     private func discardDraftAndExit() {
@@ -2157,6 +2269,7 @@ struct CreateEntryView: View {
         storyboardPhotos = Array(repeating: nil, count: 5)
         toolbarSavedSnapshot = nil
         toolbarSavedJournalEntryID = nil
+        cloudSaveState = .idle
         showsToolbarSavedFeedback = false
         isToolbarSaveInProgress = false
         toolbarSaveFeedbackVersion += 1
@@ -2168,6 +2281,7 @@ struct CreateEntryView: View {
         didEditEntryLocation = false
         savesDraft = true
         isPrivateEntry = false
+        currentEntryStatus = .draft
         selectedFontChoice = .sans
         selectedTextColorIndex = 0
         previewTextSize = CreateEntryTextSize.defaultSliderValue
@@ -2683,6 +2797,7 @@ struct CreateEntryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isToolbarSaveInProgress)
         .accessibilityLabel("Next")
     }
 
@@ -3557,6 +3672,76 @@ struct CreateEntryView: View {
         .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
     }
 
+    private func cloudSaveStatusBanner(message: String) -> some View {
+        HStack(spacing: 11) {
+            cloudSaveStatusIcon
+
+            Text(message)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .lineLimit(2)
+
+            Spacer(minLength: 10)
+
+            if case .failed = cloudSaveState {
+                Button("Retry") {
+                    retryCloudSave()
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .disabled(isToolbarSaveInProgress)
+            } else if case .photoUploadFailed = cloudSaveState {
+                Button("Retry") {
+                    retryCloudSave()
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .disabled(isToolbarSaveInProgress)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
+    }
+
+    @ViewBuilder
+    private var cloudSaveStatusIcon: some View {
+        switch cloudSaveState {
+        case .saving, .uploadingPhotos:
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.storyPurple)
+                .frame(width: 30, height: 30)
+        case .saved, .photosUploaded:
+            Image(systemName: "checkmark.icloud.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.green)
+                .frame(width: 30, height: 30)
+                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .savedLocally:
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 30, height: 30)
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .failed, .photoUploadFailed:
+            Image(systemName: "exclamationmark.icloud.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.red)
+                .frame(width: 30, height: 30)
+                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .idle:
+            EmptyView()
+        }
+    }
+
     private func saveDirectJournalEntryAndExit() {
         guard let journalTitle = presentation.directJournalTitle, hasDraftContent else {
             return
@@ -3817,15 +4002,15 @@ struct CreateEntryView: View {
     private var photoStripContent: some View {
         HStack(spacing: 9) {
             if hasStoryboardPhotos {
-                ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
+                ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.element.id) { index, photo in
                     StoryboardPhotoStripThumbnail(
-                        image: image,
+                        image: photo.image,
                         removeAction: {
                             removeStoryboardPhoto(at: index)
                         },
                         tapAction: {
                             dismissKeyboard()
-                            previewedStoryboardPhoto = image
+                            previewedStoryboardPhoto = photo.image
                         }
                     )
                         .onDrag {
@@ -4462,7 +4647,7 @@ struct CreateEntryView: View {
 
     private func storyboardPhotoPanel(index: Int) -> some View {
         StoryboardPhotoPanel(
-            image: storyboardPhotos.indices.contains(index) ? storyboardPhotos[index] : nil,
+            image: storyboardPhotos.indices.contains(index) ? storyboardPhotos[index]?.image : nil,
             placeholderImageName: "storyboard_placeholder_\(min(index + 1, 5))",
             number: index + 1
         )
@@ -4477,7 +4662,7 @@ struct CreateEntryView: View {
             return
         }
 
-        storyboardPhotos[slot] = image
+        storyboardPhotos[slot] = CreateEntryReferencePhoto(image: image)
         selectedPhotoSlot = nil
     }
 
@@ -4498,7 +4683,7 @@ struct CreateEntryView: View {
                 break
             }
 
-            updatedPhotos[slot] = image
+            updatedPhotos[slot] = CreateEntryReferencePhoto(image: image)
             slot += 1
         }
 
@@ -4538,7 +4723,7 @@ struct CreateEntryView: View {
         storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
     }
 
-    private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
+    private func paddedStoryboardPhotos(_ photos: [CreateEntryReferencePhoto]) -> [CreateEntryReferencePhoto?] {
         let trimmedPhotos = Array(photos.prefix(storyboardPhotos.count))
         return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
     }
@@ -7114,7 +7299,7 @@ struct KeyboardPhotoOverflowBadge: View {
 }
 
 struct StoryboardPhotoDropDelegate: DropDelegate {
-    @Binding var photos: [UIImage?]
+    @Binding var photos: [CreateEntryReferencePhoto?]
     @Binding var draggedIndex: Int?
 
     let destinationIndex: Int

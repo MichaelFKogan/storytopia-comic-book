@@ -1,0 +1,239 @@
+import Foundation
+import Supabase
+import UIKit
+
+struct EntryReferencePhoto: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    let userID: UUID
+    let entryID: UUID
+    let clientEntryID: UUID
+    let storagePath: String
+    let mimeType: String
+    let byteSize: Int
+    let width: Int
+    let height: Int
+    let sortOrder: Int
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case entryID = "entry_id"
+        case clientEntryID = "client_entry_id"
+        case storagePath = "storage_path"
+        case mimeType = "mime_type"
+        case byteSize = "byte_size"
+        case width
+        case height
+        case sortOrder = "sort_order"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct ReferencePhotoUpsert: Encodable, Sendable {
+    let id: UUID
+    let userID: UUID
+    let entryID: UUID
+    let clientEntryID: UUID
+    let storagePath: String
+    let mimeType: String
+    let byteSize: Int
+    let width: Int
+    let height: Int
+    let sortOrder: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case entryID = "entry_id"
+        case clientEntryID = "client_entry_id"
+        case storagePath = "storage_path"
+        case mimeType = "mime_type"
+        case byteSize = "byte_size"
+        case width
+        case height
+        case sortOrder = "sort_order"
+    }
+}
+
+enum SupabaseReferencePhotoError: LocalizedError {
+    case invalidImage
+    case syncFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage:
+            return "One of the reference photos could not be prepared for upload."
+        case .syncFailed:
+            return "Reference photos could not be synced. Please try again."
+        }
+    }
+}
+
+struct SupabaseReferencePhotoService {
+    private let client: SupabaseClient
+    private let bucketName = "storytopia-media"
+
+    init(client: SupabaseClient = SupabaseService.shared) {
+        self.client = client
+    }
+
+    func syncReferencePhotos(
+        entry: JournalEntry,
+        photos: [CreateEntryReferencePhoto]
+    ) async throws {
+        do {
+            let existingPhotos = try await existingReferencePhotos(entryID: entry.id)
+            let localPhotoIDs = Set(photos.map(\.id))
+            let photosToDelete = existingPhotos.filter { !localPhotoIDs.contains($0.id) }
+
+            for photo in photosToDelete {
+                try await deleteCloudPhoto(photo)
+            }
+
+            for (index, photo) in photos.enumerated() {
+                let upload = try makeUpload(
+                    photo: photo,
+                    userID: entry.userID,
+                    clientEntryID: entry.clientEntryID,
+                    sortOrder: index
+                )
+
+                try await client.storage
+                    .from(bucketName)
+                    .upload(
+                        upload.storagePath,
+                        data: upload.data,
+                        options: FileOptions(
+                            cacheControl: "31536000",
+                            contentType: CreateEntryReferencePhoto.mimeType,
+                            upsert: true
+                        )
+                    )
+
+                try await client
+                    .from("entry_reference_photos")
+                    .upsert(
+                        ReferencePhotoUpsert(
+                            id: photo.id,
+                            userID: entry.userID,
+                            entryID: entry.id,
+                            clientEntryID: entry.clientEntryID,
+                            storagePath: upload.storagePath,
+                            mimeType: CreateEntryReferencePhoto.mimeType,
+                            byteSize: upload.data.count,
+                            width: upload.width,
+                            height: upload.height,
+                            sortOrder: index
+                        ),
+                        onConflict: "id"
+                    )
+                    .execute()
+            }
+        } catch let error as SupabaseReferencePhotoError {
+            throw error
+        } catch {
+            throw SupabaseReferencePhotoError.syncFailed
+        }
+    }
+
+    func loadReferencePhotos(entryID: UUID) async throws -> [CreateEntryReferencePhoto] {
+        do {
+            let rows = try await existingReferencePhotos(entryID: entryID)
+                .sorted { $0.sortOrder < $1.sortOrder }
+
+            var photos: [CreateEntryReferencePhoto] = []
+            for row in rows {
+                let data = try await client.storage
+                    .from(bucketName)
+                    .download(path: row.storagePath)
+                guard let image = UIImage(data: data) else {
+                    continue
+                }
+                photos.append(CreateEntryReferencePhoto(id: row.id, image: image))
+            }
+
+            return photos
+        } catch {
+            throw SupabaseReferencePhotoError.syncFailed
+        }
+    }
+
+    func deleteReferencePhotos(entryID: UUID) async throws {
+        do {
+            let rows = try await existingReferencePhotos(entryID: entryID)
+            for row in rows {
+                try await deleteCloudPhoto(row)
+            }
+        } catch let error as SupabaseReferencePhotoError {
+            throw error
+        } catch {
+            throw SupabaseReferencePhotoError.syncFailed
+        }
+    }
+
+    func existingReferencePhotos(entryID: UUID) async throws -> [EntryReferencePhoto] {
+        try await client
+            .from("entry_reference_photos")
+            .select()
+            .eq("entry_id", value: entryID)
+            .execute()
+            .value
+    }
+
+    private func deleteCloudPhoto(_ photo: EntryReferencePhoto) async throws {
+        do {
+            try await client.storage
+                .from(bucketName)
+                .remove(paths: [photo.storagePath])
+        } catch let error as StorageError where error.statusCode == "404" {
+            // Missing objects are already deleted; continue so retries can heal partial work.
+        }
+
+        try await client
+            .from("entry_reference_photos")
+            .delete()
+            .eq("id", value: photo.id)
+            .execute()
+    }
+
+    private func makeUpload(
+        photo: CreateEntryReferencePhoto,
+        userID: UUID,
+        clientEntryID: UUID,
+        sortOrder: Int
+    ) throws -> ReferencePhotoUpload {
+        guard let data = photo.image.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
+            throw SupabaseReferencePhotoError.invalidImage
+        }
+        guard let normalizedImage = UIImage(data: data) else {
+            throw SupabaseReferencePhotoError.invalidImage
+        }
+
+        let storagePath = [
+            userID.uuidString.lowercased(),
+            "entries",
+            clientEntryID.uuidString.lowercased(),
+            "references",
+            "\(photo.id.uuidString.lowercased()).\(CreateEntryReferencePhoto.fileExtension)"
+        ].joined(separator: "/")
+
+        return ReferencePhotoUpload(
+            data: data,
+            storagePath: storagePath,
+            width: normalizedImage.cgImage?.width ?? Int(normalizedImage.size.width.rounded()),
+            height: normalizedImage.cgImage?.height ?? Int(normalizedImage.size.height.rounded()),
+            sortOrder: sortOrder
+        )
+    }
+}
+
+private struct ReferencePhotoUpload {
+    let data: Data
+    let storagePath: String
+    let width: Int
+    let height: Int
+    let sortOrder: Int
+}

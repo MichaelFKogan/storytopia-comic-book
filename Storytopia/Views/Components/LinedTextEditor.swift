@@ -51,7 +51,7 @@ enum NotebookTextRunStyle: String, Codable, Equatable, CaseIterable {
     }
 }
 
-struct NotebookTextFormattingRun: Codable, Equatable {
+struct NotebookTextFormattingRun: Codable, Equatable, Sendable {
     var location: Int
     var length: Int
     var isBold: Bool
@@ -79,7 +79,7 @@ struct NotebookTextFormattingRun: Codable, Equatable {
     }
 }
 
-struct NotebookRichTextDocument: Codable, Equatable {
+struct NotebookRichTextDocument: Codable, Equatable, Sendable {
     var text: String
     var formattingRuns: [NotebookTextFormattingRun]
 

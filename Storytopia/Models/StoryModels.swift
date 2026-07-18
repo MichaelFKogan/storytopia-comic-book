@@ -153,6 +153,19 @@ struct GeneratedStoryboard: Identifiable {
     }
 }
 
+struct CreateEntryReferencePhoto: Identifiable {
+    static let fileExtension = "jpg"
+    static let mimeType = "image/jpeg"
+
+    let id: UUID
+    let image: UIImage
+
+    init(id: UUID = UUID(), image: UIImage) {
+        self.id = id
+        self.image = image
+    }
+}
+
 enum OpenAITestConfig {
     // Temporary test-only client key. Remove this before pushing or shipping.
     static let apiKey = ""
@@ -164,7 +177,7 @@ struct CreateEntryDraft: Identifiable {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photos: [UIImage]
+    let photos: [CreateEntryReferencePhoto]
     let artStyle: String
     let location: String
     let date: Date
@@ -267,6 +280,59 @@ enum CreateEntryDraftStore {
         textAlignmentRawValue: String = "leading",
         thumbnail: UIImage? = nil
     ) -> UUID? {
+        save(
+            id: id,
+            title: title,
+            text: text,
+            richText: richText,
+            referencePhotos: photos.map { CreateEntryReferencePhoto(image: $0) },
+            artStyle: artStyle,
+            location: location,
+            date: date,
+            datePrecision: datePrecision,
+            savesDraft: savesDraft,
+            isPrivate: isPrivate,
+            fontChoiceRawValue: fontChoiceRawValue,
+            textColorIndex: textColorIndex,
+            textSize: textSize,
+            paperStyleRawValue: paperStyleRawValue,
+            paperColorIndex: paperColorIndex,
+            isBold: isBold,
+            isItalic: isItalic,
+            isUnderlined: isUnderlined,
+            isStrikethrough: isStrikethrough,
+            isHighlighted: isHighlighted,
+            textAlignmentRawValue: textAlignmentRawValue,
+            thumbnail: thumbnail
+        )
+    }
+
+    @discardableResult
+    static func save(
+        id: UUID?,
+        title: String,
+        text: String,
+        richText: NotebookRichTextDocument? = nil,
+        referencePhotos: [CreateEntryReferencePhoto],
+        artStyle: String,
+        location: String,
+        date: Date,
+        datePrecision: EntryDatePrecision = .exact,
+        savesDraft: Bool,
+        isPrivate: Bool,
+        fontChoiceRawValue: String? = nil,
+        textColorIndex: Int? = nil,
+        textSize: Double? = nil,
+        paperStyleRawValue: String? = nil,
+        paperColorIndex: Int? = nil,
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        isStrikethrough: Bool = false,
+        isHighlighted: Bool = false,
+        textAlignmentRawValue: String = "leading",
+        thumbnail: UIImage? = nil
+    ) -> UUID? {
         let draftID = id ?? UUID()
         let draftDirectory = directory(for: draftID)
         let existingDraft = id.flatMap(load(id:))
@@ -279,18 +345,24 @@ enum CreateEntryDraftStore {
                 withIntermediateDirectories: true
             )
 
-            var photoFileNames: [String] = []
-            for (index, photo) in photos.enumerated() {
-                guard let data = photo.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
+            var photoMetadata: [CreateEntryDraftPhotoMetadata] = []
+            for (index, photo) in referencePhotos.enumerated() {
+                guard let data = photo.image.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
                     continue
                 }
 
-                let fileName = "photo-\(index).jpg"
+                let fileName = "photo-\(index)-\(photo.id.uuidString).jpg"
                 try data.write(
                     to: draftDirectory.appendingPathComponent(fileName),
                     options: [.atomic]
                 )
-                photoFileNames.append(fileName)
+                photoMetadata.append(
+                    CreateEntryDraftPhotoMetadata(
+                        id: photo.id,
+                        fileName: fileName,
+                        mimeType: CreateEntryReferencePhoto.mimeType
+                    )
+                )
             }
 
             let thumbnailToSave = thumbnail ?? existingDraft?.thumbnail
@@ -307,7 +379,8 @@ enum CreateEntryDraftStore {
                 title: title,
                 text: text,
                 richText: richText,
-                photoFileNames: photoFileNames,
+                photoFileNames: photoMetadata.map(\.fileName),
+                referencePhotos: photoMetadata,
                 artStyle: artStyle,
                 location: location,
                 date: date,
@@ -380,17 +453,28 @@ enum CreateEntryDraftStore {
         let metadataURL = draftDirectory.appendingPathComponent(metadataFileName)
         guard
             let data = try? Data(contentsOf: metadataURL),
-            let metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
+            var metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
         else {
             return nil
         }
 
-        let photos = metadata.photoFileNames.compactMap { fileName -> UIImage? in
+        let photoMetadata = metadata.normalizedPhotoMetadata()
+        if metadata.referencePhotos == nil, !photoMetadata.isEmpty {
+            metadata.referencePhotos = photoMetadata
+            if let updatedData = try? JSONEncoder().encode(metadata) {
+                try? updatedData.write(to: metadataURL, options: [.atomic])
+            }
+        }
+
+        let photos = photoMetadata.compactMap { item -> CreateEntryReferencePhoto? in
+            let fileName = item.fileName
             let photoURL = draftDirectory.appendingPathComponent(fileName)
             guard let data = try? Data(contentsOf: photoURL) else {
                 return nil
             }
-            return UIImage(data: data)
+            return UIImage(data: data).map {
+                CreateEntryReferencePhoto(id: item.id, image: $0)
+            }
         }
 
         let thumbnailURL = draftDirectory.appendingPathComponent(thumbnailFileName)
@@ -456,7 +540,7 @@ enum CreateEntryDraftStore {
             title: legacyDraft.title,
             text: legacyDraft.text,
             richText: legacyDraft.richText,
-            photos: legacyDraft.photos,
+            referencePhotos: legacyDraft.photos,
             artStyle: legacyDraft.artStyle,
             location: legacyDraft.location,
             date: legacyDraft.date,
@@ -498,6 +582,7 @@ private struct CreateEntryDraftMetadata: Codable {
     var text: String
     var richText: NotebookRichTextDocument?
     var photoFileNames: [String]
+    var referencePhotos: [CreateEntryDraftPhotoMetadata]?
     var artStyle: String?
     var location: String?
     var date: Date?
@@ -518,6 +603,26 @@ private struct CreateEntryDraftMetadata: Codable {
     var createdAt: Date?
     var updatedAt: Date?
     var displayOrder: Int?
+
+    func normalizedPhotoMetadata() -> [CreateEntryDraftPhotoMetadata] {
+        if let referencePhotos {
+            return referencePhotos
+        }
+
+        return photoFileNames.map {
+            CreateEntryDraftPhotoMetadata(
+                id: UUID(),
+                fileName: $0,
+                mimeType: CreateEntryReferencePhoto.mimeType
+            )
+        }
+    }
+}
+
+private struct CreateEntryDraftPhotoMetadata: Codable {
+    var id: UUID
+    var fileName: String
+    var mimeType: String
 }
 
 enum GeneratedStoryboardStore {
