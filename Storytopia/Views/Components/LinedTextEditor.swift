@@ -471,7 +471,7 @@ enum NotebookMetrics {
     static let contentBottomPadding: CGFloat = 18
 
     static var firstNotebookRuleY: CGFloat {
-        contentTopPadding + ruleSpacing
+        contentTopPadding + (ruleSpacing * 2)
     }
 
     static func bodyAreaMinHeight(forPageHeight pageHeight: CGFloat, titleBodySpacing: CGFloat = 0) -> CGFloat {
@@ -721,13 +721,12 @@ final class LinedTextView: UITextView {
 
         let font = activeCaretFont()
         let lineHeight = max(bodyLineHeight, font.lineHeight)
-        let height = min(lineHeight, max(font.lineHeight + 6, lineHeight - 1))
-        let lineCenteredY = rect.minY + max(0, (lineHeight - height) / 2)
-        let textCenteredY = lineCenteredY + max(0, (height - font.lineHeight) / 2)
+        let height = ceil(font.lineHeight)
+        let textAlignedY = rect.minY + max(0, (lineHeight - font.lineHeight) / 2) + 6
 
         return CGRect(
             x: rect.minX,
-            y: textCenteredY,
+            y: min(textAlignedY, rect.maxY - height),
             width: rect.width,
             height: height
         )

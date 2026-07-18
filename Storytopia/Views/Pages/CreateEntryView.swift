@@ -1215,7 +1215,7 @@ struct CreateEntryView: View {
     @State private var recentEntryLocations = EntryLocationRecentStore.all
     @StateObject private var locationSearch = EntryLocationSearchModel()
     @State private var storyDate = Date()
-    @State private var storyDatePrecision: EntryDatePrecision = .exact
+    @State private var storyDatePrecision: EntryDatePrecision = .noDate
     @State private var didEditEntryDate = false
     @State private var didEditEntryLocation = false
     @State private var savesDraft = true
@@ -1223,7 +1223,8 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var previewedStoryboardPhoto: UIImage?
-    @State private var isPhotoTabCollapsed = false
+    @State private var isPhotoTabCollapsed = true
+    @State private var isStoryDetailsTabCollapsed = true
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @FocusState private var isTitleFocused: Bool
@@ -1605,8 +1606,7 @@ struct CreateEntryView: View {
             if !isFullScreenEditorVisible {
                 createToolbarItems(
                     title: presentation.editorToolbarTitle,
-                    showsCloseButton: true,
-                    showsEntryDateButton: true
+                    showsCloseButton: true
                 )
             }
         }
@@ -2163,7 +2163,7 @@ struct CreateEntryView: View {
         selectedArtStyle = "Anime"
         storyLocation = ""
         storyDate = Date()
-        storyDatePrecision = .exact
+        storyDatePrecision = .noDate
         didEditEntryDate = false
         didEditEntryLocation = false
         savesDraft = true
@@ -2401,13 +2401,11 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                entryLocationMetadataButton
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-
             photosAttachedTab
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+
+            storyDetailsTab
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
 
@@ -2415,112 +2413,86 @@ struct CreateEntryView: View {
         }
     }
 
-    private var photosAttachedTab: some View {
+    private var storyDetailsTab: some View {
         Group {
-            if hasStoryboardPhotos {
-                if isPhotoTabCollapsed {
-                    Button {
-                        togglePhotoTabCollapsed()
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "photo.stack")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.storyPurple)
-                                .frame(width: 22, height: 22)
+            if isStoryDetailsTabCollapsed {
+                Button {
+                    toggleStoryDetailsTabCollapsed()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: hasStoryDetailsMetadata ? "calendar.badge.clock" : "calendar")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 22, height: 22)
 
-                            Text(attachedPhotoSummaryText)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Story Details")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(Color.storyInk)
 
-                            Spacer(minLength: 8)
-
-                            photoCollapseChevron(systemName: "chevron.up")
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: 54)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(attachedPhotoSummaryText), expand photos")
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            photoStripHeader
-
-                            Spacer(minLength: 8)
-
-                            Button {
-                                togglePhotoTabCollapsed()
-                            } label: {
-                                photoCollapseChevron(systemName: "chevron.down")
+                            if hasStoryDetailsMetadata {
+                                collapsedStoryDetailsValues
+                            } else {
+                                Text("Add date, time, or location")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.storyInk.opacity(0.62))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.76)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Collapse photos")
-                        }
-                        .padding(.horizontal, 16)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            photoStripContent
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 4)
-                        }
-                        .frame(height: 76)
-                    }
-                    .padding(.top, 10)
-                    .padding(.bottom, 12)
-                }
-            } else {
-                Button {
-                    handlePhotosTabTapped()
-                } label: {
-                    HStack(spacing: 6) {
-                        StoryboardPhotoStripAddButton(
-                            systemName: "camera",
-                            iconColor: Color.storyPurple,
-                            size: 34,
-                            iconWeight: .semibold,
-                            showsDashedBorder: false
-                        )
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Add Reference Photos")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(Color.storyPurple)
-
-                            Text("Photos help create better comics")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.storyInk.opacity(0.66))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.76)
                         }
 
                         Spacer(minLength: 8)
 
-                        HStack(spacing: 4) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 11, weight: .semibold))
-
-                            Text("Up to 5 photos")
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.78)
-
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.storyPurple.opacity(0.86))
-                        }
-                        .foregroundStyle(Color.storyInk.opacity(0.58))
+                        photoCollapseChevron(systemName: "chevron.up")
                     }
-                    .padding(.horizontal, 14)
-                    .frame(height: 70)
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(nextAvailablePhotoSlot == nil)
+                .accessibilityLabel("Story Details, expand")
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 8) {
+                        storyDetailsHeader
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            toggleStoryDetailsTabCollapsed()
+                        } label: {
+                            photoCollapseChevron(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Collapse story details")
+                    }
+                    .padding(.horizontal, 16)
+
+                    VStack(spacing: 8) {
+                        storyDetailButton(
+                            title: "Date",
+                            value: entryDateMetadataText,
+                            systemName: hasEntryDateValue ? "calendar.badge.clock" : "calendar",
+                            isSelected: hasEntryDateValue,
+                            action: openEntryDateSheet
+                        )
+
+                        storyDetailButton(
+                            title: "Location",
+                            value: entryPlaceMetadataText,
+                            systemName: hasEntryLocationValue ? "location.fill" : "location",
+                            isSelected: hasEntryLocationValue,
+                            action: openEntryLocationSheet
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+                .padding(.top, 10)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
@@ -2528,26 +2500,77 @@ struct CreateEntryView: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
     }
 
-    private var entryLocationMetadataButton: some View {
-        Button {
-            openEntryLocationSheet()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill")
-                    .font(.system(size: 11, weight: .medium))
+    private var photosAttachedTab: some View {
+        Group {
+            if isPhotoTabCollapsed {
+                Button {
+                    togglePhotoTabCollapsed()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: hasStoryboardPhotos ? "photo.stack" : "camera")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 22, height: 22)
 
-                Text(entryPlaceMetadataText)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(collapsedPhotoTitleText)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+
+                            if !hasStoryboardPhotos {
+                                Text("Photos help create better comics")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.storyInk.opacity(0.62))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.76)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        photoCollapseChevron(systemName: "chevron.up")
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(collapsedPhotoTitleText), expand photos")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        photoStripHeader
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            togglePhotoTabCollapsed()
+                        } label: {
+                            photoCollapseChevron(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Collapse photos")
+                    }
+                    .padding(.horizontal, 16)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        photoStripContent
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(height: 76)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 12)
             }
-            .foregroundStyle(Color.storyInk.opacity(0.48))
-            .frame(height: 24)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(entryPlaceMetadataText)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
     }
 
     private var entryPlaceMetadataText: String {
@@ -2661,11 +2684,6 @@ struct CreateEntryView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Next")
-    }
-
-    private func handlePhotosTabTapped() {
-        dismissKeyboard()
-        openPhotoSourceSheet()
     }
 
     private func openPhotoSourceSheet() {
@@ -3682,9 +3700,110 @@ struct CreateEntryView: View {
         }
     }
 
+    private var storyDetailsHeader: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.84))
+                .frame(width: 20, height: 20)
+
+            Text("Story Details")
+                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
+    }
+
+    private var hasEntryLocationValue: Bool {
+        !storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasStoryDetailsMetadata: Bool {
+        hasEntryDateValue || hasEntryLocationValue
+    }
+
+    private var collapsedStoryDetailsValues: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if hasEntryDateValue {
+                collapsedStoryDetailValue(systemName: "calendar", text: entryDateMetadataText)
+            }
+
+            if hasEntryLocationValue {
+                collapsedStoryDetailValue(systemName: "location.fill", text: entryPlaceMetadataText)
+            }
+        }
+    }
+
+    private func collapsedStoryDetailValue(systemName: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.storyPurple.opacity(0.88))
+                .frame(width: 11)
+
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.68))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private func storyDetailButton(
+        title: String,
+        value: String,
+        systemName: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.52))
+
+                    Text(value)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(isSelected ? Color.storyInk : Color.storyInk.opacity(0.72))
+                        .lineLimit(isSelected ? 2 : 1)
+                        .minimumScaleFactor(0.9)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.36))
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
+            .background(
+                isSelected ? Color.storyPurple.opacity(0.08) : Color.homeCardGray.opacity(0.86),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.storyPurple.opacity(0.26) : Color.storyBorder.opacity(0.58), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value)")
+    }
+
     private var attachedPhotoSummaryText: String {
         let count = storyboardPhotos.compactMap { $0 }.count
         return "\(count) photo\(count == 1 ? "" : "s") attached"
+    }
+
+    private var collapsedPhotoTitleText: String {
+        hasStoryboardPhotos ? attachedPhotoSummaryText : "Add reference photos"
     }
 
     private func photoCollapseChevron(systemName: String) -> some View {
@@ -3697,33 +3816,60 @@ struct CreateEntryView: View {
 
     private var photoStripContent: some View {
         HStack(spacing: 9) {
-            ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
-                StoryboardPhotoStripThumbnail(
-                    image: image,
-                    removeAction: {
-                        removeStoryboardPhoto(at: index)
-                    },
-                    tapAction: {
-                        dismissKeyboard()
-                        previewedStoryboardPhoto = image
-                    }
-                )
-                    .onDrag {
-                        draggedStoryboardPhotoIndex = index
-                        return NSItemProvider(object: String(index) as NSString)
-                    }
-                    .onDrop(
-                        of: [.text],
-                        delegate: StoryboardPhotoDropDelegate(
-                            photos: $storyboardPhotos,
-                            draggedIndex: $draggedStoryboardPhotoIndex,
-                            destinationIndex: index
-                        )
+            if hasStoryboardPhotos {
+                ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
+                    StoryboardPhotoStripThumbnail(
+                        image: image,
+                        removeAction: {
+                            removeStoryboardPhoto(at: index)
+                        },
+                        tapAction: {
+                            dismissKeyboard()
+                            previewedStoryboardPhoto = image
+                        }
                     )
+                        .onDrag {
+                            draggedStoryboardPhotoIndex = index
+                            return NSItemProvider(object: String(index) as NSString)
+                        }
+                        .onDrop(
+                            of: [.text],
+                            delegate: StoryboardPhotoDropDelegate(
+                                photos: $storyboardPhotos,
+                                draggedIndex: $draggedStoryboardPhotoIndex,
+                                destinationIndex: index
+                            )
+                        )
+                }
             }
 
             if nextAvailablePhotoSlot != nil {
                 addPhotoStripButton
+            }
+
+            if !hasStoryboardPhotos {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add Reference Photos")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+
+                    Text("Photos help create better comics")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.66))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                }
+
+                HStack(spacing: 4) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 11, weight: .semibold))
+
+                    Text("Up to 5 photos")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+                .foregroundStyle(Color.storyInk.opacity(0.58))
             }
         }
     }
@@ -3733,7 +3879,11 @@ struct CreateEntryView: View {
             dismissKeyboard()
             openPhotoSourceSheet()
         } label: {
-            StoryboardPhotoStripAddButton()
+            StoryboardPhotoStripAddButton(
+                systemName: hasStoryboardPhotos ? "plus" : "camera",
+                iconColor: hasStoryboardPhotos ? Color.storyInk.opacity(0.82) : Color.storyPurple,
+                iconWeight: hasStoryboardPhotos ? .light : .semibold
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add reference photos")
@@ -3742,6 +3892,12 @@ struct CreateEntryView: View {
     private func togglePhotoTabCollapsed() {
         withAnimation(.snappy(duration: 0.2)) {
             isPhotoTabCollapsed.toggle()
+        }
+    }
+
+    private func toggleStoryDetailsTabCollapsed() {
+        withAnimation(.snappy(duration: 0.2)) {
+            isStoryDetailsTabCollapsed.toggle()
         }
     }
 
@@ -4380,9 +4536,6 @@ struct CreateEntryView: View {
 
         existingPhotos.remove(at: index)
         storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
-        if existingPhotos.isEmpty {
-            isPhotoTabCollapsed = false
-        }
     }
 
     private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
