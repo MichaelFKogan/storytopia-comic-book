@@ -18,6 +18,16 @@ struct SettingsView: View {
                 ) {
                     dismiss()
                 }
+
+                SettingsNavigationRow(
+                    systemName: "lock.cloud",
+                    title: "Cloud Journal Test",
+                    subtitle: "Test Supabase sign-in and private entries",
+                    accessibilityLabel: "Open cloud journal test"
+                ) {
+                    SupabaseJournalTestView()
+                        .enableInteractivePopGesture()
+                }
             }
 
             Section("Journal") {

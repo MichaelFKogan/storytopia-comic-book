@@ -14,6 +14,9 @@ DerivedData/
 .build/
 Packages/
 
+# Local Supabase configuration
+Config/Supabase.xcconfig
+
 # CocoaPods (only if using Pods)
 Pods/
 
@@ -26,3 +29,13 @@ fastlane/test_output
 # Misc
 *.swp
 *.lock
+
+# Local Supabase configuration
+Supabase.xcconfig
+Config/Supabase.xcconfig
+
+# Supabase CLI local state
+supabase/.temp/
+
+# Xcode project recovery backups
+*.deleted-target-backup
