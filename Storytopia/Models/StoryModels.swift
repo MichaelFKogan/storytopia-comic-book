@@ -127,6 +127,7 @@ enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
 
 struct GeneratedStoryboard: Identifiable {
     let id: UUID
+    let clientEntryID: UUID?
     let image: UIImage
     let promptText: String
     let artStyle: String
@@ -136,6 +137,7 @@ struct GeneratedStoryboard: Identifiable {
 
     init(
         id: UUID = UUID(),
+        clientEntryID: UUID? = nil,
         image: UIImage,
         promptText: String,
         artStyle: String,
@@ -144,6 +146,7 @@ struct GeneratedStoryboard: Identifiable {
         imageFileName: String? = nil
     ) {
         self.id = id
+        self.clientEntryID = clientEntryID
         self.image = image
         self.promptText = promptText
         self.artStyle = artStyle
@@ -167,8 +170,19 @@ struct CreateEntryReferencePhoto: Identifiable {
 }
 
 enum OpenAITestConfig {
-    // Temporary test-only client key. Remove this before pushing or shipping.
-    static let apiKey = ""
+    // Prototype-only client key. Move image generation server-side before shipping.
+    static var apiKey: String {
+        guard
+            let value = Bundle.main.object(forInfoDictionaryKey: "OPENAI_API_KEY") as? String,
+            !value.isEmpty,
+            !value.hasPrefix("$(")
+        else {
+            return ""
+        }
+
+        return value
+    }
+
     static let imageModel = "gpt-image-2"
 }
 
@@ -647,6 +661,7 @@ enum GeneratedStoryboardStore {
 
             return GeneratedStoryboard(
                 id: item.id,
+                clientEntryID: item.clientEntryID,
                 image: image,
                 promptText: item.promptText,
                 artStyle: item.artStyle,
@@ -665,6 +680,7 @@ enum GeneratedStoryboardStore {
 
             return GeneratedStoryboardMetadata(
                 id: storyboard.id,
+                clientEntryID: storyboard.clientEntryID,
                 promptText: storyboard.promptText,
                 artStyle: storyboard.artStyle,
                 sourcePhotoCount: storyboard.sourcePhotoCount,
@@ -693,6 +709,7 @@ enum GeneratedStoryboardStore {
 
     static func persistedStoryboard(
         image: UIImage,
+        clientEntryID: UUID,
         promptText: String,
         artStyle: String,
         sourcePhotoCount: Int
@@ -714,6 +731,7 @@ enum GeneratedStoryboardStore {
 
         return GeneratedStoryboard(
             id: id,
+            clientEntryID: clientEntryID,
             image: image,
             promptText: promptText,
             artStyle: artStyle,
@@ -730,6 +748,7 @@ enum GeneratedStoryboardStore {
 
 struct GeneratedStoryboardMetadata: Codable {
     let id: UUID
+    let clientEntryID: UUID?
     let promptText: String
     let artStyle: String
     let sourcePhotoCount: Int

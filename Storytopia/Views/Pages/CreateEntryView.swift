@@ -229,6 +229,33 @@ private struct PendingCreateEntryDraftSave {
     let textAlignmentRawValue: String
 }
 
+private enum StoryboardGenerationPhase: Equatable {
+    case ready
+    case preparingEntry
+    case uploadingReferencePhotos
+    case generating
+    case savingResult
+    case completed
+    case failed
+
+    var buttonTitle: String {
+        switch self {
+        case .ready, .failed:
+            return "Generate Storyboard"
+        case .preparingEntry:
+            return "Preparing Entry..."
+        case .uploadingReferencePhotos:
+            return "Uploading Photos..."
+        case .generating:
+            return "Generating..."
+        case .savingResult:
+            return "Saving Result..."
+        case .completed:
+            return "Completed"
+        }
+    }
+}
+
 private struct EntryLocationSuggestion: Identifiable, Equatable {
     let title: String
     let subtitle: String
@@ -1198,6 +1225,7 @@ struct CreateEntryView: View {
     @State private var isShowingCamera = false
     @State private var isShowingExitConfirmation = false
     @State private var isGeneratingStoryboard = false
+    @State private var storyboardGenerationPhase: StoryboardGenerationPhase = .ready
     @State private var generationErrorMessage: String?
     @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
@@ -1265,20 +1293,8 @@ struct CreateEntryView: View {
             return
         }
 
-        guard !isToolbarSaveInProgress else {
-            return
-        }
-
         dismissKeyboard()
-        guard hasDraftContent else {
-            isShowingEntryOptionsPage = true
-            return
-        }
-
-        beginToolbarSavedFeedback()
-        Task {
-            await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: true)
-        }
+        isShowingEntryOptionsPage = true
     }
 
     private var selectedTextStyle: NotebookTextStyle {
@@ -1576,44 +1592,118 @@ struct CreateEntryView: View {
             return
         }
 
+        guard let generationPayload = makeEntryDraftSavePayload(forceSave: true) else {
+            generationErrorMessage = StoryboardGenerationError.invalidRequest.localizedDescription
+            return
+        }
+
+        guard authStore.userID != nil else {
+            generationErrorMessage = "Sign in before generating a storyboard."
+            return
+        }
+
         let photos = storyboardPhotos.compactMap { $0 }
         let photoImages = photos.map(\.image)
         let layout = effectiveStoryboardLayout
         isGeneratingStoryboard = true
+        storyboardGenerationPhase = photos.isEmpty ? .preparingEntry : .uploadingReferencePhotos
 
         Task {
             do {
+                let prepareResult = try await EntrySaveService().prepareEntryForGeneration(
+                    payload: generationPayload,
+                    isSignedIn: authStore.userID != nil,
+                    currentStatus: currentEntryStatus
+                )
+                activeDraftID = prepareResult.localDraftID
+                cloudSaveState = prepareResult.state
+                if case .failed(let message) = prepareResult.state {
+                    throw StoryboardGenerationError.openAIMessage(message)
+                }
+                if case .photoUploadFailed(let message) = prepareResult.state {
+                    throw StoryboardGenerationError.openAIMessage(message)
+                }
+                if authStore.userID != nil, prepareResult.cloudEntry == nil {
+                    throw StoryboardGenerationError.openAIMessage("Could not prepare this entry in Storytopia cloud.")
+                }
+
+                await MainActor.run {
+                    storyboardGenerationPhase = .generating
+                }
+
                 let image = try await OpenAIImageGenerationService().generateStoryboard(
                     apiKey: apiKey,
+                    title: storyTitle,
                     text: entryText,
+                    richText: currentEntryRichText(),
                     artStyle: selectedArtStyle,
                     layout: layout,
+                    isSmartGenerationEnabled: isSmartGenerationEnabled,
                     images: photoImages
                 )
 
+                await MainActor.run {
+                    storyboardGenerationPhase = .savingResult
+                }
+
                 let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
                     image: image,
+                    clientEntryID: prepareResult.localDraftID,
                     promptText: entryText,
                     artStyle: selectedArtStyle,
                     sourcePhotoCount: photoImages.count
                 )
 
+                let completionPayload = EntryDraftSavePayload(
+                    id: prepareResult.localDraftID,
+                    title: generationPayload.title,
+                    text: generationPayload.text,
+                    richText: generationPayload.richText,
+                    photos: generationPayload.photos,
+                    artStyle: generationPayload.artStyle,
+                    location: generationPayload.location,
+                    date: generationPayload.date,
+                    datePrecision: generationPayload.datePrecision,
+                    savesDraft: generationPayload.savesDraft,
+                    isPrivate: generationPayload.isPrivate,
+                    fontChoiceRawValue: generationPayload.fontChoiceRawValue,
+                    textColorIndex: generationPayload.textColorIndex,
+                    textSize: generationPayload.textSize,
+                    paperStyleRawValue: generationPayload.paperStyleRawValue,
+                    paperColorIndex: generationPayload.paperColorIndex,
+                    isBold: generationPayload.isBold,
+                    isItalic: generationPayload.isItalic,
+                    isUnderlined: generationPayload.isUnderlined,
+                    isStrikethrough: generationPayload.isStrikethrough,
+                    isHighlighted: generationPayload.isHighlighted,
+                    textAlignmentRawValue: generationPayload.textAlignmentRawValue
+                )
+
+                let completionResult = try await EntrySaveService().markEntryCompletedAfterStoryboardSaved(
+                    payload: completionPayload,
+                    isSignedIn: authStore.userID != nil
+                )
+
                 await MainActor.run {
+                    activeDraftID = completionResult.localDraftID
+                    cloudSaveState = completionResult.state
                     addCurrentEntry(to: journalTitle)
                     generatedStoryboards.insert(storyboard, at: 0)
                     GeneratedStoryboardStore.save(generatedStoryboards)
-                    clearEditor()
-                    if let activeDraftID {
-                        CreateEntryDraftStore.delete(id: activeDraftID)
-                    }
-                    self.activeDraftID = nil
+                    currentEntryStatus = .completed
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+                    storyboardGenerationPhase = .completed
                     isGeneratingStoryboard = false
                     addedJournalTitle = journalTitle
+                    UserDefaults.standard.set("completed", forKey: "StorytopiaSelectedEntriesTab")
+                    isOpeningCompletedEntryFromEntries = true
+                    completedEntryOpenedStoryboardImage = image
+                    selectedPage = .entries
                 }
             } catch {
                 await MainActor.run {
                     generationErrorMessage = error.localizedDescription
+                    storyboardGenerationPhase = .failed
                     isGeneratingStoryboard = false
                 }
             }
@@ -2211,7 +2301,7 @@ struct CreateEntryView: View {
         cloudSaveState = payload.photos.isEmpty ? .saving : .uploadingPhotos
 
         do {
-            let result = try await EntrySaveService().ensureEntryAndReferencePhotosSynced(
+            let result = try await EntrySaveService().saveEntryPreservingStatus(
                 payload: payload,
                 isSignedIn: authStore.userID != nil,
                 status: currentEntryStatus
@@ -2270,6 +2360,7 @@ struct CreateEntryView: View {
         toolbarSavedSnapshot = nil
         toolbarSavedJournalEntryID = nil
         cloudSaveState = .idle
+        storyboardGenerationPhase = .ready
         showsToolbarSavedFeedback = false
         isToolbarSaveInProgress = false
         toolbarSaveFeedbackVersion += 1
@@ -5445,11 +5536,13 @@ struct CreateEntryView: View {
                         ProgressView()
                             .tint(.white)
 
-                        Text("Generating...")
+                        Text(storyboardGenerationPhase.buttonTitle)
                     } else {
-                        Text("Generate Storyboard")
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 14, weight: .semibold))
+                        Text(storyboardGenerationPhase.buttonTitle)
+                        if storyboardGenerationPhase != .completed {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
                     }
                 }
                 .font(.system(size: 16, weight: .bold))

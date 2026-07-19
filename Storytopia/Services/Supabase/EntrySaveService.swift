@@ -77,7 +77,7 @@ struct EntrySaveService {
         self.referencePhotoService = referencePhotoService
     }
 
-    func ensureEntryAndReferencePhotosSynced(
+    func saveEntryPreservingStatus(
         payload: EntryDraftSavePayload,
         isSignedIn: Bool,
         status: JournalEntryStatus = .draft
@@ -148,6 +148,65 @@ struct EntrySaveService {
                 state: .photoUploadFailed("Saved locally. Photo sync failed.")
             )
         }
+    }
+
+    func prepareEntryForGeneration(
+        payload: EntryDraftSavePayload,
+        isSignedIn: Bool,
+        currentStatus: JournalEntryStatus
+    ) async throws -> EntrySaveResult {
+        try await saveEntryPreservingStatus(
+            payload: payload,
+            isSignedIn: isSignedIn,
+            status: currentStatus == .completed ? .completed : .draft
+        )
+    }
+
+    func markEntryCompletedAfterStoryboardSaved(
+        payload: EntryDraftSavePayload,
+        isSignedIn: Bool
+    ) async throws -> EntrySaveResult {
+        try await saveEntryPreservingStatus(
+            payload: payload,
+            isSignedIn: isSignedIn,
+            status: .completed
+        )
+    }
+
+    func renameEntry(
+        entry: CreateEntryDraft,
+        title: String,
+        status: JournalEntryStatus,
+        isSignedIn: Bool
+    ) async throws -> JournalEntry? {
+        guard isSignedIn else {
+            return nil
+        }
+
+        return try await repository.upsertEntry(
+            clientEntryID: entry.id,
+            title: title,
+            content: entry.text,
+            richText: entry.richText,
+            artStyle: entry.artStyle,
+            location: entry.location,
+            entryDate: entry.date,
+            datePrecision: entry.datePrecision,
+            savesDraft: entry.savesDraft,
+            isPrivate: entry.isPrivate,
+            fontChoiceRawValue: entry.fontChoiceRawValue,
+            textColorIndex: entry.textColorIndex,
+            textSize: entry.textSize,
+            paperStyleRawValue: entry.paperStyleRawValue,
+            paperColorIndex: entry.paperColorIndex,
+            isBold: entry.isBold,
+            isItalic: entry.isItalic,
+            isUnderlined: entry.isUnderlined,
+            isStrikethrough: entry.isStrikethrough,
+            isHighlighted: entry.isHighlighted,
+            textAlignmentRawValue: entry.textAlignmentRawValue,
+            status: status
+        )
     }
 
     func deleteEntry(localDraftID: UUID, cloudEntry: JournalEntry?, isSignedIn: Bool) async throws {

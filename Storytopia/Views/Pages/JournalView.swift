@@ -4641,8 +4641,8 @@ struct EntriesView: View {
     @State private var cloudEntries: [JournalEntry] = []
     @State private var isLoadingCloudEntries = false
     @State private var cloudEntriesErrorMessage: String?
-    @State private var selectedEntryTab: EntriesTab = .drafts
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
+    @AppStorage("StorytopiaSelectedEntriesTab") private var selectedEntryTabRawValue = EntriesTab.drafts.rawValue
 
     private var selectedEntryLayout: JournalEntryLayout {
         get {
@@ -4650,6 +4650,15 @@ struct EntriesView: View {
         }
         nonmutating set {
             selectedEntryLayoutRawValue = newValue.rawValue
+        }
+    }
+
+    private var selectedEntryTab: EntriesTab {
+        get {
+            EntriesTab(rawValue: selectedEntryTabRawValue) ?? .drafts
+        }
+        nonmutating set {
+            selectedEntryTabRawValue = newValue.rawValue
         }
     }
 
@@ -5058,9 +5067,9 @@ struct EntriesView: View {
                             CompletedEntryGridCard(
                                 entry: item.entry,
                                 title: entryDisplayTitle(item.entry),
-                                storyboardImage: storyboardImage(for: index),
+                                storyboardImage: storyboardImage(for: item, fallbackIndex: index),
                                 onOpen: {
-                                    openEntryItem(item, asCompleted: true, storyboardImage: storyboardUIImage(for: index))
+                                    openEntryItem(item, asCompleted: true, storyboardImage: storyboardUIImage(for: item, fallbackIndex: index))
                                 }
                             )
                         }
@@ -5095,16 +5104,30 @@ struct EntriesView: View {
         min(max(entryCount / 3, 1), 4)
     }
 
-    private func storyboardImage(for index: Int) -> CompletedStoryboardImage {
-        if completedStoryboards.indices.contains(index) {
+    private func generatedStoryboard(for item: EntryDisplayItem) -> GeneratedStoryboard? {
+        completedStoryboards.first { $0.clientEntryID == item.id }
+    }
+
+    private func storyboardImage(for item: EntryDisplayItem, fallbackIndex index: Int) -> CompletedStoryboardImage {
+        if let storyboard = generatedStoryboard(for: item) {
+            return .uiImage(storyboard.image)
+        }
+
+        if completedStoryboards.indices.contains(index),
+           completedStoryboards[index].clientEntryID == nil {
             return .uiImage(completedStoryboards[index].image)
         }
 
         return .asset(CompletedStoryboardSample.imageName(for: index))
     }
 
-    private func storyboardUIImage(for index: Int) -> UIImage? {
-        if completedStoryboards.indices.contains(index) {
+    private func storyboardUIImage(for item: EntryDisplayItem, fallbackIndex index: Int) -> UIImage? {
+        if let storyboard = generatedStoryboard(for: item) {
+            return storyboard.image
+        }
+
+        if completedStoryboards.indices.contains(index),
+           completedStoryboards[index].clientEntryID == nil {
             return completedStoryboards[index].image
         }
 
@@ -5360,31 +5383,20 @@ struct EntriesView: View {
             defer { entryIDsBeingRenamed.remove(entry.id) }
 
             do {
-                let status = cloudEntries.first(where: { $0.clientEntryID == entry.id })?.status
-                    .flatMap(JournalEntryStatus.init(rawValue:)) ?? .draft
-                _ = try await SupabaseEntryRepository().upsertEntry(
-                    clientEntryID: entry.id,
+                let matchingCloudEntry = cloudEntries.firstIndex(where: { $0.clientEntryID == entry.id })
+                    .map { cloudEntries[$0] }
+                let status: JournalEntryStatus
+                if let rawStatus = matchingCloudEntry?.status,
+                   let cloudStatus = JournalEntryStatus(rawValue: rawStatus) {
+                    status = cloudStatus
+                } else {
+                    status = .draft
+                }
+                _ = try await EntrySaveService().renameEntry(
+                    entry: entry,
                     title: trimmedTitle,
-                    content: entry.text,
-                    richText: entry.richText,
-                    artStyle: entry.artStyle,
-                    location: entry.location,
-                    entryDate: entry.date,
-                    datePrecision: entry.datePrecision,
-                    savesDraft: entry.savesDraft,
-                    isPrivate: entry.isPrivate,
-                    fontChoiceRawValue: entry.fontChoiceRawValue,
-                    textColorIndex: entry.textColorIndex,
-                    textSize: entry.textSize,
-                    paperStyleRawValue: entry.paperStyleRawValue,
-                    paperColorIndex: entry.paperColorIndex,
-                    isBold: entry.isBold,
-                    isItalic: entry.isItalic,
-                    isUnderlined: entry.isUnderlined,
-                    isStrikethrough: entry.isStrikethrough,
-                    isHighlighted: entry.isHighlighted,
-                    textAlignmentRawValue: entry.textAlignmentRawValue,
-                    status: status
+                    status: status,
+                    isSignedIn: true
                 )
                 await loadCloudEntriesIfNeeded()
             } catch {
