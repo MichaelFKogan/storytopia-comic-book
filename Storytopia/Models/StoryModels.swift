@@ -127,35 +127,74 @@ enum StoryboardLayoutOption: String, CaseIterable, Identifiable {
 
 struct GeneratedStoryboard: Identifiable {
     let id: UUID
+    let clientEntryID: UUID?
     let image: UIImage
     let promptText: String
     let artStyle: String
+    let panelLayout: String?
     let sourcePhotoCount: Int
     let createdAt: Date
     let imageFileName: String?
+    let storagePath: String?
+    let cloudSyncState: String?
+    let isPrimary: Bool
 
     init(
         id: UUID = UUID(),
+        clientEntryID: UUID? = nil,
         image: UIImage,
         promptText: String,
         artStyle: String,
+        panelLayout: String? = nil,
         sourcePhotoCount: Int,
         createdAt: Date = Date(),
-        imageFileName: String? = nil
+        imageFileName: String? = nil,
+        storagePath: String? = nil,
+        cloudSyncState: String? = nil,
+        isPrimary: Bool = true
     ) {
         self.id = id
+        self.clientEntryID = clientEntryID
         self.image = image
         self.promptText = promptText
         self.artStyle = artStyle
+        self.panelLayout = panelLayout
         self.sourcePhotoCount = sourcePhotoCount
         self.createdAt = createdAt
         self.imageFileName = imageFileName
+        self.storagePath = storagePath
+        self.cloudSyncState = cloudSyncState
+        self.isPrimary = isPrimary
+    }
+}
+
+struct CreateEntryReferencePhoto: Identifiable {
+    static let fileExtension = "jpg"
+    static let mimeType = "image/jpeg"
+
+    let id: UUID
+    let image: UIImage
+
+    init(id: UUID = UUID(), image: UIImage) {
+        self.id = id
+        self.image = image
     }
 }
 
 enum OpenAITestConfig {
-    // Temporary test-only client key. Remove this before pushing or shipping.
-    static let apiKey = ""
+    // Prototype-only client key. Move image generation server-side before shipping.
+    static var apiKey: String {
+        guard
+            let value = Bundle.main.object(forInfoDictionaryKey: "OPENAI_API_KEY") as? String,
+            !value.isEmpty,
+            !value.hasPrefix("$(")
+        else {
+            return ""
+        }
+
+        return value
+    }
+
     static let imageModel = "gpt-image-2"
 }
 
@@ -164,13 +203,14 @@ struct CreateEntryDraft: Identifiable {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photos: [UIImage]
+    let photos: [CreateEntryReferencePhoto]
     let artStyle: String
     let location: String
     let date: Date
     let datePrecision: EntryDatePrecision
     let savesDraft: Bool
     let isPrivate: Bool
+    let status: String
     let fontChoiceRawValue: String?
     let textColorIndex: Int?
     let textSize: Double?
@@ -254,6 +294,62 @@ enum CreateEntryDraftStore {
         datePrecision: EntryDatePrecision = .exact,
         savesDraft: Bool,
         isPrivate: Bool,
+        status: JournalEntryStatus = .draft,
+        fontChoiceRawValue: String? = nil,
+        textColorIndex: Int? = nil,
+        textSize: Double? = nil,
+        paperStyleRawValue: String? = nil,
+        paperColorIndex: Int? = nil,
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        isStrikethrough: Bool = false,
+        isHighlighted: Bool = false,
+        textAlignmentRawValue: String = "leading",
+        thumbnail: UIImage? = nil
+    ) -> UUID? {
+        save(
+            id: id,
+            title: title,
+            text: text,
+            richText: richText,
+            referencePhotos: photos.map { CreateEntryReferencePhoto(image: $0) },
+            artStyle: artStyle,
+            location: location,
+            date: date,
+            datePrecision: datePrecision,
+            savesDraft: savesDraft,
+            isPrivate: isPrivate,
+            status: status,
+            fontChoiceRawValue: fontChoiceRawValue,
+            textColorIndex: textColorIndex,
+            textSize: textSize,
+            paperStyleRawValue: paperStyleRawValue,
+            paperColorIndex: paperColorIndex,
+            isBold: isBold,
+            isItalic: isItalic,
+            isUnderlined: isUnderlined,
+            isStrikethrough: isStrikethrough,
+            isHighlighted: isHighlighted,
+            textAlignmentRawValue: textAlignmentRawValue,
+            thumbnail: thumbnail
+        )
+    }
+
+    @discardableResult
+    static func save(
+        id: UUID?,
+        title: String,
+        text: String,
+        richText: NotebookRichTextDocument? = nil,
+        referencePhotos: [CreateEntryReferencePhoto],
+        artStyle: String,
+        location: String,
+        date: Date,
+        datePrecision: EntryDatePrecision = .exact,
+        savesDraft: Bool,
+        isPrivate: Bool,
+        status: JournalEntryStatus = .draft,
         fontChoiceRawValue: String? = nil,
         textColorIndex: Int? = nil,
         textSize: Double? = nil,
@@ -279,18 +375,24 @@ enum CreateEntryDraftStore {
                 withIntermediateDirectories: true
             )
 
-            var photoFileNames: [String] = []
-            for (index, photo) in photos.enumerated() {
-                guard let data = photo.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
+            var photoMetadata: [CreateEntryDraftPhotoMetadata] = []
+            for (index, photo) in referencePhotos.enumerated() {
+                guard let data = photo.image.storytopiaPreparedJPEGData(compressionQuality: 0.88) else {
                     continue
                 }
 
-                let fileName = "photo-\(index).jpg"
+                let fileName = "photo-\(index)-\(photo.id.uuidString).jpg"
                 try data.write(
                     to: draftDirectory.appendingPathComponent(fileName),
                     options: [.atomic]
                 )
-                photoFileNames.append(fileName)
+                photoMetadata.append(
+                    CreateEntryDraftPhotoMetadata(
+                        id: photo.id,
+                        fileName: fileName,
+                        mimeType: CreateEntryReferencePhoto.mimeType
+                    )
+                )
             }
 
             let thumbnailToSave = thumbnail ?? existingDraft?.thumbnail
@@ -307,13 +409,15 @@ enum CreateEntryDraftStore {
                 title: title,
                 text: text,
                 richText: richText,
-                photoFileNames: photoFileNames,
+                photoFileNames: photoMetadata.map(\.fileName),
+                referencePhotos: photoMetadata,
                 artStyle: artStyle,
                 location: location,
                 date: date,
                 datePrecision: datePrecision,
                 savesDraft: savesDraft,
                 isPrivate: isPrivate,
+                status: status.rawValue,
                 fontChoiceRawValue: fontChoiceRawValue,
                 textColorIndex: textColorIndex,
                 textSize: textSize,
@@ -380,17 +484,28 @@ enum CreateEntryDraftStore {
         let metadataURL = draftDirectory.appendingPathComponent(metadataFileName)
         guard
             let data = try? Data(contentsOf: metadataURL),
-            let metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
+            var metadata = try? JSONDecoder().decode(CreateEntryDraftMetadata.self, from: data)
         else {
             return nil
         }
 
-        let photos = metadata.photoFileNames.compactMap { fileName -> UIImage? in
+        let photoMetadata = metadata.normalizedPhotoMetadata()
+        if metadata.referencePhotos == nil, !photoMetadata.isEmpty {
+            metadata.referencePhotos = photoMetadata
+            if let updatedData = try? JSONEncoder().encode(metadata) {
+                try? updatedData.write(to: metadataURL, options: [.atomic])
+            }
+        }
+
+        let photos = photoMetadata.compactMap { item -> CreateEntryReferencePhoto? in
+            let fileName = item.fileName
             let photoURL = draftDirectory.appendingPathComponent(fileName)
             guard let data = try? Data(contentsOf: photoURL) else {
                 return nil
             }
-            return UIImage(data: data)
+            return UIImage(data: data).map {
+                CreateEntryReferencePhoto(id: item.id, image: $0)
+            }
         }
 
         let thumbnailURL = draftDirectory.appendingPathComponent(thumbnailFileName)
@@ -408,6 +523,7 @@ enum CreateEntryDraftStore {
             datePrecision: metadata.datePrecision ?? .exact,
             savesDraft: metadata.savesDraft ?? true,
             isPrivate: metadata.isPrivate ?? false,
+            status: metadata.normalizedStatus,
             fontChoiceRawValue: metadata.fontChoiceRawValue,
             textColorIndex: metadata.textColorIndex,
             textSize: metadata.textSize,
@@ -456,7 +572,7 @@ enum CreateEntryDraftStore {
             title: legacyDraft.title,
             text: legacyDraft.text,
             richText: legacyDraft.richText,
-            photos: legacyDraft.photos,
+            referencePhotos: legacyDraft.photos,
             artStyle: legacyDraft.artStyle,
             location: legacyDraft.location,
             date: legacyDraft.date,
@@ -498,12 +614,14 @@ private struct CreateEntryDraftMetadata: Codable {
     var text: String
     var richText: NotebookRichTextDocument?
     var photoFileNames: [String]
+    var referencePhotos: [CreateEntryDraftPhotoMetadata]?
     var artStyle: String?
     var location: String?
     var date: Date?
     var datePrecision: EntryDatePrecision?
     var savesDraft: Bool?
     var isPrivate: Bool?
+    var status: String?
     var fontChoiceRawValue: String?
     var textColorIndex: Int?
     var textSize: Double?
@@ -518,6 +636,37 @@ private struct CreateEntryDraftMetadata: Codable {
     var createdAt: Date?
     var updatedAt: Date?
     var displayOrder: Int?
+
+    func normalizedPhotoMetadata() -> [CreateEntryDraftPhotoMetadata] {
+        if let referencePhotos {
+            return referencePhotos
+        }
+
+        return photoFileNames.map {
+            CreateEntryDraftPhotoMetadata(
+                id: UUID(),
+                fileName: $0,
+                mimeType: CreateEntryReferencePhoto.mimeType
+            )
+        }
+    }
+
+    var normalizedStatus: String {
+        guard
+            let status,
+            JournalEntryStatus(rawValue: status) != nil
+        else {
+            return JournalEntryStatus.draft.rawValue
+        }
+
+        return status
+    }
+}
+
+private struct CreateEntryDraftPhotoMetadata: Codable {
+    var id: UUID
+    var fileName: String
+    var mimeType: String
 }
 
 enum GeneratedStoryboardStore {
@@ -542,12 +691,17 @@ enum GeneratedStoryboardStore {
 
             return GeneratedStoryboard(
                 id: item.id,
+                clientEntryID: item.clientEntryID,
                 image: image,
                 promptText: item.promptText,
                 artStyle: item.artStyle,
+                panelLayout: item.panelLayout,
                 sourcePhotoCount: item.sourcePhotoCount,
                 createdAt: item.createdAt,
-                imageFileName: item.imageFileName
+                imageFileName: item.imageFileName,
+                storagePath: item.storagePath,
+                cloudSyncState: item.cloudSyncState,
+                isPrimary: item.isPrimary ?? true
             )
         }
     }
@@ -560,11 +714,16 @@ enum GeneratedStoryboardStore {
 
             return GeneratedStoryboardMetadata(
                 id: storyboard.id,
+                clientEntryID: storyboard.clientEntryID,
                 promptText: storyboard.promptText,
                 artStyle: storyboard.artStyle,
+                panelLayout: storyboard.panelLayout,
                 sourcePhotoCount: storyboard.sourcePhotoCount,
                 createdAt: storyboard.createdAt,
-                imageFileName: imageFileName
+                imageFileName: imageFileName,
+                storagePath: storyboard.storagePath,
+                cloudSyncState: storyboard.cloudSyncState,
+                isPrimary: storyboard.isPrimary
             )
         }
 
@@ -588,16 +747,21 @@ enum GeneratedStoryboardStore {
 
     static func persistedStoryboard(
         image: UIImage,
+        clientEntryID: UUID,
         promptText: String,
         artStyle: String,
-        sourcePhotoCount: Int
+        panelLayout: String?,
+        sourcePhotoCount: Int,
+        id: UUID = UUID(),
+        storagePath: String? = nil,
+        cloudSyncState: String? = nil,
+        isPrimary: Bool = true
     ) throws -> GeneratedStoryboard {
         try FileManager.default.createDirectory(
             at: imagesDirectory,
             withIntermediateDirectories: true
         )
 
-        let id = UUID()
         let imageFileName = "\(id.uuidString).jpg"
         let imageURL = imagesDirectory.appendingPathComponent(imageFileName)
 
@@ -609,12 +773,50 @@ enum GeneratedStoryboardStore {
 
         return GeneratedStoryboard(
             id: id,
+            clientEntryID: clientEntryID,
             image: image,
             promptText: promptText,
             artStyle: artStyle,
+            panelLayout: panelLayout,
             sourcePhotoCount: sourcePhotoCount,
-            imageFileName: imageFileName
+            imageFileName: imageFileName,
+            storagePath: storagePath,
+            cloudSyncState: cloudSyncState,
+            isPrimary: isPrimary
         )
+    }
+
+    static func merging(_ storyboard: GeneratedStoryboard, into storyboards: [GeneratedStoryboard]) -> [GeneratedStoryboard] {
+        var merged = storyboards.map { existing in
+            guard
+                storyboard.isPrimary,
+                existing.id != storyboard.id,
+                existing.clientEntryID == storyboard.clientEntryID
+            else {
+                return existing
+            }
+
+            return GeneratedStoryboard(
+                id: existing.id,
+                clientEntryID: existing.clientEntryID,
+                image: existing.image,
+                promptText: existing.promptText,
+                artStyle: existing.artStyle,
+                panelLayout: existing.panelLayout,
+                sourcePhotoCount: existing.sourcePhotoCount,
+                createdAt: existing.createdAt,
+                imageFileName: existing.imageFileName,
+                storagePath: existing.storagePath,
+                cloudSyncState: existing.cloudSyncState,
+                isPrimary: false
+            )
+        }
+        if let index = merged.firstIndex(where: { $0.id == storyboard.id }) {
+            merged[index] = storyboard
+        } else {
+            merged.insert(storyboard, at: 0)
+        }
+        return merged
     }
 
     private static var imagesDirectory: URL {
@@ -625,11 +827,16 @@ enum GeneratedStoryboardStore {
 
 struct GeneratedStoryboardMetadata: Codable {
     let id: UUID
+    let clientEntryID: UUID?
     let promptText: String
     let artStyle: String
+    let panelLayout: String?
     let sourcePhotoCount: Int
     let createdAt: Date
     let imageFileName: String
+    let storagePath: String?
+    let cloudSyncState: String?
+    let isPrimary: Bool?
 }
 
 enum StoryboardGenerationError: LocalizedError {

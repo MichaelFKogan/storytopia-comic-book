@@ -8,16 +8,27 @@ struct OpenAIImageGenerationService {
 
     func generateStoryboard(
         apiKey: String,
+        title: String,
         text: String,
+        richText: NotebookRichTextDocument?,
         artStyle: String,
         layout: StoryboardLayoutOption,
+        isSmartGenerationEnabled: Bool,
         images: [UIImage]
     ) async throws -> UIImage {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw StoryboardGenerationError.missingAPIKey
         }
 
-        let prompt = makePrompt(text: text, artStyle: artStyle, layout: layout, imageCount: images.count)
+        let prompt = makePrompt(
+            title: title,
+            text: text,
+            richText: richText,
+            artStyle: artStyle,
+            layout: layout,
+            isSmartGenerationEnabled: isSmartGenerationEnabled,
+            imageCount: images.count
+        )
         let data = try await images.isEmpty
             ? generateStoryboardWithoutReferences(apiKey: apiKey, prompt: prompt)
             : generateStoryboardWithReferences(apiKey: apiKey, prompt: prompt, images: images)
@@ -120,16 +131,23 @@ struct OpenAIImageGenerationService {
     }
 
     private func makePrompt(
+        title: String,
         text: String,
+        richText: NotebookRichTextDocument?,
         artStyle: String,
         layout: StoryboardLayoutOption,
+        isSmartGenerationEnabled: Bool,
         imageCount: Int
     ) -> String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRichText = richText?.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasReferencePhotos = imageCount > 0
         let storyText: String
 
-        if trimmedText.isEmpty {
+        if let trimmedRichText, !trimmedRichText.isEmpty {
+            storyText = trimmedRichText
+        } else if trimmedText.isEmpty {
             storyText = hasReferencePhotos
                 ? "No written story was provided. Infer a warm, visually coherent story about the moment from the uploaded photos."
                 : "No written story or reference photos were provided. Invent a warm, visually coherent everyday moment with a clear beginning, middle, and end."
@@ -138,6 +156,12 @@ struct OpenAIImageGenerationService {
         }
 
         let referencePhotoCount = min(imageCount, 5)
+        let titleBlock = trimmedTitle.isEmpty
+            ? "Untitled Entry"
+            : trimmedTitle
+        let generationMode = isSmartGenerationEnabled
+            ? "Smart Generation was enabled. The app selected this layout from the entry and photo count."
+            : "Manual layout was selected by the user."
         let creationSource = hasReferencePhotos
             ? "using the user's \(referencePhotoCount) uploaded reference photo(s) and optional written story"
             : "from the user's written story"
@@ -166,6 +190,9 @@ struct OpenAIImageGenerationService {
         return """
         Create a vertical illustrated comic/storyboard about the moment \(creationSource).
 
+        ENTRY TITLE:
+        \(titleBlock)
+
         USER STORY:
         \(storyText)
 
@@ -181,8 +208,12 @@ struct OpenAIImageGenerationService {
         The result should look like authentic \(artStyle) artwork, not a photograph with an art filter applied.
         When there is a conflict between realism and the selected art style, always prioritize the selected art style.
 
+        GENERATION SETTINGS:
+        - \(generationMode)
+        - Selected panel count: \(layout.panelCount)
+
         FORMAT:
-        - Output ONE single tall image divided into exactly 5 distinct comic panels with visible gutters or borders.
+        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible gutters or borders.
         - Panel layout (top to bottom): \(layout.promptDescription)
         - Create a coherent beginning, middle, and end.
         - Show a progression of events rather than repeating the same scene.

@@ -6,8 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		17C3F88D300B0B0800DE84D6 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 17C3F88C300B0B0800DE84D6 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		17B501D82FC8D5F80003C9B7 /* Storytopia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Storytopia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		17C3F88E300B121900DE84D6 /* Config/Supabase.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Supabase.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				17C3F88D300B0B0800DE84D6 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -46,6 +52,7 @@
 			isa = PBXGroup;
 			children = (
 				17B501DA2FC8D5F80003C9B7 /* Storytopia */,
+				17C3F88E300B121900DE84D6 /* Config/Supabase.xcconfig */,
 				17B501D92FC8D5F80003C9B7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,6 +85,7 @@
 			);
 			name = Storytopia;
 			packageProductDependencies = (
+				17C3F88C300B0B0800DE84D6 /* Supabase */,
 			);
 			productName = Storytopia;
 			productReference = 17B501D82FC8D5F80003C9B7 /* Storytopia.app */;
@@ -107,6 +115,9 @@
 			);
 			mainGroup = 17B501CF2FC8D5F80003C9B7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				17C3F88B300B0B0800DE84D6 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 17B501D92FC8D5F80003C9B7 /* Products */;
 			projectDirPath = "";
@@ -256,6 +267,7 @@
 		};
 		17B501E42FC8D5F90003C9B7 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 17C3F88E300B121900DE84D6 /* Config/Supabase.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -307,6 +319,7 @@
 		};
 		17B501E52FC8D5F90003C9B7 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 17C3F88E300B121900DE84D6 /* Config/Supabase.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -378,6 +391,27 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		17C3F88B300B0B0800DE84D6 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.46.0;
+			};
+			traits = (
+			);
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		17C3F88C300B0B0800DE84D6 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 17C3F88B300B0B0800DE84D6 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 17B501D02FC8D5F80003C9B7 /* Project object */;
 }

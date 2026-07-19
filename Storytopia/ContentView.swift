@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var pageBehindCreate: StoryPage = .home
     @State private var entryText: String
     @State private var draftStoryTitle: String
-    @State private var draftStoryboardPhotos: [UIImage?]
+    @State private var draftStoryboardPhotos: [CreateEntryReferencePhoto?]
     @State private var isDraftSaved: Bool
     @State private var activeDraftID: UUID?
     @State private var generatedStoryboards: [GeneratedStoryboard]
@@ -145,6 +145,7 @@ struct ContentView: View {
             selectedPage: pageSelection,
             generatedStoryboards: $generatedStoryboards,
             completedEntryOpenedStoryboardImage: $completedEntryOpenedStoryboardImage,
+            isOpeningCompletedEntryFromEntries: $isOpeningCompletedEntryFromEntries,
             dismissCreate: {
                 selectedPage = pageBehindCreate
                 isOpeningEntryFromEntries = false

@@ -18,6 +18,16 @@ struct SettingsView: View {
                 ) {
                     dismiss()
                 }
+
+                SettingsNavigationRow(
+                    systemName: "lock.cloud",
+                    title: "Cloud Journal Test",
+                    subtitle: "Test Supabase sign-in and private entries",
+                    accessibilityLabel: "Open cloud journal test"
+                ) {
+                    SupabaseJournalTestView()
+                        .enableInteractivePopGesture()
+                }
             }
 
             Section("Journal") {
@@ -53,6 +63,16 @@ struct SettingsView: View {
             }
 
             Section("Create") {
+                SettingsNavigationRow(
+                    systemName: "square.and.pencil",
+                    title: "Create Visual Test",
+                    subtitle: "Preview Create with Cloud Journal styling",
+                    accessibilityLabel: "Open create visual test"
+                ) {
+                    CreateVisualTestView()
+                        .enableInteractivePopGesture()
+                }
+
                 SettingsNavigationRow(
                     systemName: "paintpalette",
                     title: "Choose Art Style",

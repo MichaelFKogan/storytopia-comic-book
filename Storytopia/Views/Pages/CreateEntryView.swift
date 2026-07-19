@@ -11,19 +11,21 @@ enum CreateEntryPresentation {
     case editDraft
 
     var showsNextButton: Bool {
-        if case .compose = self {
+        switch self {
+        case .compose, .editDraft:
             return true
+        case .composeInJournal:
+            return false
         }
-
-        return false
     }
 
     var showsEntryOptionsFlow: Bool {
-        if case .compose = self {
+        switch self {
+        case .compose, .editDraft:
             return true
+        case .composeInJournal:
+            return false
         }
-
-        return false
     }
 
     var savesDirectlyToJournal: Bool {
@@ -154,7 +156,7 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photoIDs: [ObjectIdentifier]
+    let photoIDs: [UUID]
     let artStyle: String
     let location: String
     let date: Date
@@ -166,13 +168,15 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let textSize: Double
     let paperStyleRawValue: String
     let paperColorIndex: Int
+    let storyboardLayoutRawValue: String
+    let isSmartGenerationEnabled: Bool
 
     init(
         id: UUID,
         title: String,
         text: String,
         richText: NotebookRichTextDocument?,
-        photos: [UIImage],
+        photos: [CreateEntryReferencePhoto],
         artStyle: String,
         location: String,
         date: Date,
@@ -183,13 +187,15 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         textColorIndex: Int,
         textSize: Double,
         paperStyleRawValue: String,
-        paperColorIndex: Int
+        paperColorIndex: Int,
+        storyboardLayout: StoryboardLayoutOption,
+        isSmartGenerationEnabled: Bool
     ) {
         self.id = id
         self.title = title
         self.text = text
         self.richText = richText?.normalized(for: text)
-        self.photoIDs = photos.map { ObjectIdentifier($0) }
+        self.photoIDs = photos.map(\.id)
         self.artStyle = artStyle
         self.location = location
         self.date = date
@@ -201,6 +207,8 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.textSize = textSize
         self.paperStyleRawValue = paperStyleRawValue
         self.paperColorIndex = paperColorIndex
+        self.storyboardLayoutRawValue = storyboardLayout.rawValue
+        self.isSmartGenerationEnabled = isSmartGenerationEnabled
     }
 }
 
@@ -209,7 +217,7 @@ private struct PendingCreateEntryDraftSave {
     let title: String
     let text: String
     let richText: NotebookRichTextDocument?
-    let photos: [UIImage]
+    let photos: [CreateEntryReferencePhoto]
     let artStyle: String
     let location: String
     let date: Date
@@ -221,6 +229,39 @@ private struct PendingCreateEntryDraftSave {
     let textSize: Double
     let paperStyleRawValue: String
     let paperColorIndex: Int
+    let isBold: Bool
+    let isItalic: Bool
+    let isUnderlined: Bool
+    let isStrikethrough: Bool
+    let isHighlighted: Bool
+    let textAlignmentRawValue: String
+}
+
+private enum StoryboardGenerationPhase: Equatable {
+    case ready
+    case preparingEntry
+    case uploadingReferencePhotos
+    case generating
+    case savingResult
+    case completed
+    case failed
+
+    var buttonTitle: String {
+        switch self {
+        case .ready, .failed:
+            return "Generate Storyboard"
+        case .preparingEntry:
+            return "Preparing Entry..."
+        case .uploadingReferencePhotos:
+            return "Uploading Photos..."
+        case .generating:
+            return "Generating..."
+        case .savingResult:
+            return "Saving Result..."
+        case .completed:
+            return "Completed"
+        }
+    }
 }
 
 private struct EntryLocationSuggestion: Identifiable, Equatable {
@@ -1171,14 +1212,16 @@ struct CreateEntryView: View {
 
     @Binding var entryText: String
     @Binding var storyTitle: String
-    @Binding var storyboardPhotos: [UIImage?]
+    @Binding var storyboardPhotos: [CreateEntryReferencePhoto?]
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
     @Binding var completedEntryOpenedStoryboardImage: UIImage?
+    @Binding var isOpeningCompletedEntryFromEntries: Bool
     let dismissCreate: () -> Void
     var onJournalEntryCreated: (String, PrototypeEntry) -> Void = { _, _ in }
+    @EnvironmentObject private var authStore: SupabaseAuthStore
 
     @State private var selectedArtStyle = "Anime"
     @State private var selectedStoryboardLayout = StoryboardLayoutOption.fiveClassic
@@ -1190,6 +1233,7 @@ struct CreateEntryView: View {
     @State private var isShowingCamera = false
     @State private var isShowingExitConfirmation = false
     @State private var isGeneratingStoryboard = false
+    @State private var storyboardGenerationPhase: StoryboardGenerationPhase = .ready
     @State private var generationErrorMessage: String?
     @State private var isFullScreenEditorVisible = false
     @State private var isShowingArtStyleGrid = false
@@ -1215,7 +1259,7 @@ struct CreateEntryView: View {
     @State private var recentEntryLocations = EntryLocationRecentStore.all
     @StateObject private var locationSearch = EntryLocationSearchModel()
     @State private var storyDate = Date()
-    @State private var storyDatePrecision: EntryDatePrecision = .exact
+    @State private var storyDatePrecision: EntryDatePrecision = .noDate
     @State private var didEditEntryDate = false
     @State private var didEditEntryLocation = false
     @State private var savesDraft = true
@@ -1223,7 +1267,9 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var previewedStoryboardPhoto: UIImage?
-    @State private var isPhotoTabCollapsed = false
+    @State private var isPreviewingCompletedStoryboard = false
+    @State private var isPhotoTabCollapsed = true
+    @State private var isStoryDetailsTabCollapsed = true
     @State private var isShowingEntryOptionsPage = false
     @State private var loadedDraftSnapshot: LoadedCreateEntryDraftSnapshot?
     @FocusState private var isTitleFocused: Bool
@@ -1237,6 +1283,8 @@ struct CreateEntryView: View {
     @State private var showsToolbarSavedFeedback = false
     @State private var isToolbarSaveInProgress = false
     @State private var toolbarSaveFeedbackVersion = 0
+    @State private var cloudSaveState: EntryCloudSaveState = .idle
+    @State private var currentEntryStatus: JournalEntryStatus = .draft
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
@@ -1247,15 +1295,37 @@ struct CreateEntryView: View {
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         editorBlurRequestID += 1
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .endEditing(true)
     }
 
     private func showEntryOptionsPage() {
-        guard presentation.showsEntryOptionsFlow else {
+        guard canShowEntryOptionsPage else {
             return
         }
 
         dismissKeyboard()
         isShowingEntryOptionsPage = true
+    }
+
+    private func advanceToEntryOptionsPage() {
+        guard canShowEntryOptionsPage else {
+            return
+        }
+
+        if presentation.isEditDraft, hasUnsavedDraftChanges {
+            dismissKeyboard()
+            beginToolbarSavedFeedback()
+
+            Task {
+                await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: true)
+            }
+        } else {
+            showEntryOptionsPage()
+        }
     }
 
     private var selectedTextStyle: NotebookTextStyle {
@@ -1307,7 +1377,11 @@ struct CreateEntryView: View {
     }
 
     private var showsComposeFlowControls: Bool {
-        presentation.showsNextButton && activeDraftID == nil
+        canShowEntryOptionsPage
+    }
+
+    private var canShowEntryOptionsPage: Bool {
+        presentation.showsEntryOptionsFlow && !isOpeningCompletedEntryFromEntries
     }
 
     var body: some View {
@@ -1328,6 +1402,11 @@ struct CreateEntryView: View {
         .overlay(alignment: .bottom) {
             if let addedJournalTitle {
                 addedToJournalToast(journalTitle: addedJournalTitle)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let cloudSaveMessage = cloudSaveState.message {
+                cloudSaveStatusBanner(message: cloudSaveMessage)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1360,6 +1439,14 @@ struct CreateEntryView: View {
             if let previewedStoryboardPhoto {
                 ReferencePhotoViewer(image: previewedStoryboardPhoto) {
                     self.previewedStoryboardPhoto = nil
+                }
+                .presentationBackground(.clear)
+            }
+        }
+        .fullScreenCover(isPresented: $isPreviewingCompletedStoryboard) {
+            if let completedEntryOpenedStoryboardImage {
+                ReferencePhotoViewer(image: completedEntryOpenedStoryboardImage) {
+                    isPreviewingCompletedStoryboard = false
                 }
                 .presentationBackground(.clear)
             }
@@ -1498,6 +1585,7 @@ struct CreateEntryView: View {
             configureDirectJournalEntryIfNeeded()
             loadLinkedJournalTitle(for: activeDraftID)
             loadSavedDraftIfNeeded()
+            currentEntryStatus = resolvedCurrentEntryStatus()
         }
         .onChange(of: activeDraftID) { newDraftID in
             handleActiveDraftChange(newDraftID)
@@ -1528,6 +1616,17 @@ struct CreateEntryView: View {
 
         loadLinkedJournalTitle(for: draftID)
         loadSavedDraftIfNeeded()
+        currentEntryStatus = resolvedCurrentEntryStatus()
+    }
+
+    private func resolvedCurrentEntryStatus() -> JournalEntryStatus {
+        if let activeDraftID,
+           let draft = CreateEntryDraftStore.load(id: activeDraftID),
+           let status = JournalEntryStatus(rawValue: draft.status) {
+            return status
+        }
+
+        return isOpeningCompletedEntryFromEntries ? .completed : .draft
     }
 
     private func startStoryboardGeneration() {
@@ -1546,43 +1645,184 @@ struct CreateEntryView: View {
             return
         }
 
+        guard let generationPayload = makeEntryDraftSavePayload(forceSave: true) else {
+            generationErrorMessage = StoryboardGenerationError.invalidRequest.localizedDescription
+            return
+        }
+
+        guard authStore.userID != nil else {
+            generationErrorMessage = "Sign in before generating a storyboard."
+            return
+        }
+
         let photos = storyboardPhotos.compactMap { $0 }
+        let photoImages = photos.map(\.image)
         let layout = effectiveStoryboardLayout
+        let requiresEntrySave = activeDraftID == nil || hasUnsavedDraftChanges
+        let requiresReferencePhotoSync = requiresEntrySave && hasUnsavedReferencePhotoChanges
         isGeneratingStoryboard = true
+        storyboardGenerationPhase = requiresReferencePhotoSync ? .uploadingReferencePhotos : .preparingEntry
 
         Task {
             do {
-                let image = try await OpenAIImageGenerationService().generateStoryboard(
-                    apiKey: apiKey,
-                    text: entryText,
-                    artStyle: selectedArtStyle,
-                    layout: layout,
-                    images: photos
+                let prepareResult = try await EntrySaveService().prepareEntryForGeneration(
+                    payload: generationPayload,
+                    isSignedIn: authStore.userID != nil,
+                    currentStatus: currentEntryStatus,
+                    requiresSave: requiresEntrySave,
+                    syncReferencePhotos: requiresReferencePhotoSync
                 )
-
-                let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
-                    image: image,
-                    promptText: entryText,
-                    artStyle: selectedArtStyle,
-                    sourcePhotoCount: photos.count
-                )
+                activeDraftID = prepareResult.localDraftID
+                cloudSaveState = prepareResult.state
+                if case .failed(let message) = prepareResult.state {
+                    throw StoryboardGenerationError.openAIMessage(message)
+                }
+                if case .photoUploadFailed(let message) = prepareResult.state {
+                    throw StoryboardGenerationError.openAIMessage(message)
+                }
+                if authStore.userID != nil, requiresEntrySave, prepareResult.cloudEntry == nil {
+                    throw StoryboardGenerationError.openAIMessage("Could not prepare this entry in Storytopia cloud.")
+                }
 
                 await MainActor.run {
-                    addCurrentEntry(to: journalTitle)
-                    generatedStoryboards.insert(storyboard, at: 0)
-                    GeneratedStoryboardStore.save(generatedStoryboards)
-                    clearEditor()
-                    if let activeDraftID {
-                        CreateEntryDraftStore.delete(id: activeDraftID)
+                    storyboardGenerationPhase = .generating
+                }
+
+                print("[Storytopia] Calling OpenAI.")
+                let image = try await OpenAIImageGenerationService().generateStoryboard(
+                    apiKey: apiKey,
+                    title: storyTitle,
+                    text: entryText,
+                    richText: currentEntryRichText(),
+                    artStyle: selectedArtStyle,
+                    layout: layout,
+                    isSmartGenerationEnabled: isSmartGenerationEnabled,
+                    images: photoImages
+                )
+                print("[Storytopia] OpenAI response received.")
+
+                await MainActor.run {
+                    storyboardGenerationPhase = .savingResult
+                }
+
+                print("[Storytopia] Saving generated storyboard.")
+                let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
+                    image: image,
+                    clientEntryID: prepareResult.localDraftID,
+                    promptText: entryText,
+                    artStyle: selectedArtStyle,
+                    panelLayout: layout.rawValue,
+                    sourcePhotoCount: photoImages.count
+                )
+                print("[Storytopia] Storyboard saved.")
+
+                var storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboard, into: generatedStoryboards)
+                GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
+
+                let cloudStoryboard: EntryStoryboard
+                do {
+                    cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                } catch {
+                    let failedStoryboard = GeneratedStoryboard(
+                        id: storyboard.id,
+                        clientEntryID: storyboard.clientEntryID,
+                        image: storyboard.image,
+                        promptText: storyboard.promptText,
+                        artStyle: storyboard.artStyle,
+                        panelLayout: storyboard.panelLayout,
+                        sourcePhotoCount: storyboard.sourcePhotoCount,
+                        createdAt: storyboard.createdAt,
+                        imageFileName: storyboard.imageFileName,
+                        storagePath: storyboard.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.failed.rawValue,
+                        isPrimary: storyboard.isPrimary
+                    )
+                    storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(failedStoryboard, into: storyboardsAfterLocalSave)
+                    GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
+                    generatedStoryboards = storyboardsAfterLocalSave
+                    throw StoryboardGenerationError.openAIMessage("Storyboard saved locally. Cloud storyboard sync failed, so this entry was not completed.")
+                }
+
+                let syncedStoryboard = GeneratedStoryboard(
+                    id: storyboard.id,
+                    clientEntryID: storyboard.clientEntryID,
+                    image: storyboard.image,
+                    promptText: storyboard.promptText,
+                    artStyle: storyboard.artStyle,
+                    panelLayout: storyboard.panelLayout,
+                    sourcePhotoCount: storyboard.sourcePhotoCount,
+                    createdAt: storyboard.createdAt,
+                    imageFileName: storyboard.imageFileName,
+                    storagePath: cloudStoryboard.storagePath,
+                    cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                    isPrimary: true
+                )
+
+                print("[Storytopia] Entry completion started.")
+                print("[Storytopia] Marking entry completed.")
+                let completionPayload = EntryDraftSavePayload(
+                    id: prepareResult.localDraftID,
+                    title: generationPayload.title,
+                    text: generationPayload.text,
+                    richText: generationPayload.richText,
+                    photos: generationPayload.photos,
+                    artStyle: generationPayload.artStyle,
+                    location: generationPayload.location,
+                    date: generationPayload.date,
+                    datePrecision: generationPayload.datePrecision,
+                    savesDraft: generationPayload.savesDraft,
+                    isPrivate: generationPayload.isPrivate,
+                    fontChoiceRawValue: generationPayload.fontChoiceRawValue,
+                    textColorIndex: generationPayload.textColorIndex,
+                    textSize: generationPayload.textSize,
+                    paperStyleRawValue: generationPayload.paperStyleRawValue,
+                    paperColorIndex: generationPayload.paperColorIndex,
+                    isBold: generationPayload.isBold,
+                    isItalic: generationPayload.isItalic,
+                    isUnderlined: generationPayload.isUnderlined,
+                    isStrikethrough: generationPayload.isStrikethrough,
+                    isHighlighted: generationPayload.isHighlighted,
+                    textAlignmentRawValue: generationPayload.textAlignmentRawValue
+                )
+
+                let completionResult = try await EntrySaveService().markEntryCompletedAfterStoryboardSaved(
+                    payload: completionPayload,
+                    isSignedIn: authStore.userID != nil
+                )
+                print("[Storytopia] Entry completion succeeded.")
+
+                await MainActor.run {
+                    activeDraftID = completionResult.localDraftID
+                    cloudSaveState = completionResult.state
+                    let completedSnapshot = currentDraftSnapshot(id: completionResult.localDraftID)
+                    loadedDraftSnapshot = completedSnapshot
+                    toolbarSavedSnapshot = completedSnapshot
+                    if let journalEntry = currentJournalEntry(id: completionResult.localDraftID) {
+                        StoryEntryStore.upsert(journalEntry, to: journalTitle)
+                        onJournalEntryCreated(journalTitle, journalEntry)
+                        EntryJournalLinkStore.save(
+                            journalTitle: journalTitle,
+                            journalEntryID: journalEntry.id,
+                            for: completionResult.localDraftID
+                        )
                     }
-                    self.activeDraftID = nil
+                    generatedStoryboards = GeneratedStoryboardStore.merging(syncedStoryboard, into: storyboardsAfterLocalSave)
+                    GeneratedStoryboardStore.save(generatedStoryboards)
+                    currentEntryStatus = .completed
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+                    storyboardGenerationPhase = .completed
                     isGeneratingStoryboard = false
                     addedJournalTitle = journalTitle
+                    UserDefaults.standard.set("completed", forKey: "StorytopiaSelectedEntriesTab")
+                    isOpeningCompletedEntryFromEntries = true
+                    completedEntryOpenedStoryboardImage = image
+                    print("[Storytopia] Entries list refresh requested.")
+                    selectedPage = .entries
                 }
             } catch {
                 await MainActor.run {
                     generationErrorMessage = error.localizedDescription
+                    storyboardGenerationPhase = .failed
                     isGeneratingStoryboard = false
                 }
             }
@@ -1605,8 +1845,7 @@ struct CreateEntryView: View {
             if !isFullScreenEditorVisible {
                 createToolbarItems(
                     title: presentation.editorToolbarTitle,
-                    showsCloseButton: true,
-                    showsEntryDateButton: true
+                    showsCloseButton: true
                 )
             }
         }
@@ -1852,7 +2091,7 @@ struct CreateEntryView: View {
                     .foregroundStyle(toolbarSaveButtonColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(!canUseToolbarSaveButton && !isToolbarSaveInProgress)
+                .disabled(!canUseToolbarSaveButton || isToolbarSaveInProgress)
             }
             .hideSharedBackgroundIfAvailable()
         }
@@ -1917,11 +2156,10 @@ struct CreateEntryView: View {
             return
         }
 
-        beginToolbarSavedFeedback()
-
         if presentation.isEditDraft {
             saveEditedDraftChanges()
         } else if presentation.savesDirectlyToJournal {
+            beginToolbarSavedFeedback()
             saveDirectJournalEntryInPlace()
         } else {
             saveDraftInPlace()
@@ -1946,6 +2184,18 @@ struct CreateEntryView: View {
         }
 
         return currentDraftSnapshot(id: loadedDraftSnapshot.id) != loadedDraftSnapshot
+    }
+
+    private var hasUnsavedReferencePhotoChanges: Bool {
+        guard let loadedDraftSnapshot else {
+            return storyboardPhotos.contains { $0 != nil }
+        }
+
+        return currentReferencePhotoIDs != loadedDraftSnapshot.photoIDs
+    }
+
+    private var currentReferencePhotoIDs: [UUID] {
+        storyboardPhotos.compactMap { $0?.id }
     }
 
     private func requestExit() {
@@ -1974,34 +2224,20 @@ struct CreateEntryView: View {
 
     private func saveEditedDraftChanges() {
         dismissKeyboard()
+        beginToolbarSavedFeedback()
 
-        guard let savedDraftID = makePendingDraftSave(forceSave: true).flatMap(persistDraftSave) else {
-            cancelToolbarSavedFeedback()
-            return
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
         }
-
-        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
-        loadedDraftSnapshot = savedSnapshot
-        toolbarSavedSnapshot = savedSnapshot
-        completeToolbarSavedFeedback(for: savedSnapshot)
-        activeDraftID = savedDraftID
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
     }
 
     private func saveDraftInPlace() {
         dismissKeyboard()
+        beginToolbarSavedFeedback()
 
-        guard let savedDraftID = makePendingDraftSave(forceSave: false).flatMap(persistDraftSave) else {
-            cancelToolbarSavedFeedback()
-            return
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: false)
         }
-
-        let savedSnapshot = currentDraftSnapshot(id: savedDraftID)
-        loadedDraftSnapshot = savedSnapshot
-        toolbarSavedSnapshot = savedSnapshot
-        completeToolbarSavedFeedback(for: savedSnapshot)
-        activeDraftID = savedDraftID
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
     }
 
     private func beginToolbarSavedFeedback() {
@@ -2049,20 +2285,20 @@ struct CreateEntryView: View {
     private func saveDraftAndExit(forceSave: Bool) {
         dismissKeyboard()
 
-        let pendingSave = makePendingDraftSave(forceSave: forceSave)
-        if let pendingSave {
-            persistDraftSave(pendingSave)
-            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
-        }
+        Task {
+            if hasDraftContent || forceSave {
+                await saveDraftToLocalAndCloud(forceSave: forceSave, navigatesToOptions: false)
+            }
 
-        withAnimation(.snappy(duration: 0.32)) {
-            dismissCreate()
-        }
+            withAnimation(.snappy(duration: 0.32)) {
+                dismissCreate()
+            }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            if selectedPage != .create {
-                clearEditor()
-                activeDraftID = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if selectedPage != .create {
+                    clearEditor()
+                    activeDraftID = nil
+                }
             }
         }
     }
@@ -2072,6 +2308,10 @@ struct CreateEntryView: View {
             return nil
         }
 
+        let existingDraft = activeDraftID.flatMap(CreateEntryDraftStore.load)
+
+        let normalizedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+
         return PendingCreateEntryDraftSave(
             id: activeDraftID,
             title: storyTitle,
@@ -2079,7 +2319,7 @@ struct CreateEntryView: View {
             richText: currentEntryRichText(),
             photos: storyboardPhotos.compactMap { $0 },
             artStyle: selectedArtStyle,
-            location: storyLocation,
+            location: normalizedLocation,
             date: storyDate,
             datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
@@ -2088,7 +2328,13 @@ struct CreateEntryView: View {
             textColorIndex: selectedTextColorIndex,
             textSize: previewTextSize,
             paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-            paperColorIndex: selectedPaperColorIndex
+            paperColorIndex: selectedPaperColorIndex,
+            isBold: existingDraft?.isBold ?? false,
+            isItalic: existingDraft?.isItalic ?? false,
+            isUnderlined: existingDraft?.isUnderlined ?? false,
+            isStrikethrough: existingDraft?.isStrikethrough ?? false,
+            isHighlighted: existingDraft?.isHighlighted ?? false,
+            textAlignmentRawValue: existingDraft?.textAlignmentRawValue ?? "leading"
         )
     }
 
@@ -2098,15 +2344,60 @@ struct CreateEntryView: View {
             title: pendingSave.title,
             text: pendingSave.text,
             richText: pendingSave.richText,
-            photos: pendingSave.photos,
+            photos: pendingSave.photos.map(\.image),
             fontChoiceRawValue: pendingSave.fontChoiceRawValue,
             textColorIndex: pendingSave.textColorIndex,
             textSize: pendingSave.textSize,
             paperStyleRawValue: pendingSave.paperStyleRawValue,
-            paperColorIndex: pendingSave.paperColorIndex
+            paperColorIndex: pendingSave.paperColorIndex,
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue
         )
 
         if let savedDraftID = CreateEntryDraftStore.save(
+            id: pendingSave.id,
+            title: pendingSave.title,
+            text: pendingSave.text,
+            richText: pendingSave.richText,
+            referencePhotos: pendingSave.photos,
+            artStyle: pendingSave.artStyle,
+            location: pendingSave.location,
+            date: pendingSave.date,
+            datePrecision: pendingSave.datePrecision,
+            savesDraft: pendingSave.savesDraft,
+            isPrivate: pendingSave.isPrivate,
+            status: currentEntryStatus,
+            fontChoiceRawValue: pendingSave.fontChoiceRawValue,
+            textColorIndex: pendingSave.textColorIndex,
+            textSize: pendingSave.textSize,
+            paperStyleRawValue: pendingSave.paperStyleRawValue,
+            paperColorIndex: pendingSave.paperColorIndex,
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue,
+            thumbnail: draftThumbnail
+        ) {
+            EntryLocationRecentStore.add(pendingSave.location)
+            recentEntryLocations = EntryLocationRecentStore.all
+            return savedDraftID
+        }
+
+        return nil
+    }
+
+    private func makeEntryDraftSavePayload(forceSave: Bool) -> EntryDraftSavePayload? {
+        guard let pendingSave = makePendingDraftSave(forceSave: forceSave) else {
+            return nil
+        }
+
+        return EntryDraftSavePayload(
             id: pendingSave.id,
             title: pendingSave.title,
             text: pendingSave.text,
@@ -2123,14 +2414,59 @@ struct CreateEntryView: View {
             textSize: pendingSave.textSize,
             paperStyleRawValue: pendingSave.paperStyleRawValue,
             paperColorIndex: pendingSave.paperColorIndex,
-            thumbnail: draftThumbnail
-        ) {
-            EntryLocationRecentStore.add(pendingSave.location)
-            recentEntryLocations = EntryLocationRecentStore.all
-            return savedDraftID
+            isBold: pendingSave.isBold,
+            isItalic: pendingSave.isItalic,
+            isUnderlined: pendingSave.isUnderlined,
+            isStrikethrough: pendingSave.isStrikethrough,
+            isHighlighted: pendingSave.isHighlighted,
+            textAlignmentRawValue: pendingSave.textAlignmentRawValue
+        )
+    }
+
+    private func saveDraftToLocalAndCloud(forceSave: Bool, navigatesToOptions: Bool) async {
+        guard let payload = makeEntryDraftSavePayload(forceSave: forceSave) else {
+            cancelToolbarSavedFeedback()
+            if navigatesToOptions {
+                isShowingEntryOptionsPage = true
+            }
+            return
         }
 
-        return nil
+        cloudSaveState = payload.photos.isEmpty ? .saving : .uploadingPhotos
+
+        do {
+            let result = try await EntrySaveService().saveEntryPreservingStatus(
+                payload: payload,
+                isSignedIn: authStore.userID != nil,
+                status: currentEntryStatus
+            )
+            activeDraftID = result.localDraftID
+            let savedSnapshot = currentDraftSnapshot(id: result.localDraftID)
+            loadedDraftSnapshot = savedSnapshot
+            toolbarSavedSnapshot = savedSnapshot
+            isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+            recentEntryLocations = EntryLocationRecentStore.all
+            cloudSaveState = result.state
+            completeToolbarSavedFeedback(for: savedSnapshot)
+
+            if navigatesToOptions {
+                isShowingEntryOptionsPage = true
+            }
+        } catch {
+            cloudSaveState = .failed("Could not save this entry locally.")
+            cancelToolbarSavedFeedback()
+        }
+    }
+
+    private func retryCloudSave() {
+        guard !isToolbarSaveInProgress else {
+            return
+        }
+
+        beginToolbarSavedFeedback()
+        Task {
+            await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
+        }
     }
 
     private func discardDraftAndExit() {
@@ -2157,17 +2493,20 @@ struct CreateEntryView: View {
         storyboardPhotos = Array(repeating: nil, count: 5)
         toolbarSavedSnapshot = nil
         toolbarSavedJournalEntryID = nil
+        cloudSaveState = .idle
+        storyboardGenerationPhase = .ready
         showsToolbarSavedFeedback = false
         isToolbarSaveInProgress = false
         toolbarSaveFeedbackVersion += 1
         selectedArtStyle = "Anime"
         storyLocation = ""
         storyDate = Date()
-        storyDatePrecision = .exact
+        storyDatePrecision = .noDate
         didEditEntryDate = false
         didEditEntryLocation = false
         savesDraft = true
         isPrivateEntry = false
+        currentEntryStatus = .draft
         selectedFontChoice = .sans
         selectedTextColorIndex = 0
         previewTextSize = CreateEntryTextSize.defaultSliderValue
@@ -2214,6 +2553,7 @@ struct CreateEntryView: View {
         storyLocation = draft.location
         storyDate = draft.date
         storyDatePrecision = draft.datePrecision
+        currentEntryStatus = JournalEntryStatus(rawValue: draft.status) ?? .draft
         didEditEntryDate = false
         didEditEntryLocation = false
         savesDraft = draft.savesDraft
@@ -2243,7 +2583,7 @@ struct CreateEntryView: View {
             richText: currentEntryRichText(),
             photos: storyboardPhotos.compactMap { $0 },
             artStyle: selectedArtStyle,
-            location: storyLocation,
+            location: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines),
             date: storyDate,
             datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
@@ -2252,7 +2592,9 @@ struct CreateEntryView: View {
             textColorIndex: selectedTextColorIndex,
             textSize: previewTextSize,
             paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-            paperColorIndex: selectedPaperColorIndex
+            paperColorIndex: selectedPaperColorIndex,
+            storyboardLayout: selectedStoryboardLayout,
+            isSmartGenerationEnabled: isSmartGenerationEnabled
         )
     }
 
@@ -2368,26 +2710,19 @@ struct CreateEntryView: View {
                             .stroke(Color.white.opacity(0.78), lineWidth: 1)
                     )
 
-                ZStack {
-                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
-                        .position(x: 12, y: 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
-                        .position(x: imageWidth - 12, y: 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
-                        .position(x: 12, y: imageHeight - 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
-                        .position(x: imageWidth - 12, y: imageHeight - 12)
-                }
-                .frame(width: imageWidth, height: imageHeight)
+                StoryPhotoTape(width: 70, height: 18, rotation: -2)
+                    .offset(y: -(imageHeight / 2))
             }
             .shadow(color: Color.storyInk.opacity(0.16), radius: 7, y: 4)
             .frame(maxWidth: .infinity)
             .padding(.top, 28)
             .frame(height: alignedHeight, alignment: .top)
-            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isPreviewingCompletedStoryboard = true
+            }
+            .accessibilityLabel("Open storyboard full screen")
+            .accessibilityAddTraits(.isButton)
         }
     }
 
@@ -2401,126 +2736,94 @@ struct CreateEntryView: View {
 
     private var entryDraftBottomBar: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                entryLocationMetadataButton
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-
             photosAttachedTab
                 .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .padding(.bottom, 10)
 
             unifiedEditorToolbar
         }
     }
 
-    private var photosAttachedTab: some View {
+    private var storyDetailsTab: some View {
         Group {
-            if hasStoryboardPhotos {
-                if isPhotoTabCollapsed {
-                    Button {
-                        togglePhotoTabCollapsed()
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "photo.stack")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.storyPurple)
-                                .frame(width: 22, height: 22)
+            if isStoryDetailsTabCollapsed {
+                Button {
+                    toggleStoryDetailsTabCollapsed()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: hasStoryDetailsMetadata ? "calendar.badge.clock" : "calendar")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 22, height: 22)
 
-                            Text(attachedPhotoSummaryText)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Story Details")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(Color.storyInk)
 
-                            Spacer(minLength: 8)
-
-                            photoCollapseChevron(systemName: "chevron.up")
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: 54)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(attachedPhotoSummaryText), expand photos")
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            photoStripHeader
-
-                            Spacer(minLength: 8)
-
-                            Button {
-                                togglePhotoTabCollapsed()
-                            } label: {
-                                photoCollapseChevron(systemName: "chevron.down")
+                            if hasStoryDetailsMetadata {
+                                collapsedStoryDetailsValues
+                            } else {
+                                Text("Add date, time, or location")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.storyInk.opacity(0.62))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.76)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Collapse photos")
-                        }
-                        .padding(.horizontal, 16)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            photoStripContent
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 4)
-                        }
-                        .frame(height: 76)
-                    }
-                    .padding(.top, 10)
-                    .padding(.bottom, 12)
-                }
-            } else {
-                Button {
-                    handlePhotosTabTapped()
-                } label: {
-                    HStack(spacing: 6) {
-                        StoryboardPhotoStripAddButton(
-                            systemName: "camera",
-                            iconColor: Color.storyPurple,
-                            size: 34,
-                            iconWeight: .semibold,
-                            showsDashedBorder: false
-                        )
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Add Reference Photos")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(Color.storyPurple)
-
-                            Text("Photos help create better comics")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.storyInk.opacity(0.66))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.76)
                         }
 
                         Spacer(minLength: 8)
 
-                        HStack(spacing: 4) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 11, weight: .semibold))
-
-                            Text("Up to 5 photos")
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.78)
-
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.storyPurple.opacity(0.86))
-                        }
-                        .foregroundStyle(Color.storyInk.opacity(0.58))
+                        photoCollapseChevron(systemName: "chevron.up")
                     }
-                    .padding(.horizontal, 14)
-                    .frame(height: 70)
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(nextAvailablePhotoSlot == nil)
+                .accessibilityLabel("Story Details, expand")
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 8) {
+                        storyDetailsHeader
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            toggleStoryDetailsTabCollapsed()
+                        } label: {
+                            photoCollapseChevron(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Collapse story details")
+                    }
+                    .padding(.horizontal, 16)
+
+                    VStack(spacing: 8) {
+                        storyDetailButton(
+                            title: "Date",
+                            value: entryDateMetadataText,
+                            systemName: hasEntryDateValue ? "calendar.badge.clock" : "calendar",
+                            isSelected: hasEntryDateValue,
+                            action: openEntryDateSheet
+                        )
+
+                        storyDetailButton(
+                            title: "Location",
+                            value: entryPlaceMetadataText,
+                            systemName: hasEntryLocationValue ? "location.fill" : "location",
+                            isSelected: hasEntryLocationValue,
+                            action: openEntryLocationSheet
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+                .padding(.top, 10)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
@@ -2528,26 +2831,77 @@ struct CreateEntryView: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
     }
 
-    private var entryLocationMetadataButton: some View {
-        Button {
-            openEntryLocationSheet()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "location" : "location.fill")
-                    .font(.system(size: 11, weight: .medium))
+    private var photosAttachedTab: some View {
+        Group {
+            if isPhotoTabCollapsed {
+                Button {
+                    togglePhotoTabCollapsed()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: hasStoryboardPhotos ? "photo.stack" : "camera")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 22, height: 22)
 
-                Text(entryPlaceMetadataText)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(collapsedPhotoTitleText)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Color.storyInk)
+
+                            if !hasStoryboardPhotos {
+                                Text("Photos help create better comics")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.storyInk.opacity(0.62))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.76)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        photoCollapseChevron(systemName: "chevron.up")
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(collapsedPhotoTitleText), expand photos")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        photoStripHeader
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            togglePhotoTabCollapsed()
+                        } label: {
+                            photoCollapseChevron(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Collapse photos")
+                    }
+                    .padding(.horizontal, 16)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        photoStripContent
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(height: 76)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 12)
             }
-            .foregroundStyle(Color.storyInk.opacity(0.48))
-            .frame(height: 24)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(entryPlaceMetadataText)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
     }
 
     private var entryPlaceMetadataText: String {
@@ -2646,7 +3000,7 @@ struct CreateEntryView: View {
 
     private var bottomToolbarNextButton: some View {
         Button {
-            showEntryOptionsPage()
+            advanceToEntryOptionsPage()
         } label: {
             HStack(spacing: 5) {
                 Text("Next")
@@ -2660,12 +3014,8 @@ struct CreateEntryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isToolbarSaveInProgress)
         .accessibilityLabel("Next")
-    }
-
-    private func handlePhotosTabTapped() {
-        dismissKeyboard()
-        openPhotoSourceSheet()
     }
 
     private func openPhotoSourceSheet() {
@@ -3361,6 +3711,7 @@ struct CreateEntryView: View {
 
             artStylePickerSection
             journalDestinationCard
+            storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
         }
@@ -3539,6 +3890,76 @@ struct CreateEntryView: View {
         .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
     }
 
+    private func cloudSaveStatusBanner(message: String) -> some View {
+        HStack(spacing: 11) {
+            cloudSaveStatusIcon
+
+            Text(message)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .lineLimit(2)
+
+            Spacer(minLength: 10)
+
+            if case .failed = cloudSaveState {
+                Button("Retry") {
+                    retryCloudSave()
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .disabled(isToolbarSaveInProgress)
+            } else if case .photoUploadFailed = cloudSaveState {
+                Button("Retry") {
+                    retryCloudSave()
+                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.storyPurple)
+                .buttonStyle(.plain)
+                .disabled(isToolbarSaveInProgress)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
+    }
+
+    @ViewBuilder
+    private var cloudSaveStatusIcon: some View {
+        switch cloudSaveState {
+        case .saving, .uploadingPhotos:
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.storyPurple)
+                .frame(width: 30, height: 30)
+        case .saved, .photosUploaded:
+            Image(systemName: "checkmark.icloud.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.green)
+                .frame(width: 30, height: 30)
+                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .savedLocally:
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 30, height: 30)
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .failed, .photoUploadFailed:
+            Image(systemName: "exclamationmark.icloud.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.red)
+                .frame(width: 30, height: 30)
+                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .idle:
+            EmptyView()
+        }
+    }
+
     private func saveDirectJournalEntryAndExit() {
         guard let journalTitle = presentation.directJournalTitle, hasDraftContent else {
             return
@@ -3604,6 +4025,53 @@ struct CreateEntryView: View {
                     isShowingJournalDestinationSheet = true
                     dismissKeyboard()
                 }
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.68), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
+    }
+
+    private var storyDetailsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Story Details")
+                        .font(.system(size: 15, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text("Add when and where this happened")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+
+                Spacer()
+            }
+
+            VStack(spacing: 8) {
+                storyDetailButton(
+                    title: "Date",
+                    value: entryDateMetadataText,
+                    systemName: hasEntryDateValue ? "calendar.badge.clock" : "calendar",
+                    isSelected: hasEntryDateValue,
+                    action: openEntryDateSheet
+                )
+
+                storyDetailButton(
+                    title: "Location",
+                    value: entryPlaceMetadataText,
+                    systemName: hasEntryLocationValue ? "location.fill" : "location",
+                    isSelected: hasEntryLocationValue,
+                    action: openEntryLocationSheet
+                )
             }
         }
         .padding(12)
@@ -3682,9 +4150,110 @@ struct CreateEntryView: View {
         }
     }
 
+    private var storyDetailsHeader: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.storyInk.opacity(0.84))
+                .frame(width: 20, height: 20)
+
+            Text("Story Details")
+                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .foregroundStyle(Color.storyInk)
+        }
+    }
+
+    private var hasEntryLocationValue: Bool {
+        !storyLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasStoryDetailsMetadata: Bool {
+        hasEntryDateValue || hasEntryLocationValue
+    }
+
+    private var collapsedStoryDetailsValues: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if hasEntryDateValue {
+                collapsedStoryDetailValue(systemName: "calendar", text: entryDateMetadataText)
+            }
+
+            if hasEntryLocationValue {
+                collapsedStoryDetailValue(systemName: "location.fill", text: entryPlaceMetadataText)
+            }
+        }
+    }
+
+    private func collapsedStoryDetailValue(systemName: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.storyPurple.opacity(0.88))
+                .frame(width: 11)
+
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.storyInk.opacity(0.68))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private func storyDetailButton(
+        title: String,
+        value: String,
+        systemName: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.storyInk.opacity(0.52))
+
+                    Text(value)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(isSelected ? Color.storyInk : Color.storyInk.opacity(0.72))
+                        .lineLimit(isSelected ? 2 : 1)
+                        .minimumScaleFactor(0.9)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.storyInk.opacity(0.36))
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
+            .background(
+                isSelected ? Color.storyPurple.opacity(0.08) : Color.homeCardGray.opacity(0.86),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.storyPurple.opacity(0.26) : Color.storyBorder.opacity(0.58), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value)")
+    }
+
     private var attachedPhotoSummaryText: String {
         let count = storyboardPhotos.compactMap { $0 }.count
         return "\(count) photo\(count == 1 ? "" : "s") attached"
+    }
+
+    private var collapsedPhotoTitleText: String {
+        hasStoryboardPhotos ? attachedPhotoSummaryText : "Add reference photos"
     }
 
     private func photoCollapseChevron(systemName: String) -> some View {
@@ -3697,33 +4266,49 @@ struct CreateEntryView: View {
 
     private var photoStripContent: some View {
         HStack(spacing: 9) {
-            ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.offset) { index, image in
-                StoryboardPhotoStripThumbnail(
-                    image: image,
-                    removeAction: {
-                        removeStoryboardPhoto(at: index)
-                    },
-                    tapAction: {
-                        dismissKeyboard()
-                        previewedStoryboardPhoto = image
-                    }
-                )
-                    .onDrag {
-                        draggedStoryboardPhotoIndex = index
-                        return NSItemProvider(object: String(index) as NSString)
-                    }
-                    .onDrop(
-                        of: [.text],
-                        delegate: StoryboardPhotoDropDelegate(
-                            photos: $storyboardPhotos,
-                            draggedIndex: $draggedStoryboardPhotoIndex,
-                            destinationIndex: index
-                        )
+            if hasStoryboardPhotos {
+                ForEach(Array(storyboardPhotos.compactMap { $0 }.enumerated()), id: \.element.id) { index, photo in
+                    StoryboardPhotoStripThumbnail(
+                        image: photo.image,
+                        removeAction: {
+                            removeStoryboardPhoto(at: index)
+                        },
+                        tapAction: {
+                            dismissKeyboard()
+                            previewedStoryboardPhoto = photo.image
+                        }
                     )
+                        .onDrag {
+                            draggedStoryboardPhotoIndex = index
+                            return NSItemProvider(object: String(index) as NSString)
+                        }
+                        .onDrop(
+                            of: [.text],
+                            delegate: StoryboardPhotoDropDelegate(
+                                photos: $storyboardPhotos,
+                                draggedIndex: $draggedStoryboardPhotoIndex,
+                                destinationIndex: index
+                            )
+                        )
+                }
             }
 
             if nextAvailablePhotoSlot != nil {
                 addPhotoStripButton
+            }
+
+            if !hasStoryboardPhotos {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add Reference Photos")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.storyPurple)
+
+                    Text("Up to 5 photos")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.66))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                }
             }
         }
     }
@@ -3733,7 +4318,11 @@ struct CreateEntryView: View {
             dismissKeyboard()
             openPhotoSourceSheet()
         } label: {
-            StoryboardPhotoStripAddButton()
+            StoryboardPhotoStripAddButton(
+                systemName: hasStoryboardPhotos ? "plus" : "camera",
+                iconColor: hasStoryboardPhotos ? Color.storyInk.opacity(0.82) : Color.storyPurple,
+                iconWeight: hasStoryboardPhotos ? .light : .semibold
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add reference photos")
@@ -3742,6 +4331,12 @@ struct CreateEntryView: View {
     private func togglePhotoTabCollapsed() {
         withAnimation(.snappy(duration: 0.2)) {
             isPhotoTabCollapsed.toggle()
+        }
+    }
+
+    private func toggleStoryDetailsTabCollapsed() {
+        withAnimation(.snappy(duration: 0.2)) {
+            isStoryDetailsTabCollapsed.toggle()
         }
     }
 
@@ -3774,82 +4369,157 @@ struct CreateEntryView: View {
     }
 
     private var smartGenerationCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 18, height: 18)
 
-                Text("Smart Generation")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer(minLength: 8)
-
-                Text("Recommended")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 7)
-                    .frame(height: 20)
-                    .background(Color.storyPurple.opacity(0.1), in: Capsule())
-            }
-
-            HStack(alignment: .top, spacing: 14) {
-                compactStoryboardPreview(layout: effectiveStoryboardLayout)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle(isOn: $isSmartGenerationEnabled.animation(.snappy(duration: 0.2))) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(isSmartGenerationEnabled ? "Auto chooses best layout" : "Manual layout controls")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(Color.storyInk)
-
-                            Text(isSmartGenerationEnabled ? "AI chooses layout, panel count, and photo placement." : "Choose your own layout below.")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.homeMutedText)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text("Your memories become\na graphic novel.")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color.storyInk)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color.storyPurple))
 
-                    VStack(alignment: .leading, spacing: 7) {
-                        smartGenerationBenefit("Best layout")
-                        smartGenerationBenefit("Number of panels")
-                        smartGenerationBenefit("Photo placement")
-                    }
-                    .opacity(isSmartGenerationEnabled ? 1 : 0.64)
-
-                    HStack(spacing: 5) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 11, weight: .semibold))
-
-                        Text("\(isSmartGenerationEnabled ? "Auto" : effectiveStoryboardLayout.title) · \(effectiveStoryboardLayout.panelCount) panels")
-                            .font(.system(size: 10, weight: .bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                    }
-                    .foregroundStyle(Color.storyPurple)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(Color.storyPurple.opacity(0.09), in: Capsule())
+                    Text("Storytopia transforms your journal entry into a comic page where you are the main character.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.8))
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                smartGenerationHeroArt
+                    .frame(width: 112, height: 108)
+                    .padding(.top, -3)
+                    .padding(.trailing, -2)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 13)
+
+            Divider()
+                .overlay(Color.storyBorder.opacity(0.45))
+
+            HStack(spacing: 0) {
+                smartGenerationFeatureTile(systemName: "sparkles", title: "Understands\nyour story")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "photo", title: "Uses your\nphotos")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "rectangle.split.3x1", title: "Designs the\nbest layout")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "gauge.with.dots.needle.33percent", title: "Creates\ncinematic\npacing")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "paintbrush", title: "Matches your\nart style")
+            }
+            .padding(.vertical, 10)
+
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .bold))
+
+                Text("2-6 panels")
+                    .font(.system(size: 11, weight: .bold))
+
+                Circle()
+                    .fill(Color.storyPurple)
+                    .frame(width: 3.5, height: 3.5)
+
+                Text("Unique for every story")
+                    .font(.system(size: 11, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(Color.storyPurple)
+            .padding(.horizontal, 13)
+            .frame(height: 26)
+            .background(Color.storyPurple.opacity(0.09), in: Capsule())
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 13)
         }
-        .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+                .stroke(Color.storyBorder.opacity(0.58), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
                 dismissKeyboard()
             }
         )
+    }
+
+    private var smartGenerationHeroArt: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.93, green: 0.96, blue: 1.0),
+                            Color.storyCream.opacity(0.82)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Image(artStyleAssetName(for: selectedArtStyle))
+                .resizable()
+                .scaledToFill()
+                .frame(width: 98, height: 94)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(0.85), lineWidth: 1)
+                )
+                .rotationEffect(.degrees(-2))
+                .shadow(color: Color.storyInk.opacity(0.14), radius: 8, y: 4)
+                .offset(x: 3, y: 3)
+
+            VStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color.white.opacity(0.74))
+                        .frame(width: CGFloat(30 - index * 5), height: 3)
+                }
+            }
+            .padding(.trailing, 8)
+            .padding(.bottom, 8)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var smartGenerationFeatureDivider: some View {
+        Rectangle()
+            .fill(Color.storyBorder.opacity(0.36))
+            .frame(width: 0.7, height: 42)
+    }
+
+    private func smartGenerationFeatureTile(systemName: String, title: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(height: 16)
+
+            Text(title)
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+                .frame(height: 28, alignment: .top)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func smartGenerationBenefit(_ title: String) -> some View {
@@ -4306,7 +4976,7 @@ struct CreateEntryView: View {
 
     private func storyboardPhotoPanel(index: Int) -> some View {
         StoryboardPhotoPanel(
-            image: storyboardPhotos.indices.contains(index) ? storyboardPhotos[index] : nil,
+            image: storyboardPhotos.indices.contains(index) ? storyboardPhotos[index]?.image : nil,
             placeholderImageName: "storyboard_placeholder_\(min(index + 1, 5))",
             number: index + 1
         )
@@ -4321,7 +4991,7 @@ struct CreateEntryView: View {
             return
         }
 
-        storyboardPhotos[slot] = image
+        storyboardPhotos[slot] = CreateEntryReferencePhoto(image: image)
         selectedPhotoSlot = nil
     }
 
@@ -4342,7 +5012,7 @@ struct CreateEntryView: View {
                 break
             }
 
-            updatedPhotos[slot] = image
+            updatedPhotos[slot] = CreateEntryReferencePhoto(image: image)
             slot += 1
         }
 
@@ -4380,12 +5050,9 @@ struct CreateEntryView: View {
 
         existingPhotos.remove(at: index)
         storyboardPhotos = paddedStoryboardPhotos(existingPhotos)
-        if existingPhotos.isEmpty {
-            isPhotoTabCollapsed = false
-        }
     }
 
-    private func paddedStoryboardPhotos(_ photos: [UIImage]) -> [UIImage?] {
+    private func paddedStoryboardPhotos(_ photos: [CreateEntryReferencePhoto]) -> [CreateEntryReferencePhoto?] {
         let trimmedPhotos = Array(photos.prefix(storyboardPhotos.count))
         return trimmedPhotos.map(Optional.some) + Array(repeating: nil, count: max(0, storyboardPhotos.count - trimmedPhotos.count))
     }
@@ -5107,11 +5774,13 @@ struct CreateEntryView: View {
                         ProgressView()
                             .tint(.white)
 
-                        Text("Generating...")
+                        Text(storyboardGenerationPhase.buttonTitle)
                     } else {
-                        Text("Generate Storyboard")
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 14, weight: .semibold))
+                        Text(storyboardGenerationPhase.buttonTitle)
+                        if storyboardGenerationPhase != .completed {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
                     }
                 }
                 .font(.system(size: 16, weight: .bold))
@@ -6824,19 +7493,13 @@ struct ReferencePhotoViewer: View {
     let image: UIImage
     let closeAction: () -> Void
 
-    @State private var dragOffset: CGFloat = 0
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black
                 .ignoresSafeArea()
 
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 64)
+            ZoomableReferenceImageView(image: image)
+                .ignoresSafeArea()
 
             Button {
                 closeAction()
@@ -6852,35 +7515,94 @@ struct ReferencePhotoViewer: View {
             .padding(.top, 14)
             .padding(.trailing, 16)
         }
-        .contentShape(Rectangle())
-        .offset(y: dragOffset)
-        .gesture(dismissalDragGesture)
         .preferredColorScheme(.dark)
         .statusBarHidden()
     }
+}
 
-    private var dismissalDragGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in
-                dragOffset = max(value.translation.height, 0)
+private struct ZoomableReferenceImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .black
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 5
+        scrollView.bouncesZoom = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .black
+        imageView.isUserInteractionEnabled = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(imageView)
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            imageView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+
+        let doubleTapRecognizer = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDoubleTap(_:))
+        )
+        doubleTapRecognizer.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTapRecognizer)
+
+        context.coordinator.scrollView = scrollView
+        context.coordinator.imageView = imageView
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        if context.coordinator.imageView?.image !== image {
+            context.coordinator.imageView?.image = image
+            scrollView.setZoomScale(1, animated: false)
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var scrollView: UIScrollView?
+        weak var imageView: UIImageView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            imageView
+        }
+
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let scrollView else {
+                return
             }
-            .onEnded { value in
-                let shouldDismiss = value.translation.height > 120 || value.predictedEndTranslation.height > 220
 
-                if shouldDismiss {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        dragOffset = UIScreen.main.bounds.height
-                    }
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                        closeAction()
-                    }
-                } else {
-                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.86)) {
-                        dragOffset = 0
-                    }
-                }
+            if scrollView.zoomScale > scrollView.minimumZoomScale {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+                return
             }
+
+            let tapPoint = recognizer.location(in: imageView)
+            let targetScale = min(scrollView.maximumZoomScale, 2.35)
+            let zoomSize = CGSize(
+                width: scrollView.bounds.width / targetScale,
+                height: scrollView.bounds.height / targetScale
+            )
+            let zoomOrigin = CGPoint(
+                x: tapPoint.x - (zoomSize.width / 2),
+                y: tapPoint.y - (zoomSize.height / 2)
+            )
+            scrollView.zoom(to: CGRect(origin: zoomOrigin, size: zoomSize), animated: true)
+        }
     }
 }
 
@@ -6961,7 +7683,7 @@ struct KeyboardPhotoOverflowBadge: View {
 }
 
 struct StoryboardPhotoDropDelegate: DropDelegate {
-    @Binding var photos: [UIImage?]
+    @Binding var photos: [CreateEntryReferencePhoto?]
     @Binding var draggedIndex: Int?
 
     let destinationIndex: Int
