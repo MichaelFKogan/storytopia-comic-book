@@ -4556,8 +4556,12 @@ private enum EntryDisplayItem: Identifiable {
 
     var status: String {
         switch self {
-        case .local(_, let cloudEntry):
-            return cloudEntry?.status ?? JournalEntryStatus.draft.rawValue
+        case .local(let entry, let cloudEntry):
+            if entry.status == JournalEntryStatus.completed.rawValue {
+                return entry.status
+            }
+
+            return cloudEntry?.status ?? entry.status
         case .cloud(let entry):
             return entry.status
         }
@@ -4593,6 +4597,7 @@ private enum EntryDisplayItem: Identifiable {
                 datePrecision: entry.datePrecision.flatMap(EntryDatePrecision.init(rawValue:)) ?? .exact,
                 savesDraft: entry.savesDraft ?? true,
                 isPrivate: entry.isPrivate ?? true,
+                status: entry.status,
                 fontChoiceRawValue: entry.fontChoiceRawValue,
                 textColorIndex: entry.textColorIndex,
                 textSize: entry.textSize,
@@ -4629,6 +4634,8 @@ struct EntriesView: View {
     @State private var entries: [CreateEntryDraft] = []
     @State private var sampleEntries: [CreateEntryDraft] = []
     @State private var completedStoryboards: [GeneratedStoryboard] = []
+    @State private var cloudStoryboardClientIDs: Set<UUID> = []
+    @State private var failedCloudStoryboardClientIDs: Set<UUID> = []
     @State private var editMode: EditMode = .inactive
     @State private var entryBeingRenamed: CreateEntryDraft?
     @State private var renamedEntryTitle = ""
@@ -4672,6 +4679,10 @@ struct EntriesView: View {
                     .padding(.horizontal, 16)
 
                 tabSwitcher
+                    .padding(.horizontal, 16)
+
+                layoutSwitcherRow
+                    .padding(.horizontal, 16)
 
                 cloudEntriesNotice
 
@@ -4758,8 +4769,6 @@ struct EntriesView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Color.homeAccent)
 
-            entryLayoutSwitcher
-
             entryCreateButton
         }
         .padding(.top, 12)
@@ -4773,23 +4782,41 @@ struct EntriesView: View {
                         selectedEntryTab = tab
                     }
                 } label: {
-                    VStack(spacing: 8) {
-                        Text(tab.title)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(selectedEntryTab == tab ? Color.homeAccent : Color.homeMutedText.opacity(0.78))
-
-                        Capsule()
-                            .fill(selectedEntryTab == tab ? Color.homeAccent : Color.clear)
-                            .frame(height: 3)
-                    }
-                    .frame(maxWidth: .infinity)
+                    Text(tabTitle(for: tab))
+                        .font(.system(size: 13, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .foregroundStyle(selectedEntryTab == tab ? Color.white : Color.storyInk.opacity(0.72))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(
+                            Group {
+                                if selectedEntryTab == tab {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.homeAccent)
+                                }
+                            }
+                        )
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selectedEntryTab == tab ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 16)
+        .padding(3)
         .padding(.top, 2)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
+    }
+
+    private var layoutSwitcherRow: some View {
+        HStack {
+            Spacer()
+
+            entryLayoutSwitcher
+        }
     }
 
     private var entryLayoutSwitcher: some View {
@@ -4830,6 +4857,28 @@ struct EntriesView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(layout.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func tabTitle(for tab: EntriesTab) -> String {
+        "\(tab.title) (\(entryCount(for: tab)))"
+    }
+
+    private func entryCount(for tab: EntriesTab) -> Int {
+        if showsSampleEntries {
+            switch tab {
+            case .drafts:
+                return draftEntries.count
+            case .completed:
+                return completedEntries.count
+            }
+        }
+
+        switch tab {
+        case .drafts:
+            return draftEntryItems.count
+        case .completed:
+            return completedEntryItems.count
+        }
     }
 
     private var entryCreateButton: some View {
@@ -5105,12 +5154,23 @@ struct EntriesView: View {
     }
 
     private func generatedStoryboard(for item: EntryDisplayItem) -> GeneratedStoryboard? {
-        completedStoryboards.first { $0.clientEntryID == item.id }
+        let storyboard = completedStoryboards.first { $0.clientEntryID == item.id && $0.isPrimary }
+            ?? completedStoryboards.first { $0.clientEntryID == item.id }
+        print("[Storytopia] Completed storyboard match by clientEntryID \(item.id): \(storyboard == nil ? "missing" : "found").")
+        return storyboard
     }
 
     private func storyboardImage(for item: EntryDisplayItem, fallbackIndex index: Int) -> CompletedStoryboardImage {
         if let storyboard = generatedStoryboard(for: item) {
             return .uiImage(storyboard.image)
+        }
+
+        if cloudStoryboardClientIDs.contains(item.id) {
+            return .loading
+        }
+
+        if failedCloudStoryboardClientIDs.contains(item.id) {
+            return .failed
         }
 
         if completedStoryboards.indices.contains(index),
@@ -5124,6 +5184,10 @@ struct EntriesView: View {
     private func storyboardUIImage(for item: EntryDisplayItem, fallbackIndex index: Int) -> UIImage? {
         if let storyboard = generatedStoryboard(for: item) {
             return storyboard.image
+        }
+
+        if cloudStoryboardClientIDs.contains(item.id) || failedCloudStoryboardClientIDs.contains(item.id) {
+            return nil
         }
 
         if completedStoryboards.indices.contains(index),
@@ -5358,8 +5422,10 @@ struct EntriesView: View {
             artStyle: entry.artStyle,
             location: entry.location,
             date: entry.date,
+            datePrecision: entry.datePrecision,
             savesDraft: entry.savesDraft,
             isPrivate: entry.isPrivate,
+            status: JournalEntryStatus(rawValue: entry.status) ?? .draft,
             fontChoiceRawValue: entry.fontChoiceRawValue,
             textColorIndex: entry.textColorIndex,
             textSize: entry.textSize,
@@ -5386,7 +5452,9 @@ struct EntriesView: View {
                 let matchingCloudEntry = cloudEntries.firstIndex(where: { $0.clientEntryID == entry.id })
                     .map { cloudEntries[$0] }
                 let status: JournalEntryStatus
-                if let rawStatus = matchingCloudEntry?.status,
+                if entry.status == JournalEntryStatus.completed.rawValue {
+                    status = .completed
+                } else if let rawStatus = matchingCloudEntry?.status,
                    let cloudStatus = JournalEntryStatus(rawValue: rawStatus) {
                     status = cloudStatus
                 } else {
@@ -5420,6 +5488,7 @@ struct EntriesView: View {
     }
 
     private func refreshEntries() {
+        print("[Storytopia] Entries list refresh requested.")
         entries = CreateEntryDraftStore.loadAll()
         completedStoryboards = GeneratedStoryboardStore.load()
         if entries.isEmpty && showsPrototypeData && sampleEntries.isEmpty {
@@ -5430,6 +5499,7 @@ struct EntriesView: View {
 
         Task {
             await loadCloudEntriesIfNeeded()
+            await loadCloudStoryboardsIfNeeded()
         }
     }
 
@@ -5449,6 +5519,57 @@ struct EntriesView: View {
             cloudEntriesErrorMessage = nil
         } catch {
             cloudEntriesErrorMessage = "Could not load cloud entries."
+        }
+    }
+
+    private func loadCloudStoryboardsIfNeeded() async {
+        guard authStore.userID != nil else {
+            cloudStoryboardClientIDs = []
+            failedCloudStoryboardClientIDs = []
+            return
+        }
+
+        do {
+            let rows = try await SupabaseStoryboardService().loadStoryboards()
+            let primaryRows = rows.filter(\.isPrimary)
+            let localStoryboardIDs = Set(completedStoryboards.map(\.id))
+            let rowsToDownload = primaryRows.filter { !localStoryboardIDs.contains($0.id) }
+            cloudStoryboardClientIDs = Set(rowsToDownload.map(\.clientEntryID))
+            failedCloudStoryboardClientIDs = []
+
+            guard !rowsToDownload.isEmpty else {
+                return
+            }
+
+            var mergedStoryboards = completedStoryboards
+            for row in rowsToDownload {
+                do {
+                    let image = try await SupabaseStoryboardService().downloadStoryboardImage(storagePath: row.storagePath)
+                    let cachedStoryboard = try GeneratedStoryboardStore.persistedStoryboard(
+                        image: image,
+                        clientEntryID: row.clientEntryID,
+                        promptText: row.prompt ?? "",
+                        artStyle: row.artStyle ?? "Anime",
+                        panelLayout: row.panelLayout,
+                        sourcePhotoCount: 0,
+                        id: row.id,
+                        storagePath: row.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                        isPrimary: row.isPrimary
+                    )
+                    mergedStoryboards = GeneratedStoryboardStore.merging(cachedStoryboard, into: mergedStoryboards)
+                    cloudStoryboardClientIDs.remove(row.clientEntryID)
+                } catch {
+                    cloudStoryboardClientIDs.remove(row.clientEntryID)
+                    failedCloudStoryboardClientIDs.insert(row.clientEntryID)
+                }
+            }
+
+            completedStoryboards = mergedStoryboards
+            GeneratedStoryboardStore.save(mergedStoryboards)
+        } catch {
+            failedCloudStoryboardClientIDs = cloudStoryboardClientIDs
+            cloudStoryboardClientIDs = []
         }
     }
 
@@ -5497,6 +5618,7 @@ struct EntriesView: View {
             datePrecision: entry.datePrecision,
             savesDraft: entry.savesDraft,
             isPrivate: entry.isPrivate,
+            status: JournalEntryStatus(rawValue: item.status) ?? .draft,
             fontChoiceRawValue: entry.fontChoiceRawValue,
             textColorIndex: entry.textColorIndex,
             textSize: entry.textSize,
@@ -5601,6 +5723,7 @@ private enum EntriesSampleData {
                 datePrecision: .exact,
                 savesDraft: true,
                 isPrivate: index == 3,
+                status: JournalEntryStatus.draft.rawValue,
                 fontChoiceRawValue: nil,
                 textColorIndex: sample.textColorIndex,
                 textSize: sample.textSize,
@@ -5933,6 +6056,8 @@ private struct EntryGridPreviewCard: View {
 private enum CompletedStoryboardImage {
     case asset(String)
     case uiImage(UIImage)
+    case loading
+    case failed
 }
 
 private struct CompletedEntryGridCard: View {
@@ -5986,7 +6111,7 @@ private struct CompletedEntryGridCard: View {
 
     @ViewBuilder
     private var entryPreviewImage: some View {
-        if let thumbnail = entry.thumbnail {
+        if let thumbnail = completedEntryThumbnail {
             Image(uiImage: thumbnail)
                 .resizable()
                 .scaledToFill()
@@ -6005,28 +6130,59 @@ private struct CompletedEntryGridCard: View {
         }
     }
 
+    private var completedEntryThumbnail: UIImage? {
+        DraftThumbnailRenderer.render(
+            title: entry.title,
+            text: entry.text,
+            richText: entry.richText,
+            photos: [],
+            fontChoiceRawValue: entry.fontChoiceRawValue,
+            textColorIndex: entry.textColorIndex,
+            textSize: entry.textSize,
+            paperStyleRawValue: entry.paperStyleRawValue,
+            paperColorIndex: entry.paperColorIndex,
+            isBold: entry.isBold,
+            isItalic: entry.isItalic,
+            isUnderlined: entry.isUnderlined,
+            isStrikethrough: entry.isStrikethrough,
+            isHighlighted: entry.isHighlighted,
+            textAlignmentRawValue: entry.textAlignmentRawValue
+        )
+    }
+
     private func storyboardOverlay(in size: CGSize) -> some View {
-        let overlayHeight = size.height * 0.58
+        let overlayHeight = size.height * 0.47
         let overlayWidth = overlayHeight * 0.72
 
-        return ZStack(alignment: .top) {
+        return ZStack(alignment: .topTrailing) {
             storyboardPreviewImage
                 .frame(width: overlayWidth, height: overlayHeight)
                 .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.white.opacity(0.75), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.white.opacity(0.82), lineWidth: 1)
                 )
                 .shadow(color: Color.storyInk.opacity(0.08), radius: 3, y: 1)
-
-            StoryPhotoTape(width: 40, height: 12, rotation: 0)
-                .offset(y: -6)
                 .zIndex(1)
+
+            paperclipSymbol
+                .offset(x: 1, y: -13)
+                .zIndex(2)
         }
         .frame(width: overlayWidth, height: overlayHeight)
-        .shadow(color: Color.storyInk.opacity(0.16), radius: 7, y: 4)
-        .position(x: size.width * 0.68, y: size.height * 0.66)
+        .rotationEffect(.degrees(2))
+        .shadow(color: Color.storyInk.opacity(0.16), radius: 6, y: 4)
+        .position(x: size.width * 0.76, y: size.height * 0.27)
+    }
+
+    private var paperclipSymbol: some View {
+        Image(systemName: "paperclip")
+            .font(.system(size: 21, weight: .semibold))
+            .foregroundStyle(Color(red: 0.74, green: 0.76, blue: 0.82))
+            .rotationEffect(.degrees(-34))
+            .shadow(color: Color.white.opacity(0.75), radius: 1, y: 1)
+            .shadow(color: Color.storyInk.opacity(0.12), radius: 1, y: 1)
     }
 
     @ViewBuilder
@@ -6040,6 +6196,19 @@ private struct CompletedEntryGridCard: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .scaledToFit()
+        case .loading:
+            ZStack {
+                Color.white
+                ProgressView()
+                    .controlSize(.small)
+            }
+        case .failed:
+            ZStack {
+                Color.white
+                Image(systemName: "icloud.slash")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+            }
         }
     }
 }

@@ -131,9 +131,13 @@ struct GeneratedStoryboard: Identifiable {
     let image: UIImage
     let promptText: String
     let artStyle: String
+    let panelLayout: String?
     let sourcePhotoCount: Int
     let createdAt: Date
     let imageFileName: String?
+    let storagePath: String?
+    let cloudSyncState: String?
+    let isPrimary: Bool
 
     init(
         id: UUID = UUID(),
@@ -141,18 +145,26 @@ struct GeneratedStoryboard: Identifiable {
         image: UIImage,
         promptText: String,
         artStyle: String,
+        panelLayout: String? = nil,
         sourcePhotoCount: Int,
         createdAt: Date = Date(),
-        imageFileName: String? = nil
+        imageFileName: String? = nil,
+        storagePath: String? = nil,
+        cloudSyncState: String? = nil,
+        isPrimary: Bool = true
     ) {
         self.id = id
         self.clientEntryID = clientEntryID
         self.image = image
         self.promptText = promptText
         self.artStyle = artStyle
+        self.panelLayout = panelLayout
         self.sourcePhotoCount = sourcePhotoCount
         self.createdAt = createdAt
         self.imageFileName = imageFileName
+        self.storagePath = storagePath
+        self.cloudSyncState = cloudSyncState
+        self.isPrimary = isPrimary
     }
 }
 
@@ -198,6 +210,7 @@ struct CreateEntryDraft: Identifiable {
     let datePrecision: EntryDatePrecision
     let savesDraft: Bool
     let isPrivate: Bool
+    let status: String
     let fontChoiceRawValue: String?
     let textColorIndex: Int?
     let textSize: Double?
@@ -281,6 +294,7 @@ enum CreateEntryDraftStore {
         datePrecision: EntryDatePrecision = .exact,
         savesDraft: Bool,
         isPrivate: Bool,
+        status: JournalEntryStatus = .draft,
         fontChoiceRawValue: String? = nil,
         textColorIndex: Int? = nil,
         textSize: Double? = nil,
@@ -306,6 +320,7 @@ enum CreateEntryDraftStore {
             datePrecision: datePrecision,
             savesDraft: savesDraft,
             isPrivate: isPrivate,
+            status: status,
             fontChoiceRawValue: fontChoiceRawValue,
             textColorIndex: textColorIndex,
             textSize: textSize,
@@ -334,6 +349,7 @@ enum CreateEntryDraftStore {
         datePrecision: EntryDatePrecision = .exact,
         savesDraft: Bool,
         isPrivate: Bool,
+        status: JournalEntryStatus = .draft,
         fontChoiceRawValue: String? = nil,
         textColorIndex: Int? = nil,
         textSize: Double? = nil,
@@ -401,6 +417,7 @@ enum CreateEntryDraftStore {
                 datePrecision: datePrecision,
                 savesDraft: savesDraft,
                 isPrivate: isPrivate,
+                status: status.rawValue,
                 fontChoiceRawValue: fontChoiceRawValue,
                 textColorIndex: textColorIndex,
                 textSize: textSize,
@@ -506,6 +523,7 @@ enum CreateEntryDraftStore {
             datePrecision: metadata.datePrecision ?? .exact,
             savesDraft: metadata.savesDraft ?? true,
             isPrivate: metadata.isPrivate ?? false,
+            status: metadata.normalizedStatus,
             fontChoiceRawValue: metadata.fontChoiceRawValue,
             textColorIndex: metadata.textColorIndex,
             textSize: metadata.textSize,
@@ -603,6 +621,7 @@ private struct CreateEntryDraftMetadata: Codable {
     var datePrecision: EntryDatePrecision?
     var savesDraft: Bool?
     var isPrivate: Bool?
+    var status: String?
     var fontChoiceRawValue: String?
     var textColorIndex: Int?
     var textSize: Double?
@@ -630,6 +649,17 @@ private struct CreateEntryDraftMetadata: Codable {
                 mimeType: CreateEntryReferencePhoto.mimeType
             )
         }
+    }
+
+    var normalizedStatus: String {
+        guard
+            let status,
+            JournalEntryStatus(rawValue: status) != nil
+        else {
+            return JournalEntryStatus.draft.rawValue
+        }
+
+        return status
     }
 }
 
@@ -665,9 +695,13 @@ enum GeneratedStoryboardStore {
                 image: image,
                 promptText: item.promptText,
                 artStyle: item.artStyle,
+                panelLayout: item.panelLayout,
                 sourcePhotoCount: item.sourcePhotoCount,
                 createdAt: item.createdAt,
-                imageFileName: item.imageFileName
+                imageFileName: item.imageFileName,
+                storagePath: item.storagePath,
+                cloudSyncState: item.cloudSyncState,
+                isPrimary: item.isPrimary ?? true
             )
         }
     }
@@ -683,9 +717,13 @@ enum GeneratedStoryboardStore {
                 clientEntryID: storyboard.clientEntryID,
                 promptText: storyboard.promptText,
                 artStyle: storyboard.artStyle,
+                panelLayout: storyboard.panelLayout,
                 sourcePhotoCount: storyboard.sourcePhotoCount,
                 createdAt: storyboard.createdAt,
-                imageFileName: imageFileName
+                imageFileName: imageFileName,
+                storagePath: storyboard.storagePath,
+                cloudSyncState: storyboard.cloudSyncState,
+                isPrimary: storyboard.isPrimary
             )
         }
 
@@ -712,14 +750,18 @@ enum GeneratedStoryboardStore {
         clientEntryID: UUID,
         promptText: String,
         artStyle: String,
-        sourcePhotoCount: Int
+        panelLayout: String?,
+        sourcePhotoCount: Int,
+        id: UUID = UUID(),
+        storagePath: String? = nil,
+        cloudSyncState: String? = nil,
+        isPrimary: Bool = true
     ) throws -> GeneratedStoryboard {
         try FileManager.default.createDirectory(
             at: imagesDirectory,
             withIntermediateDirectories: true
         )
 
-        let id = UUID()
         let imageFileName = "\(id.uuidString).jpg"
         let imageURL = imagesDirectory.appendingPathComponent(imageFileName)
 
@@ -735,9 +777,46 @@ enum GeneratedStoryboardStore {
             image: image,
             promptText: promptText,
             artStyle: artStyle,
+            panelLayout: panelLayout,
             sourcePhotoCount: sourcePhotoCount,
-            imageFileName: imageFileName
+            imageFileName: imageFileName,
+            storagePath: storagePath,
+            cloudSyncState: cloudSyncState,
+            isPrimary: isPrimary
         )
+    }
+
+    static func merging(_ storyboard: GeneratedStoryboard, into storyboards: [GeneratedStoryboard]) -> [GeneratedStoryboard] {
+        var merged = storyboards.map { existing in
+            guard
+                storyboard.isPrimary,
+                existing.id != storyboard.id,
+                existing.clientEntryID == storyboard.clientEntryID
+            else {
+                return existing
+            }
+
+            return GeneratedStoryboard(
+                id: existing.id,
+                clientEntryID: existing.clientEntryID,
+                image: existing.image,
+                promptText: existing.promptText,
+                artStyle: existing.artStyle,
+                panelLayout: existing.panelLayout,
+                sourcePhotoCount: existing.sourcePhotoCount,
+                createdAt: existing.createdAt,
+                imageFileName: existing.imageFileName,
+                storagePath: existing.storagePath,
+                cloudSyncState: existing.cloudSyncState,
+                isPrimary: false
+            )
+        }
+        if let index = merged.firstIndex(where: { $0.id == storyboard.id }) {
+            merged[index] = storyboard
+        } else {
+            merged.insert(storyboard, at: 0)
+        }
+        return merged
     }
 
     private static var imagesDirectory: URL {
@@ -751,9 +830,13 @@ struct GeneratedStoryboardMetadata: Codable {
     let clientEntryID: UUID?
     let promptText: String
     let artStyle: String
+    let panelLayout: String?
     let sourcePhotoCount: Int
     let createdAt: Date
     let imageFileName: String
+    let storagePath: String?
+    let cloudSyncState: String?
+    let isPrimary: Bool?
 }
 
 enum StoryboardGenerationError: LocalizedError {

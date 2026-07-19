@@ -86,6 +86,7 @@ struct SupabaseReferencePhotoService {
     ) async throws {
         do {
             let existingPhotos = try await existingReferencePhotos(entryID: entry.id)
+            let existingPhotoByID = Dictionary(uniqueKeysWithValues: existingPhotos.map { ($0.id, $0) })
             let localPhotoIDs = Set(photos.map(\.id))
             let photosToDelete = existingPhotos.filter { !localPhotoIDs.contains($0.id) }
 
@@ -94,6 +95,32 @@ struct SupabaseReferencePhotoService {
             }
 
             for (index, photo) in photos.enumerated() {
+                if let existingPhoto = existingPhotoByID[photo.id] {
+                    guard existingPhoto.sortOrder != index else {
+                        continue
+                    }
+
+                    try await client
+                        .from("entry_reference_photos")
+                        .upsert(
+                            ReferencePhotoUpsert(
+                                id: existingPhoto.id,
+                                userID: existingPhoto.userID,
+                                entryID: existingPhoto.entryID,
+                                clientEntryID: existingPhoto.clientEntryID,
+                                storagePath: existingPhoto.storagePath,
+                                mimeType: existingPhoto.mimeType,
+                                byteSize: existingPhoto.byteSize,
+                                width: existingPhoto.width,
+                                height: existingPhoto.height,
+                                sortOrder: index
+                            ),
+                            onConflict: "id"
+                        )
+                        .execute()
+                    continue
+                }
+
                 let upload = try makeUpload(
                     photo: photo,
                     userID: entry.userID,

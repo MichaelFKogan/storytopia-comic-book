@@ -11,19 +11,21 @@ enum CreateEntryPresentation {
     case editDraft
 
     var showsNextButton: Bool {
-        if case .compose = self {
+        switch self {
+        case .compose, .editDraft:
             return true
+        case .composeInJournal:
+            return false
         }
-
-        return false
     }
 
     var showsEntryOptionsFlow: Bool {
-        if case .compose = self {
+        switch self {
+        case .compose, .editDraft:
             return true
+        case .composeInJournal:
+            return false
         }
-
-        return false
     }
 
     var savesDirectlyToJournal: Bool {
@@ -166,6 +168,8 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
     let textSize: Double
     let paperStyleRawValue: String
     let paperColorIndex: Int
+    let storyboardLayoutRawValue: String
+    let isSmartGenerationEnabled: Bool
 
     init(
         id: UUID,
@@ -183,7 +187,9 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         textColorIndex: Int,
         textSize: Double,
         paperStyleRawValue: String,
-        paperColorIndex: Int
+        paperColorIndex: Int,
+        storyboardLayout: StoryboardLayoutOption,
+        isSmartGenerationEnabled: Bool
     ) {
         self.id = id
         self.title = title
@@ -201,6 +207,8 @@ private struct LoadedCreateEntryDraftSnapshot: Equatable {
         self.textSize = textSize
         self.paperStyleRawValue = paperStyleRawValue
         self.paperColorIndex = paperColorIndex
+        self.storyboardLayoutRawValue = storyboardLayout.rawValue
+        self.isSmartGenerationEnabled = isSmartGenerationEnabled
     }
 }
 
@@ -1259,6 +1267,7 @@ struct CreateEntryView: View {
     @State private var selectedPhotoPickerItems: [PhotosPickerItem] = []
     @State private var draggedStoryboardPhotoIndex: Int?
     @State private var previewedStoryboardPhoto: UIImage?
+    @State private var isPreviewingCompletedStoryboard = false
     @State private var isPhotoTabCollapsed = true
     @State private var isStoryDetailsTabCollapsed = true
     @State private var isShowingEntryOptionsPage = false
@@ -1286,15 +1295,37 @@ struct CreateEntryView: View {
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         editorBlurRequestID += 1
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .endEditing(true)
     }
 
     private func showEntryOptionsPage() {
-        guard presentation.showsEntryOptionsFlow else {
+        guard canShowEntryOptionsPage else {
             return
         }
 
         dismissKeyboard()
         isShowingEntryOptionsPage = true
+    }
+
+    private func advanceToEntryOptionsPage() {
+        guard canShowEntryOptionsPage else {
+            return
+        }
+
+        if presentation.isEditDraft, hasUnsavedDraftChanges {
+            dismissKeyboard()
+            beginToolbarSavedFeedback()
+
+            Task {
+                await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: true)
+            }
+        } else {
+            showEntryOptionsPage()
+        }
     }
 
     private var selectedTextStyle: NotebookTextStyle {
@@ -1346,7 +1377,11 @@ struct CreateEntryView: View {
     }
 
     private var showsComposeFlowControls: Bool {
-        presentation.showsNextButton && activeDraftID == nil
+        canShowEntryOptionsPage
+    }
+
+    private var canShowEntryOptionsPage: Bool {
+        presentation.showsEntryOptionsFlow && !isOpeningCompletedEntryFromEntries
     }
 
     var body: some View {
@@ -1404,6 +1439,14 @@ struct CreateEntryView: View {
             if let previewedStoryboardPhoto {
                 ReferencePhotoViewer(image: previewedStoryboardPhoto) {
                     self.previewedStoryboardPhoto = nil
+                }
+                .presentationBackground(.clear)
+            }
+        }
+        .fullScreenCover(isPresented: $isPreviewingCompletedStoryboard) {
+            if let completedEntryOpenedStoryboardImage {
+                ReferencePhotoViewer(image: completedEntryOpenedStoryboardImage) {
+                    isPreviewingCompletedStoryboard = false
                 }
                 .presentationBackground(.clear)
             }
@@ -1542,7 +1585,7 @@ struct CreateEntryView: View {
             configureDirectJournalEntryIfNeeded()
             loadLinkedJournalTitle(for: activeDraftID)
             loadSavedDraftIfNeeded()
-            currentEntryStatus = isOpeningCompletedEntryFromEntries ? .completed : .draft
+            currentEntryStatus = resolvedCurrentEntryStatus()
         }
         .onChange(of: activeDraftID) { newDraftID in
             handleActiveDraftChange(newDraftID)
@@ -1573,7 +1616,17 @@ struct CreateEntryView: View {
 
         loadLinkedJournalTitle(for: draftID)
         loadSavedDraftIfNeeded()
-        currentEntryStatus = isOpeningCompletedEntryFromEntries ? .completed : .draft
+        currentEntryStatus = resolvedCurrentEntryStatus()
+    }
+
+    private func resolvedCurrentEntryStatus() -> JournalEntryStatus {
+        if let activeDraftID,
+           let draft = CreateEntryDraftStore.load(id: activeDraftID),
+           let status = JournalEntryStatus(rawValue: draft.status) {
+            return status
+        }
+
+        return isOpeningCompletedEntryFromEntries ? .completed : .draft
     }
 
     private func startStoryboardGeneration() {
@@ -1605,15 +1658,19 @@ struct CreateEntryView: View {
         let photos = storyboardPhotos.compactMap { $0 }
         let photoImages = photos.map(\.image)
         let layout = effectiveStoryboardLayout
+        let requiresEntrySave = activeDraftID == nil || hasUnsavedDraftChanges
+        let requiresReferencePhotoSync = requiresEntrySave && hasUnsavedReferencePhotoChanges
         isGeneratingStoryboard = true
-        storyboardGenerationPhase = photos.isEmpty ? .preparingEntry : .uploadingReferencePhotos
+        storyboardGenerationPhase = requiresReferencePhotoSync ? .uploadingReferencePhotos : .preparingEntry
 
         Task {
             do {
                 let prepareResult = try await EntrySaveService().prepareEntryForGeneration(
                     payload: generationPayload,
                     isSignedIn: authStore.userID != nil,
-                    currentStatus: currentEntryStatus
+                    currentStatus: currentEntryStatus,
+                    requiresSave: requiresEntrySave,
+                    syncReferencePhotos: requiresReferencePhotoSync
                 )
                 activeDraftID = prepareResult.localDraftID
                 cloudSaveState = prepareResult.state
@@ -1623,7 +1680,7 @@ struct CreateEntryView: View {
                 if case .photoUploadFailed(let message) = prepareResult.state {
                     throw StoryboardGenerationError.openAIMessage(message)
                 }
-                if authStore.userID != nil, prepareResult.cloudEntry == nil {
+                if authStore.userID != nil, requiresEntrySave, prepareResult.cloudEntry == nil {
                     throw StoryboardGenerationError.openAIMessage("Could not prepare this entry in Storytopia cloud.")
                 }
 
@@ -1631,6 +1688,7 @@ struct CreateEntryView: View {
                     storyboardGenerationPhase = .generating
                 }
 
+                print("[Storytopia] Calling OpenAI.")
                 let image = try await OpenAIImageGenerationService().generateStoryboard(
                     apiKey: apiKey,
                     title: storyTitle,
@@ -1641,19 +1699,67 @@ struct CreateEntryView: View {
                     isSmartGenerationEnabled: isSmartGenerationEnabled,
                     images: photoImages
                 )
+                print("[Storytopia] OpenAI response received.")
 
                 await MainActor.run {
                     storyboardGenerationPhase = .savingResult
                 }
 
+                print("[Storytopia] Saving generated storyboard.")
                 let storyboard = try GeneratedStoryboardStore.persistedStoryboard(
                     image: image,
                     clientEntryID: prepareResult.localDraftID,
                     promptText: entryText,
                     artStyle: selectedArtStyle,
+                    panelLayout: layout.rawValue,
                     sourcePhotoCount: photoImages.count
                 )
+                print("[Storytopia] Storyboard saved.")
 
+                var storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboard, into: generatedStoryboards)
+                GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
+
+                let cloudStoryboard: EntryStoryboard
+                do {
+                    cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                } catch {
+                    let failedStoryboard = GeneratedStoryboard(
+                        id: storyboard.id,
+                        clientEntryID: storyboard.clientEntryID,
+                        image: storyboard.image,
+                        promptText: storyboard.promptText,
+                        artStyle: storyboard.artStyle,
+                        panelLayout: storyboard.panelLayout,
+                        sourcePhotoCount: storyboard.sourcePhotoCount,
+                        createdAt: storyboard.createdAt,
+                        imageFileName: storyboard.imageFileName,
+                        storagePath: storyboard.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.failed.rawValue,
+                        isPrimary: storyboard.isPrimary
+                    )
+                    storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(failedStoryboard, into: storyboardsAfterLocalSave)
+                    GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
+                    generatedStoryboards = storyboardsAfterLocalSave
+                    throw StoryboardGenerationError.openAIMessage("Storyboard saved locally. Cloud storyboard sync failed, so this entry was not completed.")
+                }
+
+                let syncedStoryboard = GeneratedStoryboard(
+                    id: storyboard.id,
+                    clientEntryID: storyboard.clientEntryID,
+                    image: storyboard.image,
+                    promptText: storyboard.promptText,
+                    artStyle: storyboard.artStyle,
+                    panelLayout: storyboard.panelLayout,
+                    sourcePhotoCount: storyboard.sourcePhotoCount,
+                    createdAt: storyboard.createdAt,
+                    imageFileName: storyboard.imageFileName,
+                    storagePath: cloudStoryboard.storagePath,
+                    cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                    isPrimary: true
+                )
+
+                print("[Storytopia] Entry completion started.")
+                print("[Storytopia] Marking entry completed.")
                 let completionPayload = EntryDraftSavePayload(
                     id: prepareResult.localDraftID,
                     title: generationPayload.title,
@@ -1683,12 +1789,24 @@ struct CreateEntryView: View {
                     payload: completionPayload,
                     isSignedIn: authStore.userID != nil
                 )
+                print("[Storytopia] Entry completion succeeded.")
 
                 await MainActor.run {
                     activeDraftID = completionResult.localDraftID
                     cloudSaveState = completionResult.state
-                    addCurrentEntry(to: journalTitle)
-                    generatedStoryboards.insert(storyboard, at: 0)
+                    let completedSnapshot = currentDraftSnapshot(id: completionResult.localDraftID)
+                    loadedDraftSnapshot = completedSnapshot
+                    toolbarSavedSnapshot = completedSnapshot
+                    if let journalEntry = currentJournalEntry(id: completionResult.localDraftID) {
+                        StoryEntryStore.upsert(journalEntry, to: journalTitle)
+                        onJournalEntryCreated(journalTitle, journalEntry)
+                        EntryJournalLinkStore.save(
+                            journalTitle: journalTitle,
+                            journalEntryID: journalEntry.id,
+                            for: completionResult.localDraftID
+                        )
+                    }
+                    generatedStoryboards = GeneratedStoryboardStore.merging(syncedStoryboard, into: storyboardsAfterLocalSave)
                     GeneratedStoryboardStore.save(generatedStoryboards)
                     currentEntryStatus = .completed
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
@@ -1698,6 +1816,7 @@ struct CreateEntryView: View {
                     UserDefaults.standard.set("completed", forKey: "StorytopiaSelectedEntriesTab")
                     isOpeningCompletedEntryFromEntries = true
                     completedEntryOpenedStoryboardImage = image
+                    print("[Storytopia] Entries list refresh requested.")
                     selectedPage = .entries
                 }
             } catch {
@@ -2067,6 +2186,18 @@ struct CreateEntryView: View {
         return currentDraftSnapshot(id: loadedDraftSnapshot.id) != loadedDraftSnapshot
     }
 
+    private var hasUnsavedReferencePhotoChanges: Bool {
+        guard let loadedDraftSnapshot else {
+            return storyboardPhotos.contains { $0 != nil }
+        }
+
+        return currentReferencePhotoIDs != loadedDraftSnapshot.photoIDs
+    }
+
+    private var currentReferencePhotoIDs: [UUID] {
+        storyboardPhotos.compactMap { $0?.id }
+    }
+
     private func requestExit() {
         dismissKeyboard()
 
@@ -2179,6 +2310,8 @@ struct CreateEntryView: View {
 
         let existingDraft = activeDraftID.flatMap(CreateEntryDraftStore.load)
 
+        let normalizedLocation = storyLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+
         return PendingCreateEntryDraftSave(
             id: activeDraftID,
             title: storyTitle,
@@ -2186,7 +2319,7 @@ struct CreateEntryView: View {
             richText: currentEntryRichText(),
             photos: storyboardPhotos.compactMap { $0 },
             artStyle: selectedArtStyle,
-            location: storyLocation,
+            location: normalizedLocation,
             date: storyDate,
             datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
@@ -2237,6 +2370,7 @@ struct CreateEntryView: View {
             datePrecision: pendingSave.datePrecision,
             savesDraft: pendingSave.savesDraft,
             isPrivate: pendingSave.isPrivate,
+            status: currentEntryStatus,
             fontChoiceRawValue: pendingSave.fontChoiceRawValue,
             textColorIndex: pendingSave.textColorIndex,
             textSize: pendingSave.textSize,
@@ -2419,6 +2553,7 @@ struct CreateEntryView: View {
         storyLocation = draft.location
         storyDate = draft.date
         storyDatePrecision = draft.datePrecision
+        currentEntryStatus = JournalEntryStatus(rawValue: draft.status) ?? .draft
         didEditEntryDate = false
         didEditEntryLocation = false
         savesDraft = draft.savesDraft
@@ -2448,7 +2583,7 @@ struct CreateEntryView: View {
             richText: currentEntryRichText(),
             photos: storyboardPhotos.compactMap { $0 },
             artStyle: selectedArtStyle,
-            location: storyLocation,
+            location: storyLocation.trimmingCharacters(in: .whitespacesAndNewlines),
             date: storyDate,
             datePrecision: storyDatePrecision,
             savesDraft: savesDraft,
@@ -2457,7 +2592,9 @@ struct CreateEntryView: View {
             textColorIndex: selectedTextColorIndex,
             textSize: previewTextSize,
             paperStyleRawValue: selectedPaperStyleChoice.rawValue,
-            paperColorIndex: selectedPaperColorIndex
+            paperColorIndex: selectedPaperColorIndex,
+            storyboardLayout: selectedStoryboardLayout,
+            isSmartGenerationEnabled: isSmartGenerationEnabled
         )
     }
 
@@ -2573,26 +2710,19 @@ struct CreateEntryView: View {
                             .stroke(Color.white.opacity(0.78), lineWidth: 1)
                     )
 
-                ZStack {
-                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
-                        .position(x: 12, y: 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
-                        .position(x: imageWidth - 12, y: 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: 35)
-                        .position(x: 12, y: imageHeight - 12)
-
-                    StoryPhotoTape(width: 58, height: 16, rotation: -35)
-                        .position(x: imageWidth - 12, y: imageHeight - 12)
-                }
-                .frame(width: imageWidth, height: imageHeight)
+                StoryPhotoTape(width: 70, height: 18, rotation: -2)
+                    .offset(y: -(imageHeight / 2))
             }
             .shadow(color: Color.storyInk.opacity(0.16), radius: 7, y: 4)
             .frame(maxWidth: .infinity)
             .padding(.top, 28)
             .frame(height: alignedHeight, alignment: .top)
-            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isPreviewingCompletedStoryboard = true
+            }
+            .accessibilityLabel("Open storyboard full screen")
+            .accessibilityAddTraits(.isButton)
         }
     }
 
@@ -2609,10 +2739,6 @@ struct CreateEntryView: View {
             photosAttachedTab
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
-
-            storyDetailsTab
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
 
             unifiedEditorToolbar
         }
@@ -2874,7 +3000,7 @@ struct CreateEntryView: View {
 
     private var bottomToolbarNextButton: some View {
         Button {
-            showEntryOptionsPage()
+            advanceToEntryOptionsPage()
         } label: {
             HStack(spacing: 5) {
                 Text("Next")
@@ -3585,6 +3711,7 @@ struct CreateEntryView: View {
 
             artStylePickerSection
             journalDestinationCard
+            storyDetailsCard
             entryPrivacyCard
             generateStoryboardButton
         }
@@ -3909,6 +4036,53 @@ struct CreateEntryView: View {
         .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
     }
 
+    private var storyDetailsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Story Details")
+                        .font(.system(size: 15, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text("Add when and where this happened")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+
+                Spacer()
+            }
+
+            VStack(spacing: 8) {
+                storyDetailButton(
+                    title: "Date",
+                    value: entryDateMetadataText,
+                    systemName: hasEntryDateValue ? "calendar.badge.clock" : "calendar",
+                    isSelected: hasEntryDateValue,
+                    action: openEntryDateSheet
+                )
+
+                storyDetailButton(
+                    title: "Location",
+                    value: entryPlaceMetadataText,
+                    systemName: hasEntryLocationValue ? "location.fill" : "location",
+                    isSelected: hasEntryLocationValue,
+                    action: openEntryLocationSheet
+                )
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.storyBorder.opacity(0.68), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 9, y: 3)
+    }
+
     private func journalDestinationButton(
         title: String,
         subtitle: String,
@@ -4129,23 +4303,12 @@ struct CreateEntryView: View {
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyPurple)
 
-                    Text("Photos help create better comics")
+                    Text("Up to 5 photos")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.storyInk.opacity(0.66))
                         .lineLimit(1)
                         .minimumScaleFactor(0.76)
                 }
-
-                HStack(spacing: 4) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 11, weight: .semibold))
-
-                    Text("Up to 5 photos")
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                }
-                .foregroundStyle(Color.storyInk.opacity(0.58))
             }
         }
     }
@@ -4206,82 +4369,157 @@ struct CreateEntryView: View {
     }
 
     private var smartGenerationCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Color.storyPurple)
+                            .frame(width: 18, height: 18)
 
-                Text("Smart Generation")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.storyInk)
-
-                Spacer(minLength: 8)
-
-                Text("Recommended")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.storyPurple)
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 7)
-                    .frame(height: 20)
-                    .background(Color.storyPurple.opacity(0.1), in: Capsule())
-            }
-
-            HStack(alignment: .top, spacing: 14) {
-                compactStoryboardPreview(layout: effectiveStoryboardLayout)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle(isOn: $isSmartGenerationEnabled.animation(.snappy(duration: 0.2))) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(isSmartGenerationEnabled ? "Auto chooses best layout" : "Manual layout controls")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(Color.storyInk)
-
-                            Text(isSmartGenerationEnabled ? "AI chooses layout, panel count, and photo placement." : "Choose your own layout below.")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.homeMutedText)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text("Your memories become\na graphic novel.")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color.storyInk)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color.storyPurple))
 
-                    VStack(alignment: .leading, spacing: 7) {
-                        smartGenerationBenefit("Best layout")
-                        smartGenerationBenefit("Number of panels")
-                        smartGenerationBenefit("Photo placement")
-                    }
-                    .opacity(isSmartGenerationEnabled ? 1 : 0.64)
-
-                    HStack(spacing: 5) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 11, weight: .semibold))
-
-                        Text("\(isSmartGenerationEnabled ? "Auto" : effectiveStoryboardLayout.title) · \(effectiveStoryboardLayout.panelCount) panels")
-                            .font(.system(size: 10, weight: .bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                    }
-                    .foregroundStyle(Color.storyPurple)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(Color.storyPurple.opacity(0.09), in: Capsule())
+                    Text("Storytopia transforms your journal entry into a comic page where you are the main character.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.storyInk.opacity(0.8))
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                smartGenerationHeroArt
+                    .frame(width: 112, height: 108)
+                    .padding(.top, -3)
+                    .padding(.trailing, -2)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 13)
+
+            Divider()
+                .overlay(Color.storyBorder.opacity(0.45))
+
+            HStack(spacing: 0) {
+                smartGenerationFeatureTile(systemName: "sparkles", title: "Understands\nyour story")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "photo", title: "Uses your\nphotos")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "rectangle.split.3x1", title: "Designs the\nbest layout")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "gauge.with.dots.needle.33percent", title: "Creates\ncinematic\npacing")
+                smartGenerationFeatureDivider
+                smartGenerationFeatureTile(systemName: "paintbrush", title: "Matches your\nart style")
+            }
+            .padding(.vertical, 10)
+
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .bold))
+
+                Text("2-6 panels")
+                    .font(.system(size: 11, weight: .bold))
+
+                Circle()
+                    .fill(Color.storyPurple)
+                    .frame(width: 3.5, height: 3.5)
+
+                Text("Unique for every story")
+                    .font(.system(size: 11, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(Color.storyPurple)
+            .padding(.horizontal, 13)
+            .frame(height: 26)
+            .background(Color.storyPurple.opacity(0.09), in: Capsule())
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 13)
         }
-        .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.storyBorder.opacity(0.7), lineWidth: 1)
+                .stroke(Color.storyBorder.opacity(0.58), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
                 dismissKeyboard()
             }
         )
+    }
+
+    private var smartGenerationHeroArt: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.93, green: 0.96, blue: 1.0),
+                            Color.storyCream.opacity(0.82)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Image(artStyleAssetName(for: selectedArtStyle))
+                .resizable()
+                .scaledToFill()
+                .frame(width: 98, height: 94)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(0.85), lineWidth: 1)
+                )
+                .rotationEffect(.degrees(-2))
+                .shadow(color: Color.storyInk.opacity(0.14), radius: 8, y: 4)
+                .offset(x: 3, y: 3)
+
+            VStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color.white.opacity(0.74))
+                        .frame(width: CGFloat(30 - index * 5), height: 3)
+                }
+            }
+            .padding(.trailing, 8)
+            .padding(.bottom, 8)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var smartGenerationFeatureDivider: some View {
+        Rectangle()
+            .fill(Color.storyBorder.opacity(0.36))
+            .frame(width: 0.7, height: 42)
+    }
+
+    private func smartGenerationFeatureTile(systemName: String, title: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .frame(height: 16)
+
+            Text(title)
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(Color.storyInk)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+                .frame(height: 28, alignment: .top)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func smartGenerationBenefit(_ title: String) -> some View {
@@ -7255,19 +7493,13 @@ struct ReferencePhotoViewer: View {
     let image: UIImage
     let closeAction: () -> Void
 
-    @State private var dragOffset: CGFloat = 0
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black
                 .ignoresSafeArea()
 
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 64)
+            ZoomableReferenceImageView(image: image)
+                .ignoresSafeArea()
 
             Button {
                 closeAction()
@@ -7283,35 +7515,94 @@ struct ReferencePhotoViewer: View {
             .padding(.top, 14)
             .padding(.trailing, 16)
         }
-        .contentShape(Rectangle())
-        .offset(y: dragOffset)
-        .gesture(dismissalDragGesture)
         .preferredColorScheme(.dark)
         .statusBarHidden()
     }
+}
 
-    private var dismissalDragGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in
-                dragOffset = max(value.translation.height, 0)
+private struct ZoomableReferenceImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .black
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 5
+        scrollView.bouncesZoom = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .black
+        imageView.isUserInteractionEnabled = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(imageView)
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            imageView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+
+        let doubleTapRecognizer = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDoubleTap(_:))
+        )
+        doubleTapRecognizer.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTapRecognizer)
+
+        context.coordinator.scrollView = scrollView
+        context.coordinator.imageView = imageView
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        if context.coordinator.imageView?.image !== image {
+            context.coordinator.imageView?.image = image
+            scrollView.setZoomScale(1, animated: false)
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var scrollView: UIScrollView?
+        weak var imageView: UIImageView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            imageView
+        }
+
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let scrollView else {
+                return
             }
-            .onEnded { value in
-                let shouldDismiss = value.translation.height > 120 || value.predictedEndTranslation.height > 220
 
-                if shouldDismiss {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        dragOffset = UIScreen.main.bounds.height
-                    }
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                        closeAction()
-                    }
-                } else {
-                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.86)) {
-                        dragOffset = 0
-                    }
-                }
+            if scrollView.zoomScale > scrollView.minimumZoomScale {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+                return
             }
+
+            let tapPoint = recognizer.location(in: imageView)
+            let targetScale = min(scrollView.maximumZoomScale, 2.35)
+            let zoomSize = CGSize(
+                width: scrollView.bounds.width / targetScale,
+                height: scrollView.bounds.height / targetScale
+            )
+            let zoomOrigin = CGPoint(
+                x: tapPoint.x - (zoomSize.width / 2),
+                y: tapPoint.y - (zoomSize.height / 2)
+            )
+            scrollView.zoom(to: CGRect(origin: zoomOrigin, size: zoomSize), animated: true)
+        }
     }
 }
 
