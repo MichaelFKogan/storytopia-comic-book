@@ -1284,17 +1284,29 @@ struct CreateEntryView: View {
     @State private var isToolbarSaveInProgress = false
     @State private var toolbarSaveFeedbackVersion = 0
     @State private var cloudSaveState: EntryCloudSaveState = .idle
+    @State private var cloudSaveDismissVersion = 0
     @State private var currentEntryStatus: JournalEntryStatus = .draft
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
     @State private var editorSelectionState = NotebookTextSelectionState()
+    @State private var isKeyboardDismissInProgress = false
 
     private func dismissKeyboard() {
+        isKeyboardDismissInProgress = true
         isTitleFocused = false
-        resetKeyboardFormattingState()
-        isBodyEditorEditing = false
         editorBlurRequestID += 1
+        endWindowEditing()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            isKeyboardDismissInProgress = false
+            isBodyEditorEditing = false
+            resetKeyboardFormattingState()
+            endWindowEditing()
+        }
+    }
+
+    private func endWindowEditing() {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
@@ -1673,7 +1685,7 @@ struct CreateEntryView: View {
                     syncReferencePhotos: requiresReferencePhotoSync
                 )
                 activeDraftID = prepareResult.localDraftID
-                cloudSaveState = prepareResult.state
+                setCloudSaveState(prepareResult.state)
                 if case .failed(let message) = prepareResult.state {
                     throw StoryboardGenerationError.openAIMessage(message)
                 }
@@ -1790,7 +1802,7 @@ struct CreateEntryView: View {
 
                 await MainActor.run {
                     activeDraftID = completionResult.localDraftID
-                    cloudSaveState = completionResult.state
+                    setCloudSaveState(completionResult.state)
                     let completedSnapshot = currentDraftSnapshot(id: completionResult.localDraftID)
                     loadedDraftSnapshot = completedSnapshot
                     toolbarSavedSnapshot = completedSnapshot
@@ -2021,10 +2033,10 @@ struct CreateEntryView: View {
                     Image(systemName: presentation.closeButtonSystemName)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.72))
-                        .frame(width: 30, height: 30)
+                        .frame(width: 44, height: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
-                .frame(width: showsToolbarSaveButton ? 74 : 30, alignment: .leading)
+                .frame(width: showsToolbarSaveButton ? 88 : 44, alignment: .leading)
                 .buttonStyle(.plain)
                 .accessibilityLabel(presentation.closeButtonAccessibilityLabel)
             }
@@ -2069,23 +2081,26 @@ struct CreateEntryView: View {
                     performToolbarSave()
                 } label: {
                     HStack(spacing: 4) {
-                        Text(toolbarSaveButtonTitle)
-                            .font(.system(size: 13, weight: .bold))
-                            .lineLimit(1)
-
                         if isToolbarSaveInProgress {
                             ProgressView()
                                 .controlSize(.mini)
                                 .tint(Color.storyPurple)
                         }
 
+                        Text(toolbarSaveButtonTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+
                         if showsToolbarSavedState {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 10, weight: .bold))
                         }
                     }
-                    .frame(width: 74, alignment: .trailing)
+                    .frame(width: 88, alignment: .trailing)
                     .foregroundStyle(toolbarSaveButtonColor)
+                    .opacity(canUseToolbarSaveButton || isToolbarSaveInProgress ? 1 : 0.52)
+                    .animation(.snappy(duration: 0.18), value: isToolbarSaveInProgress)
+                    .animation(.snappy(duration: 0.18), value: showsToolbarSavedState)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canUseToolbarSaveButton || isToolbarSaveInProgress)
@@ -2126,14 +2141,18 @@ struct CreateEntryView: View {
         }
 
         if showsToolbarSavedState {
-            return .green
+            return Color.storyPurple
         }
 
         return canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
     }
 
     private var toolbarSaveButtonTitle: String {
-        showsToolbarSavedState ? "Saved" : "Save"
+        if isToolbarSaveInProgress {
+            return "Saving"
+        }
+
+        return showsToolbarSavedState ? "Saved" : "Save"
     }
 
     private var showsToolbarSavedState: Bool {
@@ -2207,11 +2226,16 @@ struct CreateEntryView: View {
 
     private func closeEditorWithoutSaving() {
         dismissKeyboard()
-        clearEditor()
-        activeDraftID = nil
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         withAnimation(.snappy(duration: 0.32)) {
             dismissCreate()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            if selectedPage != .create {
+                clearEditor()
+                activeDraftID = nil
+                isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+            }
         }
     }
 
@@ -2224,6 +2248,7 @@ struct CreateEntryView: View {
         beginToolbarSavedFeedback()
 
         Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
             await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
         }
     }
@@ -2233,6 +2258,7 @@ struct CreateEntryView: View {
         beginToolbarSavedFeedback()
 
         Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
             await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: false)
         }
     }
@@ -2268,6 +2294,29 @@ struct CreateEntryView: View {
         toolbarSaveFeedbackVersion += 1
         isToolbarSaveInProgress = false
         showsToolbarSavedFeedback = false
+    }
+
+    private func setCloudSaveState(_ state: EntryCloudSaveState) {
+        cloudSaveDismissVersion += 1
+        let dismissVersion = cloudSaveDismissVersion
+
+        withAnimation(.snappy(duration: 0.22)) {
+            cloudSaveState = state
+        }
+
+        guard state.shouldDismissAutomatically else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
+            guard cloudSaveDismissVersion == dismissVersion, cloudSaveState == state else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                cloudSaveState = .idle
+            }
+        }
     }
 
     private func saveFromExitConfirmation() {
@@ -2429,7 +2478,7 @@ struct CreateEntryView: View {
             return
         }
 
-        cloudSaveState = payload.photos.isEmpty ? .saving : .uploadingPhotos
+        setCloudSaveState(payload.photos.isEmpty ? .saving : .uploadingPhotos)
 
         do {
             let result = try await EntrySaveService().saveEntryPreservingStatus(
@@ -2443,14 +2492,14 @@ struct CreateEntryView: View {
             toolbarSavedSnapshot = savedSnapshot
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
             recentEntryLocations = EntryLocationRecentStore.all
-            cloudSaveState = result.state
+            setCloudSaveState(result.state)
             completeToolbarSavedFeedback(for: savedSnapshot)
 
             if navigatesToOptions {
                 isShowingEntryOptionsPage = true
             }
         } catch {
-            cloudSaveState = .failed("Could not save this entry locally.")
+            setCloudSaveState(.failed("Could not save this entry locally."))
             cancelToolbarSavedFeedback()
         }
     }
@@ -2490,7 +2539,7 @@ struct CreateEntryView: View {
         storyboardPhotos = Array(repeating: nil, count: 5)
         toolbarSavedSnapshot = nil
         toolbarSavedJournalEntryID = nil
-        cloudSaveState = .idle
+        setCloudSaveState(.idle)
         storyboardGenerationPhase = .ready
         showsToolbarSavedFeedback = false
         isToolbarSaveInProgress = false
@@ -2647,6 +2696,10 @@ struct CreateEntryView: View {
                             usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                             onSelectionStateChange: updateEditorSelectionState,
                             onEditingEnded: {
+                                guard !isKeyboardDismissInProgress else {
+                                    return
+                                }
+
                                 isBodyEditorEditing = false
                                 resetKeyboardFormattingState()
                             },
@@ -2724,7 +2777,7 @@ struct CreateEntryView: View {
     }
 
     private var showsDraftKeyboardAccessory: Bool {
-        isBodyEditorEditing || isTitleFocused
+        isKeyboardDismissInProgress || isBodyEditorEditing || isTitleFocused
     }
 
     private func editorScrollContentHeight(for visibleHeight: CGFloat) -> CGFloat {
@@ -3893,7 +3946,7 @@ struct CreateEntryView: View {
 
             Text(message)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyInk)
+                .foregroundStyle(cloudSaveStatusTextColor)
                 .lineLimit(2)
 
             Spacer(minLength: 10)
@@ -3935,25 +3988,34 @@ struct CreateEntryView: View {
                 .tint(Color.storyPurple)
                 .frame(width: 30, height: 30)
         case .saved, .photosUploaded:
-            Image(systemName: "checkmark.icloud.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.green)
+                .foregroundStyle(Color.storyPurple)
                 .frame(width: 30, height: 30)
-                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .savedLocally:
-            Image(systemName: "tray.and.arrow.down.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.storyPurple)
                 .frame(width: 30, height: 30)
                 .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .failed, .photoUploadFailed:
-            Image(systemName: "exclamationmark.icloud.fill")
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.red)
                 .frame(width: 30, height: 30)
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .idle:
             EmptyView()
+        }
+    }
+
+    private var cloudSaveStatusTextColor: Color {
+        switch cloudSaveState {
+        case .saved, .photosUploaded:
+            return Color.storyPurple
+        default:
+            return Color.storyInk
         }
     }
 

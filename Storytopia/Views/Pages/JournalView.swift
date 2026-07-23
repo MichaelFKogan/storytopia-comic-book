@@ -4557,10 +4557,6 @@ private enum EntryDisplayItem: Identifiable {
     var status: String {
         switch self {
         case .local(let entry, let cloudEntry):
-            if entry.status == JournalEntryStatus.completed.rawValue {
-                return entry.status
-            }
-
             return cloudEntry?.status ?? entry.status
         case .cloud(let entry):
             return entry.status
@@ -4577,44 +4573,100 @@ private enum EntryDisplayItem: Identifiable {
     }
 
     var createdAt: Date {
-        entry.createdAt
+        switch self {
+        case .local(let entry, let cloudEntry):
+            return cloudEntry?.createdAt ?? entry.createdAt
+        case .cloud(let entry):
+            return entry.createdAt
+        }
+    }
+
+    var updatedAt: Date {
+        switch self {
+        case .local(let entry, let cloudEntry):
+            return cloudEntry?.updatedAt ?? entry.updatedAt
+        case .cloud(let entry):
+            return entry.updatedAt
+        }
     }
 
     var entry: CreateEntryDraft {
         switch self {
-        case .local(let entry, _):
+        case .local(let entry, let cloudEntry):
+            if let cloudEntry {
+                return CreateEntryDraft.fromCloud(cloudEntry, thumbnail: entry.thumbnail)
+            }
+
             return entry
         case .cloud(let entry):
-            return CreateEntryDraft(
-                id: entry.clientEntryID,
-                title: entry.title ?? "",
-                text: entry.content ?? "",
-                richText: entry.richText ?? entry.content.map { NotebookRichTextDocument(text: $0) },
-                photos: [],
-                artStyle: entry.artStyle ?? "Anime",
-                location: entry.location ?? "",
-                date: entry.entryDate ?? entry.createdAt,
-                datePrecision: entry.datePrecision.flatMap(EntryDatePrecision.init(rawValue:)) ?? .exact,
-                savesDraft: entry.savesDraft ?? true,
-                isPrivate: entry.isPrivate ?? true,
-                status: entry.status,
-                fontChoiceRawValue: entry.fontChoiceRawValue,
-                textColorIndex: entry.textColorIndex,
-                textSize: entry.textSize,
-                paperStyleRawValue: entry.paperStyleRawValue,
-                paperColorIndex: entry.paperColorIndex,
-                isBold: entry.isBold ?? false,
-                isItalic: entry.isItalic ?? false,
-                isUnderlined: entry.isUnderlined ?? false,
-                isStrikethrough: entry.isStrikethrough ?? false,
-                isHighlighted: entry.isHighlighted ?? false,
-                textAlignmentRawValue: entry.textAlignmentRawValue ?? "leading",
-                thumbnail: nil,
-                createdAt: entry.createdAt,
-                updatedAt: entry.updatedAt,
-                displayOrder: nil
-            )
+            return CreateEntryDraft.fromCloud(entry)
         }
+    }
+}
+
+private extension CreateEntryDraft {
+    static func fromCloud(_ entry: JournalEntry, thumbnail: UIImage? = nil) -> CreateEntryDraft {
+        CreateEntryDraft(
+            id: entry.clientEntryID,
+            title: entry.title ?? "",
+            text: entry.content ?? "",
+            richText: entry.richText ?? entry.content.map { NotebookRichTextDocument(text: $0) },
+            photos: [],
+            artStyle: entry.artStyle ?? "Anime",
+            location: entry.location ?? "",
+            date: entry.entryDate ?? entry.createdAt,
+            datePrecision: entry.datePrecision.flatMap(EntryDatePrecision.init(rawValue:)) ?? .exact,
+            savesDraft: entry.savesDraft ?? true,
+            isPrivate: entry.isPrivate ?? true,
+            status: entry.status,
+            fontChoiceRawValue: entry.fontChoiceRawValue,
+            textColorIndex: entry.textColorIndex,
+            textSize: entry.textSize,
+            paperStyleRawValue: entry.paperStyleRawValue,
+            paperColorIndex: entry.paperColorIndex,
+            isBold: entry.isBold ?? false,
+            isItalic: entry.isItalic ?? false,
+            isUnderlined: entry.isUnderlined ?? false,
+            isStrikethrough: entry.isStrikethrough ?? false,
+            isHighlighted: entry.isHighlighted ?? false,
+            textAlignmentRawValue: entry.textAlignmentRawValue ?? "leading",
+            thumbnail: thumbnail,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+            displayOrder: nil
+        )
+    }
+
+    func replacingThumbnail(_ thumbnail: UIImage?) -> CreateEntryDraft {
+        CreateEntryDraft(
+            id: id,
+            title: title,
+            text: text,
+            richText: richText,
+            photos: photos,
+            artStyle: artStyle,
+            location: location,
+            date: date,
+            datePrecision: datePrecision,
+            savesDraft: savesDraft,
+            isPrivate: isPrivate,
+            status: status,
+            fontChoiceRawValue: fontChoiceRawValue,
+            textColorIndex: textColorIndex,
+            textSize: textSize,
+            paperStyleRawValue: paperStyleRawValue,
+            paperColorIndex: paperColorIndex,
+            isBold: isBold,
+            isItalic: isItalic,
+            isUnderlined: isUnderlined,
+            isStrikethrough: isStrikethrough,
+            isHighlighted: isHighlighted,
+            textAlignmentRawValue: textAlignmentRawValue,
+            thumbnail: thumbnail,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            displayOrder: displayOrder
+        )
     }
 }
 
@@ -4646,10 +4698,12 @@ struct EntriesView: View {
     @State private var entryIDsBeingDeleted: Set<UUID> = []
     @State private var entryIDsBeingRenamed: Set<UUID> = []
     @State private var cloudEntries: [JournalEntry] = []
+    @State private var cloudEntryThumbnails: [UUID: UIImage] = [:]
     @State private var isLoadingCloudEntries = false
     @State private var cloudEntriesErrorMessage: String?
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
     @AppStorage("StorytopiaSelectedEntriesTab") private var selectedEntryTabRawValue = EntriesTab.drafts.rawValue
+    @AppStorage("StorytopiaSelectedEntrySort") private var selectedEntrySortRawValue = EntrySortOption.entryDate.rawValue
 
     private var selectedEntryLayout: JournalEntryLayout {
         get {
@@ -4667,6 +4721,23 @@ struct EntriesView: View {
         nonmutating set {
             selectedEntryTabRawValue = newValue.rawValue
         }
+    }
+
+    private var selectedEntrySort: EntrySortOption {
+        get {
+            EntrySortOption(rawValue: selectedEntrySortRawValue) ?? .entryDate
+        }
+        nonmutating set {
+            selectedEntrySortRawValue = newValue.rawValue
+        }
+    }
+
+    private func dismissAnyKeyboard() {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .endEditing(true)
     }
 
     var body: some View {
@@ -4706,6 +4777,10 @@ struct EntriesView: View {
         .environment(\.editMode, $editMode)
         .onAppear(perform: refreshEntries)
         .onChange(of: selectedPage) { newPage in
+            if newPage != .entries {
+                dismissAnyKeyboard()
+            }
+
             if newPage != .create {
                 refreshEntries()
             }
@@ -4717,6 +4792,9 @@ struct EntriesView: View {
         }
         .onChange(of: authStore.userID) { _ in
             refreshEntries()
+        }
+        .onDisappear {
+            dismissAnyKeyboard()
         }
         .preferredColorScheme(.light)
         .sheet(item: $sampleEntryBeingPreviewed) { entry in
@@ -4812,11 +4890,48 @@ struct EntriesView: View {
     }
 
     private var layoutSwitcherRow: some View {
-        HStack {
+        HStack(spacing: 10) {
             Spacer()
+
+            entrySortMenu
 
             entryLayoutSwitcher
         }
+    }
+
+    private var entrySortMenu: some View {
+        Menu {
+            ForEach(EntrySortOption.allCases) { option in
+                Button {
+                    selectedEntrySort = option
+                } label: {
+                    Label(option.title, systemImage: selectedEntrySort == option ? "checkmark" : option.systemImage)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: selectedEntrySort.systemImage)
+                    .font(.system(size: 12, weight: .bold))
+
+                Text(selectedEntrySort.shortTitle)
+                    .font(.system(size: 12, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(Color.homeMutedText)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.homeBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort entries by \(selectedEntrySort.title)")
     }
 
     private var entryLayoutSwitcher: some View {
@@ -5016,10 +5131,12 @@ struct EntriesView: View {
             }
         } else {
             ForEach(filteredEntryItems) { item in
+                let displayEntry = entryForDisplay(item)
+
                 Button {
                     openEntryItem(item, asCompleted: false)
                 } label: {
-                    EntryListRow(entry: item.entry)
+                    EntryListRow(entry: displayEntry)
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(
@@ -5031,12 +5148,11 @@ struct EntriesView: View {
                 .listRowBackground(Color.homePageBackground)
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
                     Button {
-                        beginRenaming(item.entry)
+                        beginRenaming(displayEntry)
                     } label: {
                         Label("Rename", systemImage: "pencil")
                     }
                     .tint(Color.homeAccent)
-                    .disabled(!item.isLocal)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -5044,7 +5160,6 @@ struct EntriesView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
-                    .disabled(!item.isLocal)
                 }
             }
             .onDelete(perform: deleteEntries)
@@ -5061,14 +5176,17 @@ struct EntriesView: View {
                 } else {
                     LazyVGrid(columns: entryGridColumns, spacing: 14) {
                         ForEach(filteredEntryItems) { item in
+                            let displayEntry = entryForDisplay(item)
+
                             EntryGridPreviewCard(
-                                entry: item.entry,
-                                isEditing: editMode == .active && !showsSampleEntries && item.isLocal,
-                                showsActions: !showsSampleEntries && item.isLocal,
-                                title: entryDisplayTitle(item.entry),
+                                entry: displayEntry,
+                                sortOption: selectedEntrySort,
+                                isEditing: editMode == .active && !showsSampleEntries,
+                                showsActions: !showsSampleEntries,
+                                title: entryDisplayTitle(displayEntry),
                                 onOpen: {
                                     if showsSampleEntries {
-                                        sampleEntryBeingPreviewed = item.entry
+                                        sampleEntryBeingPreviewed = displayEntry
                                     } else {
                                         openEntryItem(item, asCompleted: false)
                                     }
@@ -5079,8 +5197,8 @@ struct EntriesView: View {
                                     }
                                 },
                                 onRename: {
-                                    if !showsSampleEntries && item.isLocal {
-                                        beginRenaming(item.entry)
+                                    if !showsSampleEntries {
+                                        beginRenaming(displayEntry)
                                     }
                                 }
                             )
@@ -5113,9 +5231,12 @@ struct EntriesView: View {
                 } else {
                     LazyVGrid(columns: entryGridColumns, spacing: 14) {
                         ForEach(Array(completedEntryItems.enumerated()), id: \.element.id) { index, item in
+                            let displayEntry = entryForDisplay(item)
+
                             CompletedEntryGridCard(
-                                entry: item.entry,
-                                title: entryDisplayTitle(item.entry),
+                                entry: displayEntry,
+                                title: entryDisplayTitle(displayEntry),
+                                sortOption: selectedEntrySort,
                                 storyboardImage: storyboardImage(for: item, fallbackIndex: index),
                                 onOpen: {
                                     openEntryItem(item, asCompleted: true, storyboardImage: storyboardUIImage(for: item, fallbackIndex: index))
@@ -5244,6 +5365,10 @@ struct EntriesView: View {
     }
 
     private var mergedEntryItems: [EntryDisplayItem] {
+        if authStore.userID != nil {
+            return cloudBackedEntryItems
+        }
+
         let cloudByClientID = Dictionary(grouping: cloudEntries, by: \.clientEntryID)
             .compactMapValues(\.first)
         let localItems = entries.map { entry in
@@ -5256,9 +5381,46 @@ struct EntriesView: View {
 
         return (localItems + cloudOnlyItems)
             .filter { $0.status != JournalEntryStatus.archived.rawValue }
-            .sorted { lhs, rhs in
-                lhs.createdAt > rhs.createdAt
+            .sorted(by: sortEntryItems)
+    }
+
+    private var cloudBackedEntryItems: [EntryDisplayItem] {
+        let localByID = Dictionary(grouping: entries, by: \.id)
+            .compactMapValues(\.first)
+
+        return cloudEntries
+            .map { cloudEntry in
+                if let localEntry = localByID[cloudEntry.clientEntryID] {
+                    return EntryDisplayItem.local(localEntry, cloudEntry: cloudEntry)
+                }
+
+                return EntryDisplayItem.cloud(cloudEntry)
             }
+            .filter { $0.status != JournalEntryStatus.archived.rawValue }
+            .sorted(by: sortEntryItems)
+    }
+
+    private func sortEntryItems(_ lhs: EntryDisplayItem, _ rhs: EntryDisplayItem) -> Bool {
+        let lhsDate = sortDate(for: lhs)
+        let rhsDate = sortDate(for: rhs)
+
+        if lhsDate != rhsDate {
+            return lhsDate > rhsDate
+        }
+
+        return lhs.createdAt > rhs.createdAt
+    }
+
+    private func sortDate(for item: EntryDisplayItem) -> Date {
+        switch selectedEntrySort {
+        case .entryDate:
+            let entry = item.entry
+            return entry.datePrecision == .noDate ? item.createdAt : entry.date
+        case .cloudCreated:
+            return item.createdAt
+        case .updated:
+            return item.updatedAt
+        }
     }
 
     private var draftEntryItems: [EntryDisplayItem] {
@@ -5270,7 +5432,22 @@ struct EntriesView: View {
     }
 
     private var showsSampleEntries: Bool {
-        authStore.userID != nil && entries.isEmpty && cloudEntries.isEmpty && showsPrototypeData && !sampleEntries.isEmpty
+        authStore.userID != nil
+            && entries.isEmpty
+            && cloudEntries.isEmpty
+            && !isLoadingCloudEntries
+            && cloudEntriesErrorMessage == nil
+            && showsPrototypeData
+            && !sampleEntries.isEmpty
+    }
+
+    private func entryForDisplay(_ item: EntryDisplayItem) -> CreateEntryDraft {
+        let entry = item.entry
+        guard entry.thumbnail == nil, let thumbnail = cloudEntryThumbnails[item.id] else {
+            return entry
+        }
+
+        return entry.replacingThumbnail(thumbnail)
     }
 
     private func deleteEntries(at offsets: IndexSet) {
@@ -5479,7 +5656,7 @@ struct EntriesView: View {
     }
 
     private func moveEntries(from source: IndexSet, to destination: Int) {
-        guard selectedEntryTab == .drafts, filteredEntryItems.allSatisfy(\.isLocal) else {
+        guard authStore.userID == nil, selectedEntryTab == .drafts, filteredEntryItems.allSatisfy(\.isLocal) else {
             return
         }
 
@@ -5494,6 +5671,7 @@ struct EntriesView: View {
             sampleEntries = []
             completedStoryboards = []
             cloudEntries = []
+            cloudEntryThumbnails = [:]
             cloudEntriesErrorMessage = nil
             cloudStoryboardClientIDs = []
             failedCloudStoryboardClientIDs = []
@@ -5508,7 +5686,8 @@ struct EntriesView: View {
             sampleEntries = EntriesSampleData.entries()
         }
         backfillEntryThumbnailsIfNeeded()
-        isDraftSaved = !entries.isEmpty
+        isDraftSaved = false
+        isLoadingCloudEntries = true
 
         Task {
             await loadCloudEntriesIfNeeded()
@@ -5529,6 +5708,8 @@ struct EntriesView: View {
 
         do {
             cloudEntries = try await SupabaseEntryRepository().getEntries()
+            backfillCloudEntryThumbnailsIfNeeded()
+            isDraftSaved = draftEntryItems.isEmpty == false
             cloudEntriesErrorMessage = nil
         } catch {
             cloudEntriesErrorMessage = "Could not load cloud entries."
@@ -5606,7 +5787,7 @@ struct EntriesView: View {
             return localDraftID
         }
 
-        let entry = item.entry
+        var entry = entryForDisplay(item)
         let photos: [CreateEntryReferencePhoto]
         if let cloudEntry = item.cloudEntry {
             do {
@@ -5617,6 +5798,10 @@ struct EntriesView: View {
             }
         } else {
             photos = []
+        }
+
+        if entry.thumbnail == nil {
+            entry = entry.replacingThumbnail(renderThumbnail(for: entry, photos: photos.map(\.image)))
         }
 
         return CreateEntryDraftStore.save(
@@ -5645,6 +5830,35 @@ struct EntriesView: View {
             textAlignmentRawValue: entry.textAlignmentRawValue,
             thumbnail: entry.thumbnail
         )
+    }
+
+    private func backfillCloudEntryThumbnailsIfNeeded() {
+        var updatedThumbnails = cloudEntryThumbnails
+        let localIDs = Set(entries.map(\.id))
+
+        for cloudEntry in cloudEntries {
+            let clientEntryID = cloudEntry.clientEntryID
+            guard updatedThumbnails[clientEntryID] == nil else {
+                continue
+            }
+
+            let cachedThumbnail = localIDs.contains(clientEntryID)
+                ? entries.first { $0.id == clientEntryID }?.thumbnail
+                : nil
+            let entry = CreateEntryDraft.fromCloud(cloudEntry, thumbnail: cachedThumbnail)
+            if let cachedThumbnail {
+                updatedThumbnails[clientEntryID] = cachedThumbnail
+                continue
+            }
+
+            if let thumbnail = renderThumbnail(for: entry, photos: []) {
+                updatedThumbnails[clientEntryID] = thumbnail
+            }
+        }
+
+        cloudEntryThumbnails = updatedThumbnails.filter { clientEntryID, _ in
+            cloudEntries.contains { $0.clientEntryID == clientEntryID }
+        }
     }
 
     private func backfillEntryThumbnailsIfNeeded() {
@@ -5686,6 +5900,26 @@ struct EntriesView: View {
         if didCreateThumbnail {
             entries = CreateEntryDraftStore.loadAll()
         }
+    }
+
+    private func renderThumbnail(for entry: CreateEntryDraft, photos: [UIImage]) -> UIImage? {
+        DraftThumbnailRenderer.render(
+            title: entry.title,
+            text: entry.text,
+            richText: entry.richText,
+            photos: photos,
+            fontChoiceRawValue: entry.fontChoiceRawValue,
+            textColorIndex: entry.textColorIndex,
+            textSize: entry.textSize,
+            paperStyleRawValue: entry.paperStyleRawValue,
+            paperColorIndex: entry.paperColorIndex,
+            isBold: entry.isBold,
+            isItalic: entry.isItalic,
+            isUnderlined: entry.isUnderlined,
+            isStrikethrough: entry.isStrikethrough,
+            isHighlighted: entry.isHighlighted,
+            textAlignmentRawValue: entry.textAlignmentRawValue
+        )
     }
 }
 
@@ -5903,6 +6137,13 @@ private struct EntrySamplePreview: View {
                 }
             }
         }
+        .onDisappear {
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?
+                .endEditing(true)
+        }
         .preferredColorScheme(.light)
     }
 
@@ -5972,7 +6213,8 @@ private struct EntryListRow: View {
     }
 
     private var entryDateText: String {
-        entry.createdAt.formatted(date: .abbreviated, time: .omitted)
+        let displayDate = entry.datePrecision == .noDate ? entry.createdAt : entry.date
+        return displayDate.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
@@ -5981,8 +6223,36 @@ private func entryDisplayTitle(_ entry: CreateEntryDraft) -> String {
     return trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle
 }
 
+private func entryPreviewDateText(_ entry: CreateEntryDraft, sortOption: EntrySortOption) -> String {
+    switch sortOption {
+    case .entryDate:
+        let displayDate = entry.datePrecision == .noDate ? entry.createdAt : entry.date
+        return displayDate.formatted(date: .abbreviated, time: .omitted)
+    case .cloudCreated:
+        return entry.createdAt.formatted(date: .abbreviated, time: .omitted)
+    case .updated:
+        return entry.updatedAt.formatted(date: .abbreviated, time: .omitted)
+    }
+}
+
+private struct EntryPreviewDateBlock: View {
+    let entry: CreateEntryDraft
+    let sortOption: EntrySortOption
+
+    var body: some View {
+        Text(entryPreviewDateText(entry, sortOption: sortOption))
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color.homeMutedText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
 private struct EntryGridPreviewCard: View {
     let entry: CreateEntryDraft
+    let sortOption: EntrySortOption
     let isEditing: Bool
     let showsActions: Bool
     let title: String
@@ -5991,32 +6261,36 @@ private struct EntryGridPreviewCard: View {
     var onRename: (() -> Void)?
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            previewImage
-                .aspectRatio(260.0 / 340.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
-                .overlay(alignment: .top) {
-                    StoryPhotoTape(width: 48, height: 14, rotation: -2)
-                        .offset(y: -7)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                previewImage
+                    .aspectRatio(260.0 / 340.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+                    .overlay(alignment: .top) {
+                        StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                            .offset(y: -7)
+                    }
 
-            if isEditing {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
-                        .background(Color.red.opacity(0.92), in: Circle())
-                        .shadow(color: Color.storyInk.opacity(0.16), radius: 5, y: 2)
+                if isEditing {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.red.opacity(0.92), in: Circle())
+                            .shadow(color: Color.storyInk.opacity(0.16), radius: 5, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .accessibilityLabel("Delete \(title)")
                 }
-                .buttonStyle(.plain)
-                .padding(8)
-                .accessibilityLabel("Delete \(title)")
             }
+
+            EntryPreviewDateBlock(entry: entry, sortOption: sortOption)
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -6040,7 +6314,7 @@ private struct EntryGridPreviewCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityLabel("\(title), \(entryPreviewDateText(entry, sortOption: sortOption))")
         .accessibilityAddTraits(.isButton)
     }
 
@@ -6076,6 +6350,7 @@ private enum CompletedStoryboardImage {
 private struct CompletedEntryGridCard: View {
     let entry: CreateEntryDraft
     let title: String
+    let sortOption: EntrySortOption
     let storyboardImage: CompletedStoryboardImage
     let onOpen: () -> Void
     let accessibilityLabel: String
@@ -6083,43 +6358,49 @@ private struct CompletedEntryGridCard: View {
     init(
         entry: CreateEntryDraft,
         title: String,
+        sortOption: EntrySortOption,
         storyboardImage: CompletedStoryboardImage,
         onOpen: @escaping () -> Void
     ) {
         self.entry = entry
         self.title = title
+        self.sortOption = sortOption
         self.storyboardImage = storyboardImage
         self.onOpen = onOpen
         accessibilityLabel = "Completed \(title)"
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .top) {
-                entryPreviewImage
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(alignment: .top) {
-                        StoryPhotoTape(width: 48, height: 14, rotation: -2)
-                            .offset(y: -7)
-                    }
-                    .zIndex(0)
+        VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { proxy in
+                ZStack(alignment: .top) {
+                    entryPreviewImage
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(alignment: .top) {
+                            StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                                .offset(y: -7)
+                        }
+                        .zIndex(0)
 
-                storyboardOverlay(in: proxy.size)
-                    .zIndex(1)
+                    storyboardOverlay(in: proxy.size)
+                        .zIndex(1)
+                }
             }
+                .aspectRatio(260.0 / 340.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
+
+            EntryPreviewDateBlock(entry: entry, sortOption: sortOption)
         }
-            .aspectRatio(260.0 / 340.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .shadow(color: Color.storyInk.opacity(0.09), radius: 9, y: 5)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onOpen()
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityLabel)
-            .accessibilityAddTraits(.isButton)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onOpen()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(accessibilityLabel), \(entryPreviewDateText(entry, sortOption: sortOption))")
+        .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder
@@ -6276,6 +6557,49 @@ private enum EntriesTab: String, CaseIterable, Identifiable {
             return "Drafts"
         case .completed:
             return "Completed"
+        }
+    }
+}
+
+private enum EntrySortOption: String, CaseIterable, Identifiable {
+    case entryDate
+    case cloudCreated
+    case updated
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .entryDate:
+            return "Story date"
+        case .cloudCreated:
+            return "Created"
+        case .updated:
+            return "Updated"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .entryDate:
+            return "Story date"
+        case .cloudCreated:
+            return "Created"
+        case .updated:
+            return "Updated"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .entryDate:
+            return "calendar"
+        case .cloudCreated:
+            return "plus.circle"
+        case .updated:
+            return "clock.arrow.circlepath"
         }
     }
 }
@@ -7107,6 +7431,9 @@ private struct NewStorySheet: View {
             )
         }
         .background(newStoryBackground)
+        .onDisappear {
+            dismissKeyboard()
+        }
         .preferredColorScheme(.light)
     }
 

@@ -19,17 +19,26 @@ enum EntryCloudSaveState: Equatable {
         case .saving:
             return "Saving..."
         case .saved:
-            return "Saved to Storytopia cloud."
+            return "Saved."
         case .savedLocally:
-            return "Saved locally. Sign in to save to Storytopia cloud."
+            return "Saved locally."
         case .uploadingPhotos:
             return "Uploading photos..."
         case .photosUploaded:
-            return "Photos uploaded."
+            return "Saved."
         case .failed(let message):
             return message
         case .photoUploadFailed(let message):
             return message
+        }
+    }
+
+    var shouldDismissAutomatically: Bool {
+        switch self {
+        case .saved, .savedLocally, .photosUploaded:
+            return true
+        case .idle, .saving, .uploadingPhotos, .failed, .photoUploadFailed:
+            return false
         }
     }
 }

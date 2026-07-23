@@ -18,6 +18,7 @@ final class SupabaseAuthStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let client: SupabaseClient
+    private let skipsSessionRefresh: Bool
     private var authStateTask: Task<Void, Never>?
 
     var userID: UUID? {
@@ -32,10 +33,24 @@ final class SupabaseAuthStore: ObservableObject {
         currentUser?.email
     }
 
-    init(client: SupabaseClient = SupabaseService.shared) {
+    init(
+        client: SupabaseClient = SupabaseService.shared,
+        startsListening: Bool = true,
+        validatesConfiguration: Bool = true,
+        skipsSessionRefresh: Bool = false
+    ) {
         self.client = client
-        validateConfiguration()
-        startListening()
+        self.skipsSessionRefresh = skipsSessionRefresh
+
+        if validatesConfiguration {
+            validateConfiguration()
+        } else {
+            status = .signedOut
+        }
+
+        if startsListening {
+            startListening()
+        }
     }
 
     deinit {
@@ -76,6 +91,10 @@ final class SupabaseAuthStore: ObservableObject {
     }
 
     func refreshCurrentUser() async {
+        if skipsSessionRefresh {
+            return
+        }
+
         if case .misconfigured = status {
             return
         }
@@ -131,6 +150,18 @@ final class SupabaseAuthStore: ObservableObject {
         }
 
         return "Authentication is unavailable right now. Please try again."
+    }
+
+    static var preview: SupabaseAuthStore {
+        SupabaseAuthStore(
+            client: SupabaseClient(
+                supabaseURL: URL(string: "https://example.supabase.co")!,
+                supabaseKey: "preview-supabase-anon-key"
+            ),
+            startsListening: false,
+            validatesConfiguration: false,
+            skipsSessionRefresh: true
+        )
     }
 }
 

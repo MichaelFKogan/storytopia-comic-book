@@ -1540,20 +1540,23 @@ struct LinedTextEditor: UIViewRepresentable {
             }
         }
 
-        if focusRequestID != coordinator.handledFocusRequestID {
-            coordinator.handledFocusRequestID = focusRequestID
+        var didHandleBlurRequest = false
+        if blurRequestID != coordinator.handledBlurRequestID {
+            coordinator.handledBlurRequestID = blurRequestID
+            didHandleBlurRequest = true
+            coordinator.isProgrammaticallyEndingEditing = true
             DispatchQueue.main.async {
-                textView.becomeFirstResponder()
+                textView.resignFirstResponder()
+                coordinator.isProgrammaticallyEndingEditing = false
             }
         }
 
-        if blurRequestID != coordinator.handledBlurRequestID {
-            coordinator.handledBlurRequestID = blurRequestID
-            coordinator.isProgrammaticallyEndingEditing = true
-            DispatchQueue.main.async {
-                textView.releaseKeyboardChrome()
-                textView.resignFirstResponder()
-                coordinator.isProgrammaticallyEndingEditing = false
+        if focusRequestID != coordinator.handledFocusRequestID {
+            coordinator.handledFocusRequestID = focusRequestID
+            if !didHandleBlurRequest {
+                DispatchQueue.main.async {
+                    textView.becomeFirstResponder()
+                }
             }
         }
 
@@ -1565,6 +1568,13 @@ struct LinedTextEditor: UIViewRepresentable {
                 coordinator.onSelectionStateChange?(textView.currentSelectionState())
             }
         }
+    }
+
+    static func dismantleUIView(_ uiView: LinedTextView, coordinator: Coordinator) {
+        uiView.resignFirstResponder()
+        uiView.releaseKeyboardChrome()
+        uiView.delegate = nil
+        uiView.onEditingEnded = nil
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: LinedTextView, context: Context) -> CGSize? {
