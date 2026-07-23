@@ -1719,11 +1719,25 @@ struct CreateEntryView: View {
                 var storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboard, into: generatedStoryboards)
                 GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
 
-                let cloudStoryboard: EntryStoryboard
+                let storyboardForCompletion: GeneratedStoryboard
                 do {
-                    cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                    let cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                    storyboardForCompletion = GeneratedStoryboard(
+                        id: storyboard.id,
+                        clientEntryID: storyboard.clientEntryID,
+                        image: storyboard.image,
+                        promptText: storyboard.promptText,
+                        artStyle: storyboard.artStyle,
+                        panelLayout: storyboard.panelLayout,
+                        sourcePhotoCount: storyboard.sourcePhotoCount,
+                        createdAt: storyboard.createdAt,
+                        imageFileName: storyboard.imageFileName,
+                        storagePath: cloudStoryboard.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                        isPrimary: true
+                    )
                 } catch {
-                    let failedStoryboard = GeneratedStoryboard(
+                    storyboardForCompletion = GeneratedStoryboard(
                         id: storyboard.id,
                         clientEntryID: storyboard.clientEntryID,
                         image: storyboard.image,
@@ -1737,26 +1751,9 @@ struct CreateEntryView: View {
                         cloudSyncState: StoryboardCloudSyncState.failed.rawValue,
                         isPrimary: storyboard.isPrimary
                     )
-                    storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(failedStoryboard, into: storyboardsAfterLocalSave)
-                    GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
-                    generatedStoryboards = storyboardsAfterLocalSave
-                    throw StoryboardGenerationError.openAIMessage("Storyboard saved locally. Cloud storyboard sync failed, so this entry was not completed.")
                 }
-
-                let syncedStoryboard = GeneratedStoryboard(
-                    id: storyboard.id,
-                    clientEntryID: storyboard.clientEntryID,
-                    image: storyboard.image,
-                    promptText: storyboard.promptText,
-                    artStyle: storyboard.artStyle,
-                    panelLayout: storyboard.panelLayout,
-                    sourcePhotoCount: storyboard.sourcePhotoCount,
-                    createdAt: storyboard.createdAt,
-                    imageFileName: storyboard.imageFileName,
-                    storagePath: cloudStoryboard.storagePath,
-                    cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
-                    isPrimary: true
-                )
+                storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboardForCompletion, into: storyboardsAfterLocalSave)
+                GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
 
                 print("[Storytopia] Entry completion started.")
                 print("[Storytopia] Marking entry completed.")
@@ -1806,7 +1803,7 @@ struct CreateEntryView: View {
                             for: completionResult.localDraftID
                         )
                     }
-                    generatedStoryboards = GeneratedStoryboardStore.merging(syncedStoryboard, into: storyboardsAfterLocalSave)
+                    generatedStoryboards = storyboardsAfterLocalSave
                     GeneratedStoryboardStore.save(generatedStoryboards)
                     currentEntryStatus = .completed
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty

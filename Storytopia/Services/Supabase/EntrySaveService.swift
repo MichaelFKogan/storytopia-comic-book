@@ -131,6 +131,14 @@ private struct EntryStoryboardPrimaryUpdate: Encodable, Sendable {
     }
 }
 
+private struct CompletedEntryReference: Decodable, Sendable {
+    let clientEntryID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case clientEntryID = "client_entry_id"
+    }
+}
+
 enum SupabaseStoryboardError: LocalizedError {
     case invalidImage
     case notAuthenticated
@@ -165,7 +173,11 @@ struct SupabaseStoryboardService {
         }
 
         let userID = try await authenticatedUserID()
-        let storagePath = storyboard.storagePath ?? "\(userID.uuidString)/\(clientEntryID.uuidString)/\(storyboard.id.uuidString).jpg"
+        let storagePath = storyboard.storagePath ?? [
+            userID.uuidString.lowercased(),
+            clientEntryID.uuidString.lowercased(),
+            "\(storyboard.id.uuidString.lowercased()).jpg"
+        ].joined(separator: "/")
 
         guard let imageData = storyboard.image.storytopiaPreparedJPEGData(compressionQuality: 0.9) else {
             throw SupabaseStoryboardError.invalidImage
@@ -216,10 +228,10 @@ struct SupabaseStoryboardService {
             print("[Storytopia] Storyboard metadata insert succeeded.")
             return row
         } catch let error as SupabaseStoryboardError {
-            print("[Storytopia] Storyboard cloud sync failed.")
+            print("[Storytopia] Storyboard cloud sync failed: \(error.localizedDescription)")
             throw error
         } catch {
-            print("[Storytopia] Storyboard cloud sync failed.")
+            print("[Storytopia] Storyboard cloud sync failed: \(error.localizedDescription)")
             throw SupabaseStoryboardError.syncFailed
         }
     }
@@ -235,6 +247,72 @@ struct SupabaseStoryboardService {
         } catch {
             throw SupabaseStoryboardError.syncFailed
         }
+    }
+
+    func loadCompletedJournalStoryboards(limit: Int = 9) async throws -> [EntryStoryboard] {
+        do {
+            let completedEntries: [CompletedEntryReference] = try await client
+                .from("entries")
+                .select("client_entry_id")
+                .eq("status", value: JournalEntryStatus.completed.rawValue)
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+
+            let completedClientEntryIDs = Set(completedEntries.map(\.clientEntryID))
+
+            guard !completedClientEntryIDs.isEmpty else {
+                return []
+            }
+
+            let rows: [EntryStoryboard] = try await client
+                .from("entry_storyboards")
+                .select()
+                .eq("is_primary", value: true)
+                .eq("generation_status", value: "completed")
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+
+            return Array(
+                rows
+                    .filter { completedClientEntryIDs.contains($0.clientEntryID) }
+                    .prefix(limit)
+            )
+        } catch {
+            print("[Storytopia] Completed profile storyboards metadata load failed: \(error.localizedDescription)")
+            throw SupabaseStoryboardError.syncFailed
+        }
+    }
+
+    func loadCompletedJournalStoryboardImages(limit: Int = 9) async throws -> [GeneratedStoryboard] {
+        let rows = try await loadCompletedJournalStoryboards(limit: limit)
+        var storyboards: [GeneratedStoryboard] = []
+
+        for row in rows {
+            do {
+                let image = try await downloadStoryboardImage(storagePath: row.storagePath)
+                storyboards.append(
+                    GeneratedStoryboard(
+                        id: row.id,
+                        clientEntryID: row.clientEntryID,
+                        image: image,
+                        promptText: row.prompt ?? "",
+                        artStyle: row.artStyle ?? "Anime",
+                        panelLayout: row.panelLayout,
+                        sourcePhotoCount: 0,
+                        createdAt: row.createdAt,
+                        storagePath: row.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                        isPrimary: row.isPrimary
+                    )
+                )
+            } catch {
+                print("[Storytopia] Profile storyboard image download skipped: \(row.id) \(error.localizedDescription)")
+            }
+        }
+
+        return storyboards
     }
 
     func downloadStoryboardImage(storagePath: String) async throws -> UIImage {

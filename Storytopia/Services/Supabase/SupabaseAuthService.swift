@@ -28,6 +28,10 @@ final class SupabaseAuthStore: ObservableObject {
         currentUser?.email ?? "Signed in"
     }
 
+    var email: String? {
+        currentUser?.email
+    }
+
     init(client: SupabaseClient = SupabaseService.shared) {
         self.client = client
         validateConfiguration()
@@ -63,6 +67,7 @@ final class SupabaseAuthStore: ObservableObject {
 
         do {
             try await client.auth.signOut()
+            StorytopiaLocalAccountScope.setActiveUserID(nil)
             currentUser = nil
             status = .signedOut
         } catch {
@@ -77,9 +82,11 @@ final class SupabaseAuthStore: ObservableObject {
 
         do {
             let session = try await client.auth.session
+            StorytopiaLocalAccountScope.setActiveUserID(session.user.id)
             currentUser = session.user
             status = .signedIn
         } catch {
+            StorytopiaLocalAccountScope.setActiveUserID(nil)
             currentUser = nil
             status = .signedOut
         }
@@ -109,6 +116,7 @@ final class SupabaseAuthStore: ObservableObject {
                         return
                     }
 
+                    StorytopiaLocalAccountScope.setActiveUserID(session?.user.id)
                     self.currentUser = session?.user
                     self.status = session == nil ? .signedOut : .signedIn
                 }

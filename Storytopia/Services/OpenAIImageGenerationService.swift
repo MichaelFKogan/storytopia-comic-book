@@ -59,7 +59,7 @@ struct OpenAIImageGenerationService {
         body.appendMultipartField(name: "model", value: OpenAITestConfig.imageModel, boundary: boundary)
         body.appendMultipartField(name: "prompt", value: prompt, boundary: boundary)
         body.appendMultipartField(name: "size", value: "1024x1536", boundary: boundary)
-        body.appendMultipartField(name: "quality", value: "medium", boundary: boundary)
+        body.appendMultipartField(name: "quality", value: "low", boundary: boundary)
 
         for (index, image) in images.prefix(5).enumerated() {
             guard let imageData = image.storytopiaPreparedJPEGData(maxDimension: 1536, compressionQuality: 0.76) else {

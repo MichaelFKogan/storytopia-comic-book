@@ -2,6 +2,8 @@ import SwiftUI
 import UIKit
 
 struct ProfileView: View {
+    @EnvironmentObject private var authStore: SupabaseAuthStore
+
     @Binding var selectedPage: StoryPage
     @Binding var generatedStoryboards: [GeneratedStoryboard]
 
@@ -10,7 +12,8 @@ struct ProfileView: View {
     @State private var selectedStoryboardIDs: Set<UUID> = []
     @State private var storyboardsToShare: [GeneratedStoryboard] = []
     @State private var isShowingShareSheet = false
-    @State private var isShowingDeleteConfirmation = false
+    @State private var isLoadingProfileStoryboards = false
+    @State private var profileStoryboardErrorMessage: String?
 
     private let storyboardColumns = [
         GridItem(.flexible(), spacing: 1),
@@ -68,26 +71,15 @@ struct ProfileView: View {
             ActivityView(activityItems: storyboardsToShare.map(\.image))
                 .presentationDetents([.medium, .large])
         }
-        .confirmationDialog(
-            deleteConfirmationTitle,
-            isPresented: $isShowingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete \(selectedStoryboardIDs.count) \(storyboardNoun)", role: .destructive) {
-                deleteSelectedStoryboards()
-            }
-
-            Button("Cancel", role: .cancel) {
-            }
-        } message: {
-            Text("This action cannot be undone.")
-        }
         .onChange(of: generatedStoryboards.map(\.id)) { availableIDs in
             selectedStoryboardIDs.formIntersection(Set(availableIDs))
 
             if generatedStoryboards.isEmpty {
                 endSelection()
             }
+        }
+        .task(id: authStore.userID) {
+            await loadProfileStoryboards()
         }
     }
 
@@ -175,7 +167,7 @@ struct ProfileView: View {
 
                 Spacer()
 
-                if !generatedStoryboards.isEmpty {
+                if !generatedStoryboards.isEmpty && !isLoadingProfileStoryboards {
                     Button {
                         withAnimation(.snappy(duration: 0.24)) {
                             if isSelecting {
@@ -195,7 +187,19 @@ struct ProfileView: View {
                 }
             }
 
-            if generatedStoryboards.isEmpty {
+            if isLoadingProfileStoryboards {
+                LazyVGrid(columns: storyboardColumns, spacing: 1) {
+                    ForEach(0..<9, id: \.self) { _ in
+                        LoadingStoryboardCard()
+                    }
+                }
+            } else if let profileStoryboardErrorMessage {
+                ProfileStoryboardErrorState(message: profileStoryboardErrorMessage) {
+                    Task {
+                        await loadProfileStoryboards()
+                    }
+                }
+            } else if generatedStoryboards.isEmpty {
                 LazyVGrid(columns: storyboardColumns, spacing: 1) {
                     ForEach(0..<9, id: \.self) { _ in
                         StoryboardPlaceholderCard()
@@ -203,7 +207,7 @@ struct ProfileView: View {
                 }
             } else {
                 LazyVGrid(columns: storyboardColumns, spacing: 1) {
-                    ForEach(Array(generatedStoryboards.enumerated()), id: \.element.id) { index, storyboard in
+                    ForEach(Array(generatedStoryboards.prefix(9).enumerated()), id: \.element.id) { index, storyboard in
                         Button {
                             if isSelecting {
                                 toggleSelection(for: storyboard)
@@ -240,14 +244,6 @@ struct ProfileView: View {
         !generatedStoryboards.isEmpty && selectedStoryboardIDs.count == generatedStoryboards.count
     }
 
-    private var storyboardNoun: String {
-        selectedStoryboardIDs.count == 1 ? "Storyboard" : "Storyboards"
-    }
-
-    private var deleteConfirmationTitle: String {
-        "Delete \(selectedStoryboardIDs.count) \(storyboardNoun)?"
-    }
-
     private var selectionActionBar: some View {
         HStack(spacing: 10) {
             Button {
@@ -276,14 +272,6 @@ struct ProfileView: View {
             }
             .selectionActionStyle()
             .disabled(selectedStoryboardIDs.isEmpty)
-
-            Button(role: .destructive) {
-                isShowingDeleteConfirmation = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .selectionActionStyle(color: .red)
-            .disabled(selectedStoryboardIDs.isEmpty)
         }
         .font(.system(size: 13, weight: .semibold))
         .padding(.horizontal, 16)
@@ -306,14 +294,28 @@ struct ProfileView: View {
         }
     }
 
-    private func deleteSelectedStoryboards() {
-        let storyboards = selectedStoryboards
-        let deletedIDs = selectedStoryboardIDs
+    @MainActor
+    private func loadProfileStoryboards() async {
+        guard authStore.userID != nil else {
+            generatedStoryboards = []
+            profileStoryboardErrorMessage = nil
+            isLoadingProfileStoryboards = false
+            return
+        }
 
-        GeneratedStoryboardStore.delete(storyboards)
-        generatedStoryboards.removeAll { deletedIDs.contains($0.id) }
-        GeneratedStoryboardStore.save(generatedStoryboards)
-        endSelection()
+        isLoadingProfileStoryboards = true
+        profileStoryboardErrorMessage = nil
+        defer { isLoadingProfileStoryboards = false }
+
+        do {
+            let service = SupabaseStoryboardService()
+            generatedStoryboards = try await service.loadCompletedJournalStoryboardImages(limit: 9)
+            profileStoryboardErrorMessage = nil
+        } catch {
+            generatedStoryboards = []
+            print("[Storytopia] Profile storyboard grid load failed: \(error.localizedDescription)")
+            profileStoryboardErrorMessage = "Could not load your completed AI storyboards from Storytopia cloud."
+        }
     }
 
     private func endSelection() {
@@ -373,6 +375,56 @@ struct StoryboardPlaceholderCard: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(0.72, contentMode: .fit)
+    }
+}
+
+struct LoadingStoryboardCard: View {
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.white)
+                .overlay(
+                    Rectangle()
+                        .stroke(Color.homeBorder, lineWidth: 1)
+                )
+
+            ProgressView()
+                .tint(Color.homeAccent)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(0.72, contentMode: .fit)
+    }
+}
+
+struct ProfileStoryboardErrorState: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Color.homeAccent.opacity(0.7))
+
+            Text(message)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.homeMutedText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Try Again", action: retry)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.homeAccent)
+                .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .padding(.horizontal, 16)
+        .background(Color.white)
+        .overlay(
+            Rectangle()
+                .stroke(Color.homeBorder, lineWidth: 1)
+        )
     }
 }
 

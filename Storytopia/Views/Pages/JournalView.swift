@@ -5270,7 +5270,7 @@ struct EntriesView: View {
     }
 
     private var showsSampleEntries: Bool {
-        entries.isEmpty && cloudEntries.isEmpty && showsPrototypeData && !sampleEntries.isEmpty
+        authStore.userID != nil && entries.isEmpty && cloudEntries.isEmpty && showsPrototypeData && !sampleEntries.isEmpty
     }
 
     private func deleteEntries(at offsets: IndexSet) {
@@ -5489,6 +5489,19 @@ struct EntriesView: View {
 
     private func refreshEntries() {
         print("[Storytopia] Entries list refresh requested.")
+        guard authStore.userID != nil else {
+            entries = []
+            sampleEntries = []
+            completedStoryboards = []
+            cloudEntries = []
+            cloudEntriesErrorMessage = nil
+            cloudStoryboardClientIDs = []
+            failedCloudStoryboardClientIDs = []
+            isLoadingCloudEntries = false
+            isDraftSaved = false
+            return
+        }
+
         entries = CreateEntryDraftStore.loadAll()
         completedStoryboards = GeneratedStoryboardStore.load()
         if entries.isEmpty && showsPrototypeData && sampleEntries.isEmpty {

@@ -2,15 +2,22 @@ import SwiftUI
 
 struct SettingsView: View {
     @Binding var selectedPage: StoryPage
+    @EnvironmentObject private var authStore: SupabaseAuthStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedArtStyle = "Anime"
+    @State private var isSigningIn = false
+    @State private var isSigningOut = false
 
     private let artStyles = ["Anime", "Graphic Novel", "Pixel Art", "Manga", "Cozy Storybook", "Pop Art", "Colored Journal"]
 
     var body: some View {
         List {
             Section("Account") {
+                accountStatusRow
+
+                accountActionRow
+
                 SettingsRow(
                     systemName: "person.circle",
                     title: "Profile",
@@ -110,6 +117,120 @@ struct SettingsView: View {
         .toolbar(.visible, for: .navigationBar)
         .preferredColorScheme(.light)
         .enableInteractivePopGesture()
+        .task {
+            await authStore.refreshCurrentUser()
+        }
+    }
+
+    private var accountStatusRow: some View {
+        SettingsRowContent(
+            systemName: accountStatusIconName,
+            title: accountStatusTitle,
+            subtitle: accountStatusSubtitle,
+            showsChevron: false
+        )
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var accountActionRow: some View {
+        switch authStore.status {
+        case .loading:
+            HStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text("Checking session")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.storyInk)
+            }
+            .padding(.vertical, 8)
+        case .misconfigured:
+            EmptyView()
+        case .signedOut:
+            Button {
+                Task {
+                    isSigningIn = true
+                    await authStore.signInWithGoogle()
+                    isSigningIn = false
+                }
+            } label: {
+                SettingsRowContent(
+                    systemName: "person.badge.key",
+                    title: isSigningIn ? "Signing In" : "Sign In with Google",
+                    subtitle: "Use one account across your devices",
+                    showsChevron: false
+                )
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSigningIn)
+        case .signedIn:
+            Button(role: .destructive) {
+                Task {
+                    isSigningOut = true
+                    await authStore.signOut()
+                    isSigningOut = false
+                }
+            } label: {
+                SettingsRowContent(
+                    systemName: "rectangle.portrait.and.arrow.right",
+                    title: isSigningOut ? "Signing Out" : "Sign Out",
+                    subtitle: "Return this device to signed-out mode",
+                    showsChevron: false,
+                    iconColor: .red
+                )
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSigningOut)
+        }
+
+        if let errorMessage = authStore.errorMessage {
+            Text(errorMessage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var accountStatusIconName: String {
+        switch authStore.status {
+        case .loading:
+            return "person.crop.circle.badge.clock"
+        case .misconfigured:
+            return "exclamationmark.triangle"
+        case .signedOut:
+            return "person.crop.circle.badge.xmark"
+        case .signedIn:
+            return "checkmark.seal"
+        }
+    }
+
+    private var accountStatusTitle: String {
+        switch authStore.status {
+        case .loading:
+            return "Checking Account"
+        case .misconfigured:
+            return "Supabase Not Configured"
+        case .signedOut:
+            return "Signed Out"
+        case .signedIn:
+            return "Signed In"
+        }
+    }
+
+    private var accountStatusSubtitle: String {
+        switch authStore.status {
+        case .loading:
+            return "Looking for a saved session"
+        case .misconfigured(let message):
+            return message
+        case .signedOut:
+            return "Local entries stay on this device"
+        case .signedIn:
+            return authStore.email ?? authStore.displayName
+        }
     }
 }
 
@@ -161,14 +282,15 @@ private struct SettingsRowContent: View {
     let title: String
     let subtitle: String
     var showsChevron = true
+    var iconColor = Color.homeAccent
 
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: systemName)
                 .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(Color.homeAccent)
+                .foregroundStyle(iconColor)
                 .frame(width: 38, height: 38)
-                .background(Color.homeAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(iconColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)

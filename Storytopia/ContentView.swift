@@ -9,6 +9,8 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @EnvironmentObject private var authStore: SupabaseAuthStore
+
     @State private var selectedPage: StoryPage = .home
     @State private var pageBehindCreate: StoryPage = .home
     @State private var entryText: String
@@ -45,6 +47,13 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.32), value: selectedPage)
+        .task {
+            await authStore.refreshCurrentUser()
+            reloadScopedLocalState()
+        }
+        .onChange(of: authStore.userID) { _ in
+            reloadScopedLocalState()
+        }
     }
 
     private var pageSelection: Binding<StoryPage> {
@@ -153,6 +162,26 @@ struct ContentView: View {
                 completedEntryOpenedStoryboardImage = nil
             }
         )
+    }
+
+    private func reloadScopedLocalState() {
+        guard authStore.userID != nil else {
+            isDraftSaved = false
+            generatedStoryboards = []
+            activeDraftID = nil
+            completedEntryOpenedStoryboardImage = nil
+            isOpeningEntryFromEntries = false
+            isOpeningCompletedEntryFromEntries = false
+            return
+        }
+
+        let drafts = CreateEntryDraftStore.loadAll()
+        isDraftSaved = !drafts.isEmpty
+        generatedStoryboards = GeneratedStoryboardStore.load()
+        activeDraftID = nil
+        completedEntryOpenedStoryboardImage = nil
+        isOpeningEntryFromEntries = false
+        isOpeningCompletedEntryFromEntries = false
     }
 }
 
