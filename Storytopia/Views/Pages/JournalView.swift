@@ -4604,6 +4604,25 @@ private enum EntryDisplayItem: Identifiable {
     }
 }
 
+private struct EntryOpeningPreview: Identifiable {
+    let entry: CreateEntryDraft
+    let sortOption: EntrySortOption
+    let isCompleted: Bool
+    let storyboardImage: UIImage?
+
+    var id: UUID {
+        entry.id
+    }
+
+    var title: String {
+        entryDisplayTitle(entry)
+    }
+
+    var dateText: String {
+        entryPreviewDateText(entry, sortOption: sortOption)
+    }
+}
+
 private extension CreateEntryDraft {
     static func fromCloud(_ entry: JournalEntry, thumbnail: UIImage? = nil) -> CreateEntryDraft {
         CreateEntryDraft(
@@ -4701,6 +4720,8 @@ struct EntriesView: View {
     @State private var cloudEntryThumbnails: [UUID: UIImage] = [:]
     @State private var isLoadingCloudEntries = false
     @State private var cloudEntriesErrorMessage: String?
+    @State private var openingEntryPreview: EntryOpeningPreview?
+    @State private var isFinishingEntryOpening = false
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
     @AppStorage("StorytopiaSelectedEntriesTab") private var selectedEntryTabRawValue = EntriesTab.drafts.rawValue
     @AppStorage("StorytopiaSelectedEntrySort") private var selectedEntrySortRawValue = EntrySortOption.entryDate.rawValue
@@ -4769,6 +4790,15 @@ struct EntriesView: View {
             BottomNavigationBar(selectedPage: $selectedPage)
 
             bottomPrototypeNotice
+
+            if let openingEntryPreview {
+                EntryOpeningOverlay(
+                    preview: openingEntryPreview,
+                    isFinishing: isFinishingEntryOpening
+                )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .center)))
+                    .zIndex(4)
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -4779,6 +4809,8 @@ struct EntriesView: View {
         .onChange(of: selectedPage) { newPage in
             if newPage != .entries {
                 dismissAnyKeyboard()
+                openingEntryPreview = nil
+                isFinishingEntryOpening = false
             }
 
             if newPage != .create {
@@ -5054,19 +5086,7 @@ struct EntriesView: View {
 
     @ViewBuilder
     private var cloudEntriesNotice: some View {
-        if isLoadingCloudEntries {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-
-                Text("Loading cloud entries...")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.homeMutedText)
-
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-        } else if let cloudEntriesErrorMessage {
+        if let cloudEntriesErrorMessage {
             HStack(spacing: 8) {
                 Image(systemName: "icloud.slash")
                     .font(.system(size: 12, weight: .bold))
@@ -5093,7 +5113,9 @@ struct EntriesView: View {
     private var entryList: some View {
         List {
             Section {
-                if filteredEntryItems.isEmpty {
+                if showsCloudLoadingPlaceholder {
+                    entryLoadingRows
+                } else if filteredEntryItems.isEmpty {
                     emptyEntriesState
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowBackground(Color.clear)
@@ -5137,8 +5159,10 @@ struct EntriesView: View {
                     openEntryItem(item, asCompleted: false)
                 } label: {
                     EntryListRow(entry: displayEntry)
+                        .opacity(openingEntryPreview?.id == item.id ? 0.58 : 1)
                 }
                 .buttonStyle(.plain)
+                .disabled(openingEntryPreview != nil)
                 .listRowInsets(EdgeInsets(
                     top: 0,
                     leading: JournalChapterListMetrics.horizontalInset,
@@ -5167,10 +5191,26 @@ struct EntriesView: View {
         }
     }
 
+    @ViewBuilder
+    private var entryLoadingRows: some View {
+        ForEach(0..<4, id: \.self) { _ in
+            EntryListLoadingRow()
+                .listRowInsets(EdgeInsets(
+                    top: 0,
+                    leading: JournalChapterListMetrics.horizontalInset,
+                    bottom: 0,
+                    trailing: JournalChapterListMetrics.trailingInset
+                ))
+                .listRowBackground(Color.homePageBackground)
+        }
+    }
+
     private var entryGrid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if filteredEntryItems.isEmpty {
+                if showsCloudLoadingPlaceholder {
+                    entryGridLoadingPlaceholders
+                } else if filteredEntryItems.isEmpty {
                     emptyEntriesState
                         .padding(.horizontal, 16)
                 } else {
@@ -5184,6 +5224,7 @@ struct EntriesView: View {
                                 isEditing: editMode == .active && !showsSampleEntries,
                                 showsActions: !showsSampleEntries,
                                 title: entryDisplayTitle(displayEntry),
+                                isOpening: openingEntryPreview?.id == item.id,
                                 onOpen: {
                                     if showsSampleEntries {
                                         sampleEntryBeingPreviewed = displayEntry
@@ -5225,7 +5266,9 @@ struct EntriesView: View {
     private var completedEntryGrid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if completedEntryItems.isEmpty {
+                if showsCloudLoadingPlaceholder {
+                    entryGridLoadingPlaceholders
+                } else if completedEntryItems.isEmpty {
                     emptyEntriesState
                         .padding(.horizontal, 16)
                 } else {
@@ -5238,6 +5281,7 @@ struct EntriesView: View {
                                 title: entryDisplayTitle(displayEntry),
                                 sortOption: selectedEntrySort,
                                 storyboardImage: storyboardImage(for: item, fallbackIndex: index),
+                                isOpening: openingEntryPreview?.id == item.id,
                                 onOpen: {
                                     openEntryItem(item, asCompleted: true, storyboardImage: storyboardUIImage(for: item, fallbackIndex: index))
                                 }
@@ -5253,6 +5297,15 @@ struct EntriesView: View {
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 104)
         }
+    }
+
+    private var entryGridLoadingPlaceholders: some View {
+        LazyVGrid(columns: entryGridColumns, spacing: 14) {
+            ForEach(0..<6, id: \.self) { index in
+                EntryGridLoadingCard(seed: index)
+            }
+        }
+        .padding(.horizontal, 16)
     }
 
     private var completedEntries: [CreateEntryDraft] {
@@ -5439,6 +5492,13 @@ struct EntriesView: View {
             && cloudEntriesErrorMessage == nil
             && showsPrototypeData
             && !sampleEntries.isEmpty
+    }
+
+    private var showsCloudLoadingPlaceholder: Bool {
+        isLoadingCloudEntries
+            && !showsSampleEntries
+            && filteredEntryItems.isEmpty
+            && cloudEntriesErrorMessage == nil
     }
 
     private func entryForDisplay(_ item: EntryDisplayItem) -> CreateEntryDraft {
@@ -5768,11 +5828,44 @@ struct EntriesView: View {
     }
 
     private func openEntryItem(_ item: EntryDisplayItem, asCompleted: Bool, storyboardImage: UIImage? = nil) {
+        guard openingEntryPreview == nil else {
+            return
+        }
+
+        let openingStartedAt = Date()
+        let minimumOpeningDuration: TimeInterval = 1.15
+        let finishingZoomDuration: TimeInterval = 0.42
+        let displayEntry = entryForDisplay(item)
+        isFinishingEntryOpening = false
+        withAnimation(.spring(response: 0.56, dampingFraction: 0.82)) {
+            openingEntryPreview = EntryOpeningPreview(
+                entry: displayEntry,
+                sortOption: selectedEntrySort,
+                isCompleted: asCompleted,
+                storyboardImage: storyboardImage
+            )
+        }
+
         Task {
             let localID = await materializeCloudEntryIfNeeded(item)
             guard let localID else {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    openingEntryPreview = nil
+                    isFinishingEntryOpening = false
+                }
                 return
             }
+
+            let elapsedOpeningTime = Date().timeIntervalSince(openingStartedAt)
+            let remainingOpeningTime = minimumOpeningDuration - elapsedOpeningTime
+            if remainingOpeningTime > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remainingOpeningTime * 1_000_000_000))
+            }
+
+            withAnimation(.spring(response: 0.44, dampingFraction: 0.8)) {
+                isFinishingEntryOpening = true
+            }
+            try? await Task.sleep(nanoseconds: UInt64(finishingZoomDuration * 1_000_000_000))
 
             isOpeningEntryFromEntries = true
             isOpeningCompletedEntryFromEntries = asCompleted
@@ -6235,6 +6328,125 @@ private func entryPreviewDateText(_ entry: CreateEntryDraft, sortOption: EntrySo
     }
 }
 
+private struct EntryLoadingBar: View {
+    let width: CGFloat?
+    let height: CGFloat
+
+    init(width: CGFloat? = nil, height: CGFloat) {
+        self.width = width
+        self.height = height
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+            .fill(Color(red: 0.82, green: 0.83, blue: 0.88))
+            .frame(width: width, height: height)
+    }
+}
+
+private struct EntryGridLoadingCard: View {
+    let seed: Int
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .top) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.homeBorder.opacity(0.76), lineWidth: 1)
+                    )
+
+                VStack(alignment: .leading, spacing: 12) {
+                    EntryLoadingBar(width: CGFloat(74 + (seed % 2) * 22), height: 14)
+                        .padding(.top, 38)
+
+                    EntryLoadingBar(width: CGFloat(118 - (seed % 3) * 14), height: 14)
+
+                    EntryLoadingBar(width: CGFloat(86 + (seed % 3) * 12), height: 10)
+                        .padding(.top, 10)
+
+                    EntryLoadingBar(width: CGFloat(126 - (seed % 2) * 18), height: 10)
+
+                    EntryLoadingBar(width: CGFloat(96 + (seed % 2) * 16), height: 10)
+
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+
+                StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                    .opacity(0.62)
+                    .offset(y: -7)
+            }
+            .aspectRatio(260.0 / 340.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .shadow(color: Color.storyInk.opacity(0.05), radius: 8, y: 4)
+            .opacity(isPulsing ? 0.54 : 0.9)
+            .animation(
+                .easeInOut(duration: 0.88)
+                    .repeatForever(autoreverses: true)
+                    .delay(Double(seed) * 0.06),
+                value: isPulsing
+            )
+
+            EntryLoadingBar(width: 78, height: 10)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .opacity(isPulsing ? 0.42 : 0.78)
+        }
+        .onAppear {
+            isPulsing = true
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct EntryListLoadingRow: View {
+    @State private var isPulsing = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    VStack(alignment: .leading, spacing: 7) {
+                        EntryLoadingBar(width: 42, height: 8)
+                        EntryLoadingBar(width: 56, height: 8)
+                        EntryLoadingBar(width: 34, height: 8)
+                    }
+                    .padding(8),
+                    alignment: .topLeading
+                )
+                .frame(
+                    width: JournalChapterListMetrics.coverWidth,
+                    height: JournalChapterListMetrics.coverHeight
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(Color.homeBorder.opacity(0.76), lineWidth: 1)
+                )
+
+            VStack(alignment: .leading, spacing: 9) {
+                EntryLoadingBar(width: 132, height: 13)
+                EntryLoadingBar(width: 86, height: 10)
+            }
+
+            Spacer(minLength: 8)
+
+            EntryLoadingBar(width: 58, height: 10)
+        }
+        .frame(maxWidth: .infinity, minHeight: JournalChapterListMetrics.rowHeight, alignment: .leading)
+        .opacity(isPulsing ? 0.52 : 0.88)
+        .animation(.easeInOut(duration: 0.88).repeatForever(autoreverses: true), value: isPulsing)
+        .onAppear {
+            isPulsing = true
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 private struct EntryPreviewDateBlock: View {
     let entry: CreateEntryDraft
     let sortOption: EntrySortOption
@@ -6256,6 +6468,7 @@ private struct EntryGridPreviewCard: View {
     let isEditing: Bool
     let showsActions: Bool
     let title: String
+    var isOpening = false
     let onOpen: () -> Void
     let onDelete: () -> Void
     var onRename: (() -> Void)?
@@ -6293,6 +6506,9 @@ private struct EntryGridPreviewCard: View {
             EntryPreviewDateBlock(entry: entry, sortOption: sortOption)
         }
         .contentShape(Rectangle())
+        .scaleEffect(isOpening ? 0.96 : 1)
+        .opacity(isOpening ? 0.62 : 1)
+        .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isOpening)
         .onTapGesture {
             onOpen()
         }
@@ -6352,6 +6568,7 @@ private struct CompletedEntryGridCard: View {
     let title: String
     let sortOption: EntrySortOption
     let storyboardImage: CompletedStoryboardImage
+    let isOpening: Bool
     let onOpen: () -> Void
     let accessibilityLabel: String
 
@@ -6360,12 +6577,14 @@ private struct CompletedEntryGridCard: View {
         title: String,
         sortOption: EntrySortOption,
         storyboardImage: CompletedStoryboardImage,
+        isOpening: Bool = false,
         onOpen: @escaping () -> Void
     ) {
         self.entry = entry
         self.title = title
         self.sortOption = sortOption
         self.storyboardImage = storyboardImage
+        self.isOpening = isOpening
         self.onOpen = onOpen
         accessibilityLabel = "Completed \(title)"
     }
@@ -6395,6 +6614,9 @@ private struct CompletedEntryGridCard: View {
             EntryPreviewDateBlock(entry: entry, sortOption: sortOption)
         }
         .contentShape(Rectangle())
+        .scaleEffect(isOpening ? 0.96 : 1)
+        .opacity(isOpening ? 0.62 : 1)
+        .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isOpening)
         .onTapGesture {
             onOpen()
         }
@@ -6504,6 +6726,141 @@ private struct CompletedEntryGridCard: View {
                     .foregroundStyle(Color.homeMutedText)
             }
         }
+    }
+}
+
+private struct EntryOpeningOverlay: View {
+    let preview: EntryOpeningPreview
+    let isFinishing: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hasAppeared = false
+
+    var body: some View {
+        ZStack {
+            Color.homePageBackground.opacity(hasAppeared ? 0.92 : 0)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                openingPreviewCard
+                    .frame(maxWidth: 284)
+                    .rotationEffect(openingRotation)
+                    .scaleEffect(openingScale)
+                    .opacity(hasAppeared ? 1 : 0)
+                    .shadow(color: Color.storyInk.opacity(0.16), radius: 18, y: 10)
+
+                VStack(spacing: 4) {
+                    Text("Opening entry...")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.storyInk)
+
+                    Text(preview.isCompleted ? "Preparing your story and art" : "Preparing your draft")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                }
+                .opacity(isFinishing ? 0 : (hasAppeared ? 1 : 0))
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 82)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.78, dampingFraction: 0.78)) {
+                hasAppeared = true
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Opening \(preview.title)")
+    }
+
+    private var openingScale: CGFloat {
+        guard !reduceMotion else {
+            return 1
+        }
+
+        if isFinishing {
+            return 1.38
+        }
+
+        return hasAppeared ? 1.08 : 0.76
+    }
+
+    private var openingRotation: Angle {
+        guard !reduceMotion else {
+            return .degrees(0)
+        }
+
+        return .degrees(isFinishing ? 0 : (hasAppeared ? -1.4 : 5))
+    }
+
+    private var openingPreviewCard: some View {
+        ZStack(alignment: .top) {
+            previewImage
+                .aspectRatio(260.0 / 340.0, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .top) {
+                    StoryPhotoTape(width: 48, height: 14, rotation: -2)
+                        .offset(y: -7)
+                }
+
+            if preview.isCompleted, let storyboardImage = preview.storyboardImage {
+                GeometryReader { proxy in
+                    completedStoryboardOverlay(storyboardImage, in: proxy.size)
+                }
+                .aspectRatio(260.0 / 340.0, contentMode: .fit)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var previewImage: some View {
+        if let thumbnail = preview.entry.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color(red: 0.985, green: 0.978, blue: 0.955)
+
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.storyInk.opacity(0.08), lineWidth: 1)
+                    .padding(12)
+
+                Image(systemName: "doc.text")
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(Color.storyInk.opacity(0.34))
+            }
+        }
+    }
+
+    private func completedStoryboardOverlay(_ storyboardImage: UIImage, in size: CGSize) -> some View {
+        let overlayHeight = size.height * 0.47
+        let overlayWidth = overlayHeight * 0.72
+
+        return ZStack(alignment: .topTrailing) {
+            Image(uiImage: storyboardImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: overlayWidth, height: overlayHeight)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                )
+                .shadow(color: Color.storyInk.opacity(0.08), radius: 3, y: 1)
+
+            Image(systemName: "paperclip")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(Color(red: 0.74, green: 0.76, blue: 0.82))
+                .rotationEffect(.degrees(-34))
+                .shadow(color: Color.white.opacity(0.75), radius: 1, y: 1)
+                .shadow(color: Color.storyInk.opacity(0.12), radius: 1, y: 1)
+                .offset(x: 1, y: -13)
+        }
+        .frame(width: overlayWidth, height: overlayHeight)
+        .rotationEffect(.degrees(2))
+        .shadow(color: Color.storyInk.opacity(0.16), radius: 6, y: 4)
+        .position(x: size.width * 0.76, y: size.height * 0.27)
     }
 }
 

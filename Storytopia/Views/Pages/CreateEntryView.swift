@@ -2033,7 +2033,12 @@ struct CreateEntryView: View {
                     Image(systemName: presentation.closeButtonSystemName)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.72))
-                        .frame(width: 44, height: 44, alignment: .leading)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.homeBorder.opacity(0.95), lineWidth: 1)
+                        )
                         .contentShape(Rectangle())
                 }
                 .frame(width: showsToolbarSaveButton ? 88 : 44, alignment: .leading)

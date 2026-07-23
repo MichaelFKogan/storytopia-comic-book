@@ -149,85 +149,230 @@ struct OpenAIImageGenerationService {
             storyText = trimmedRichText
         } else if trimmedText.isEmpty {
             storyText = hasReferencePhotos
-                ? "No written story was provided. Infer a warm, visually coherent story about the moment from the uploaded photos."
-                : "No written story or reference photos were provided. Invent a warm, visually coherent everyday moment with a clear beginning, middle, and end."
+                ? """
+                No written story was provided. Study the uploaded photos and create a \
+                restrained, emotionally coherent interpretation of the moment. Do not \
+                invent major events or relationships that are not supported by the photos.
+                """
+                : """
+                No written story or reference photos were provided. Create a warm, \
+                emotionally grounded everyday moment with a clear beginning, middle, \
+                and end.
+                """
         } else {
             storyText = trimmedText
         }
 
         let referencePhotoCount = min(imageCount, 5)
+
         let titleBlock = trimmedTitle.isEmpty
             ? "Untitled Entry"
             : trimmedTitle
+
         let generationMode = isSmartGenerationEnabled
-            ? "Smart Generation was enabled. The app selected this layout from the entry and photo count."
-            : "Manual layout was selected by the user."
+            ? "Smart Generation was enabled. The app selected this layout based on the entry and reference-photo count."
+            : "The user manually selected this layout."
+
         let creationSource = hasReferencePhotos
-            ? "using the user's \(referencePhotoCount) uploaded reference photo(s) and optional written story"
-            : "from the user's written story"
+            ? "the user's written memory and \(referencePhotoCount) uploaded reference photo(s)"
+            : "the user's written memory"
+
         let identityInstruction = hasReferencePhotos
-            ? "Preserve the identity of people, pets, locations, clothing, and important objects from the reference photos, but DO NOT preserve photographic realism."
-            : "Create appealing, consistent characters, locations, clothing, and important objects that fit the user's story."
+            ? """
+            Preserve the recognizable identity of people, pets, locations, clothing, \
+            and important objects shown in the reference photos. Preserve their defining \
+            visual characteristics without preserving photographic realism.
+            """
+            : """
+            Create appealing and visually consistent characters, locations, clothing, \
+            and important objects that faithfully support the user's memory.
+            """
+
         let referencePhotoInstructions = hasReferencePhotos
             ? """
             REFERENCE PHOTOS:
-            - Use ALL uploaded reference photos.
-            - Do not ignore uploaded photos.
-            - Use them as references for identity, pets, clothing, objects, locations, mood, and story details.
-            - Do NOT map photo 1 to panel 1, photo 2 to panel 2, and so on.
-            - You may combine details from multiple photos when it improves storytelling.
-            - Keep characters and important visual elements recognizable and consistent across panels.
-            - Reimagine every scene in the selected art style rather than recreating the original photographs.
+            - Use all uploaded reference photos as visual evidence about the memory.
+            - Do not ignore any uploaded photo.
+            - Use them to understand identity, appearance, relationships, pets, clothing,
+            locations, objects, atmosphere, and emotional context.
+            - Do not automatically map photo 1 to panel 1, photo 2 to panel 2, and so on.
+            - Combine details from multiple photos when doing so creates a more coherent story.
+            - Do not invent important people, actions, relationships, or events that are not
+            supported by the written memory or photos.
+            - Keep recurring characters and important visual details recognizable and
+            consistent across every panel.
+            - Reinterpret every scene as original artwork in the selected style.
+            - Never reproduce the uploaded photos as photographs inside a collage.
             """
             : """
             REFERENCE PHOTOS:
             - No reference photos were provided.
-            - Do not imply that a photo reference exists.
-            - Build the storyboard from the written story, selected art style, and a coherent invented scene when details are missing.
-            - Keep characters and important visual elements consistent across panels.
+            - Do not imply that a photographic reference exists.
+            - Base the page on the written memory.
+            - Fill minor visual gaps with restrained, believable details.
+            - Do not invent major events, relationships, conflicts, or emotional conclusions
+            that are not supported by the user's writing.
+            - Keep recurring characters, clothing, locations, and important objects
+            consistent across every panel.
             """
 
         return """
-        Create a vertical illustrated comic/storyboard about the moment \(creationSource).
+        CREATIVE ROLE:
+
+        You are an award-winning graphic novelist and visual storyteller.
+
+        Your job is not merely to generate a comic. Your job is to faithfully reinterpret
+        a person's memory as a graphic novel page that allows them to see their own life
+        from an outside perspective.
+
+        The user is simultaneously the protagonist, the author, and the future reader of
+        this memory.
+
+        Treat the comic as a vehicle for perspective. Help the user notice the emotional
+        meaning, relationships, behavior, atmosphere, or personal significance already
+        present in the moment.
+
+        Do not make the memory larger, more dramatic, or more profound than the source
+        material supports. Make it more understandable.
+
+        The finished page should feel as though a thoughtful graphic novelist studied the
+        memory and selected the most meaningful visual moments.
+
+        STORYTOPIA'S PURPOSE:
+
+        Turn memories into graphic novel pages so people can see their own lives from a
+        new perspective.
+
+        The ideal emotional response is:
+
+        "I never realized my life looked like that."
+
+        SOURCE MATERIAL:
+
+        Create one vertical graphic novel page based on \(creationSource).
 
         ENTRY TITLE:
         \(titleBlock)
 
-        USER STORY:
+        USER'S MEMORY:
         \(storyText)
 
+        STORY INTERPRETATION:
+
+        Before composing the page, silently determine:
+
+        - What is literally happening?
+        - What appears to matter most to the user?
+        - What emotion or internal experience is supported by the memory?
+        - What small details reveal that experience visually?
+        - What changes, becomes clearer, or gains meaning by the final panel?
+        - Which moments are necessary, and which details can be omitted?
+
+        Do not include this analysis in the final image.
+
+        Find the invisible story within the visible events, but remain faithful to the
+        evidence provided by the user.
+
+        Ordinary moments are allowed to remain quiet. Do not manufacture conflict,
+        sentimentality, tragedy, romance, triumph, or revelation.
+
+        VISUAL STORYTELLING PRINCIPLES:
+
+        - Show rather than explain.
+        - Use facial expressions, posture, distance, lighting, composition, environment,
+        gestures, and meaningful objects to communicate emotion.
+        - Avoid showing the same pose or scene repeatedly.
+        - Each panel must contribute new information, emotion, or perspective.
+        - Select distinct moments rather than slicing one instant into nearly identical images.
+        - Let quiet details carry meaning when appropriate.
+        - Use varied framing, such as establishing shots, medium shots, close-ups,
+        over-the-shoulder views, and environmental details.
+        - Keep the protagonist recognizable and visually consistent throughout the page.
+        - Preserve ambiguity when the memory itself is ambiguous.
+        - Do not diagnose, judge, moralize, or tell the user what their experience means.
+        - Present the moment with empathy and emotional honesty.
+
+        PANEL NARRATIVE:
+
+        Use exactly \(layout.panelCount) panels.
+
+        Across the page, the panels should collectively establish:
+
+        1. The setting and situation.
+        2. The important action, relationship, or experience.
+        3. The protagonist's observable emotional perspective.
+        4. A meaningful progression, contrast, realization, or lingering final impression.
+
+        Adapt this progression naturally to the selected panel count. Do not force every
+        memory into an artificial dramatic arc.
+
+        The final panel should leave the reader with the emotional meaning or atmosphere
+        of the memory rather than merely stopping the action.
+
         ART STYLE:
+
+        Selected art style:
         \(artStyle)
 
-        STYLE PRIORITY — this is the most important instruction:
+        STYLE PRIORITY:
         \(artStylePromptDescription(for: artStyle))
 
         The final image must fully commit to the selected art style.
+
         \(identityInstruction)
-        Strongly reinterpret everything in the selected style.
-        The result should look like authentic \(artStyle) artwork, not a photograph with an art filter applied.
-        When there is a conflict between realism and the selected art style, always prioritize the selected art style.
+
+        Strongly reinterpret all people, environments, objects, and reference material
+        through the selected style.
+
+        The result must look like authentic \(artStyle) artwork, not a photograph with an
+        art filter applied.
+
+        When photographic realism conflicts with the selected art style, prioritize the
+        selected art style while preserving recognizable identity and story details.
 
         GENERATION SETTINGS:
-        - \(generationMode)
-        - Selected panel count: \(layout.panelCount)
 
-        FORMAT:
-        - Output ONE single tall image divided into exactly \(layout.panelCount) distinct comic panels with visible gutters or borders.
-        - Panel layout (top to bottom): \(layout.promptDescription)
-        - Create a coherent beginning, middle, and end.
-        - Show a progression of events rather than repeating the same scene.
-        - Generate a true illustrated comic/storyboard.
-        - Never create a photo collage, contact sheet, photomontage, or collection of separate photos.
+        - \(generationMode)
+        - Required panel count: \(layout.panelCount)
+
+        PAGE FORMAT:
+
+        - Output one single tall image.
+        - Divide the image into exactly \(layout.panelCount) distinct comic panels.
+        - Use visible, intentional gutters or panel borders.
+        - Follow this panel arrangement from top to bottom:
+        \(layout.promptDescription)
+        - Create a cohesive graphic novel page, not a collection of unrelated illustrations.
+        - Show a clear progression of moments.
         - Fully redraw every scene as original illustrated artwork.
+        - Never create a photo collage, contact sheet, photomontage, scrapbook, mood board,
+        or grid of separate photographs.
+        - Do not display the reference photos as inset photographs.
+        - Keep important characters, clothing, objects, and locations consistent across panels.
+        - Maintain a clear visual hierarchy and readable panel flow.
 
         \(referencePhotoInstructions)
 
-        TEXT:
-        - Include readable text in every panel.
-        - Use concise captions and/or speech bubbles that support the story.
-        - Keep text short enough to fit cleanly inside each panel.
-        - Prioritize visual storytelling.
+        CAPTIONS AND DIALOGUE:
+
+        - Prioritize visual storytelling over written explanation.
+        - Use captions or speech bubbles only when they add information the artwork cannot
+        communicate clearly by itself.
+        - Do not require text in every panel.
+        - Keep all text concise, natural, and emotionally restrained.
+        - Do not invent quotations unless the user's memory clearly provides or implies them.
+        - Prefer narration based closely on the user's own language.
+        - Do not summarize the entire journal entry inside captions.
+        - Avoid generic inspirational statements, forced lessons, or sentimental conclusions.
+        - Ensure any included text is large, readable, correctly spelled, and cleanly placed.
+        - Never allow text to obscure faces or important visual details.
+
+        FINAL STANDARD:
+
+        The result should not feel like an image generator illustrated a journal entry.
+
+        It should feel like a thoughtful graphic novelist interpreted a real person's memory
+        with care, visual intelligence, restraint, and emotional honesty.
         """
     }
 }
