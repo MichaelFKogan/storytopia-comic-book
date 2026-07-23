@@ -258,7 +258,7 @@ enum NotebookMetrics {
     static let naturalBodyLineSpacing: CGFloat = 5
     static let bodyFontSize: CGFloat = 16
     static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
-    static let marginLeading: CGFloat = 54
+    static let marginLeading: CGFloat = 30
     static let textLeadingInset: CGFloat = 5
     static let syntheticItalicObliqueness: CGFloat = 0.16
 
@@ -2137,6 +2137,8 @@ struct NotebookEditorContent: View {
                     Rectangle()
                         .fill(NotebookMetrics.ruleColor)
                         .frame(height: 1)
+                        .padding(.leading, -leadingContentPadding)
+                        .padding(.trailing, -18)
                 }
             }
 

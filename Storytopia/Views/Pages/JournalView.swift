@@ -4698,7 +4698,7 @@ struct EntriesView: View {
     @Binding var isOpeningEntryFromEntries: Bool
     @Binding var isOpeningCompletedEntryFromEntries: Bool
 
-    private let thumbnailRendererVersion = 9
+    private let thumbnailRendererVersion = 10
     private let thumbnailRendererVersionKey = "StorytopiaEntryThumbnailRendererVersion"
 
     @State private var showsPrototypeData = true
@@ -4723,7 +4723,7 @@ struct EntriesView: View {
     @State private var openingEntryPreview: EntryOpeningPreview?
     @State private var isFinishingEntryOpening = false
     @AppStorage("StorytopiaSelectedEntryLayout") private var selectedEntryLayoutRawValue = JournalEntryLayout.grid.rawValue
-    @AppStorage("StorytopiaSelectedEntriesTab") private var selectedEntryTabRawValue = EntriesTab.drafts.rawValue
+    @AppStorage("StorytopiaSelectedEntriesTab") private var selectedEntryTabRawValue = EntriesTab.all.rawValue
     @AppStorage("StorytopiaSelectedEntrySort") private var selectedEntrySortRawValue = EntrySortOption.entryDate.rawValue
 
     private var selectedEntryLayout: JournalEntryLayout {
@@ -4737,7 +4737,7 @@ struct EntriesView: View {
 
     private var selectedEntryTab: EntriesTab {
         get {
-            EntriesTab(rawValue: selectedEntryTabRawValue) ?? .drafts
+            EntriesTab(rawValue: selectedEntryTabRawValue) ?? .all
         }
         nonmutating set {
             selectedEntryTabRawValue = newValue.rawValue
@@ -5013,6 +5013,8 @@ struct EntriesView: View {
     private func entryCount(for tab: EntriesTab) -> Int {
         if showsSampleEntries {
             switch tab {
+            case .all:
+                return sampleEntries.count
             case .drafts:
                 return draftEntries.count
             case .completed:
@@ -5021,6 +5023,8 @@ struct EntriesView: View {
         }
 
         switch tab {
+        case .all:
+            return mergedEntryItems.count
         case .drafts:
             return draftEntryItems.count
         case .completed:
@@ -5140,7 +5144,7 @@ struct EntriesView: View {
                 Button {
                     sampleEntryBeingPreviewed = entry
                 } label: {
-                    EntryListRow(entry: entry)
+                    EntryListRow(entry: entry, category: categoryForSampleEntry(entry))
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(
@@ -5154,11 +5158,16 @@ struct EntriesView: View {
         } else {
             ForEach(filteredEntryItems) { item in
                 let displayEntry = entryForDisplay(item)
+                let isCompleted = isCompletedEntryItem(item)
 
                 Button {
-                    openEntryItem(item, asCompleted: false)
+                    openEntryItem(
+                        item,
+                        asCompleted: isCompleted,
+                        storyboardImage: isCompleted ? storyboardUIImage(for: item, fallbackIndex: completedStoryboardFallbackIndex(for: item)) : nil
+                    )
                 } label: {
-                    EntryListRow(entry: displayEntry)
+                    EntryListRow(entry: displayEntry, category: categoryForEntryItem(item))
                         .opacity(openingEntryPreview?.id == item.id ? 0.58 : 1)
                 }
                 .buttonStyle(.plain)
@@ -5215,34 +5224,16 @@ struct EntriesView: View {
                         .padding(.horizontal, 16)
                 } else {
                     LazyVGrid(columns: entryGridColumns, spacing: 14) {
-                        ForEach(filteredEntryItems) { item in
-                            let displayEntry = entryForDisplay(item)
+                        if showsSampleEntries {
+                            ForEach(filteredEntries) { entry in
+                                sampleEntryGridCard(for: entry)
+                            }
+                        } else {
+                            ForEach(filteredEntryItems) { item in
+                                let displayEntry = entryForDisplay(item)
 
-                            EntryGridPreviewCard(
-                                entry: displayEntry,
-                                sortOption: selectedEntrySort,
-                                isEditing: editMode == .active && !showsSampleEntries,
-                                showsActions: !showsSampleEntries,
-                                title: entryDisplayTitle(displayEntry),
-                                isOpening: openingEntryPreview?.id == item.id,
-                                onOpen: {
-                                    if showsSampleEntries {
-                                        sampleEntryBeingPreviewed = displayEntry
-                                    } else {
-                                        openEntryItem(item, asCompleted: false)
-                                    }
-                                },
-                                onDelete: {
-                                    if !showsSampleEntries {
-                                        requestDeleteEntry(item)
-                                    }
-                                },
-                                onRename: {
-                                    if !showsSampleEntries {
-                                        beginRenaming(displayEntry)
-                                    }
-                                }
-                            )
+                                entryGridCard(for: item, displayEntry: displayEntry)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -5296,6 +5287,88 @@ struct EntriesView: View {
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 104)
+        }
+    }
+
+    @ViewBuilder
+    private func sampleEntryGridCard(for entry: CreateEntryDraft) -> some View {
+        if categoryForSampleEntry(entry) == .completed {
+            CompletedEntryGridCard(
+                entry: entry,
+                title: entryDisplayTitle(entry),
+                sortOption: selectedEntrySort,
+                storyboardImage: .asset(CompletedStoryboardSample.imageName(for: completedSampleFallbackIndex(for: entry))),
+                category: categoryForSampleEntry(entry),
+                isOpening: false,
+                onOpen: {
+                    sampleEntryBeingPreviewed = entry
+                }
+            )
+        } else {
+            EntryGridPreviewCard(
+                entry: entry,
+                sortOption: selectedEntrySort,
+                isEditing: false,
+                showsActions: false,
+                title: entryDisplayTitle(entry),
+                category: categoryForSampleEntry(entry),
+                isOpening: false,
+                onOpen: {
+                    sampleEntryBeingPreviewed = entry
+                },
+                onDelete: {},
+                onRename: nil
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func entryGridCard(for item: EntryDisplayItem, displayEntry: CreateEntryDraft) -> some View {
+        if isCompletedEntryItem(item) {
+            let fallbackIndex = completedStoryboardFallbackIndex(for: item)
+
+            CompletedEntryGridCard(
+                entry: displayEntry,
+                title: entryDisplayTitle(displayEntry),
+                sortOption: selectedEntrySort,
+                storyboardImage: storyboardImage(for: item, fallbackIndex: fallbackIndex),
+                category: categoryForEntryItem(item),
+                isOpening: openingEntryPreview?.id == item.id,
+                onOpen: {
+                    openEntryItem(
+                        item,
+                        asCompleted: true,
+                        storyboardImage: storyboardUIImage(for: item, fallbackIndex: fallbackIndex)
+                    )
+                }
+            )
+        } else {
+            EntryGridPreviewCard(
+                entry: displayEntry,
+                sortOption: selectedEntrySort,
+                isEditing: editMode == .active && !showsSampleEntries,
+                showsActions: !showsSampleEntries,
+                title: entryDisplayTitle(displayEntry),
+                category: categoryForEntryItem(item),
+                isOpening: openingEntryPreview?.id == item.id,
+                onOpen: {
+                    if showsSampleEntries {
+                        sampleEntryBeingPreviewed = displayEntry
+                    } else {
+                        openEntryItem(item, asCompleted: false)
+                    }
+                },
+                onDelete: {
+                    if !showsSampleEntries {
+                        requestDeleteEntry(item)
+                    }
+                },
+                onRename: {
+                    if !showsSampleEntries {
+                        beginRenaming(displayEntry)
+                    }
+                }
+            )
         }
     }
 
@@ -5397,6 +5470,8 @@ struct EntriesView: View {
 
     private var filteredEntries: [CreateEntryDraft] {
         switch selectedEntryTab {
+        case .all:
+            return showsSampleEntries ? sampleEntries : entries
         case .drafts:
             return draftEntries
         case .completed:
@@ -5410,6 +5485,8 @@ struct EntriesView: View {
         }
 
         switch selectedEntryTab {
+        case .all:
+            return mergedEntryItems
         case .drafts:
             return draftEntryItems
         case .completed:
@@ -5482,6 +5559,35 @@ struct EntriesView: View {
 
     private var completedEntryItems: [EntryDisplayItem] {
         mergedEntryItems.filter { $0.status == JournalEntryStatus.completed.rawValue }
+    }
+
+    private func isCompletedEntryItem(_ item: EntryDisplayItem) -> Bool {
+        item.status == JournalEntryStatus.completed.rawValue
+    }
+
+    private func categoryForEntryItem(_ item: EntryDisplayItem) -> EntriesTab? {
+        guard selectedEntryTab == .all else {
+            return nil
+        }
+
+        return isCompletedEntryItem(item) ? .completed : .drafts
+    }
+
+    private func categoryForSampleEntry(_ entry: CreateEntryDraft) -> EntriesTab? {
+        guard selectedEntryTab == .all else {
+            return nil
+        }
+
+        let completedIDs = Set(completedEntries.map(\.id))
+        return completedIDs.contains(entry.id) ? .completed : .drafts
+    }
+
+    private func completedStoryboardFallbackIndex(for item: EntryDisplayItem) -> Int {
+        completedEntryItems.firstIndex { $0.id == item.id } ?? 0
+    }
+
+    private func completedSampleFallbackIndex(for entry: CreateEntryDraft) -> Int {
+        completedEntries.firstIndex { $0.id == entry.id } ?? 0
     }
 
     private var showsSampleEntries: Bool {
@@ -6254,6 +6360,7 @@ private struct EntrySamplePreview: View {
 
 private struct EntryListRow: View {
     let entry: CreateEntryDraft
+    var category: EntriesTab?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -6268,6 +6375,11 @@ private struct EntryListRow: View {
                 .layoutPriority(0)
 
             Spacer(minLength: 8)
+
+            if let category {
+                EntryCategoryPill(category: category)
+                    .layoutPriority(1)
+            }
 
             Text(entryDateText)
                 .font(.system(size: 12, weight: .regular))
@@ -6311,6 +6423,25 @@ private struct EntryListRow: View {
     }
 }
 
+private struct EntryCategoryPill: View {
+    let category: EntriesTab
+
+    var body: some View {
+        Text(category.pillTitle)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(category.pillForegroundColor)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(category.pillBackgroundColor, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(category.pillBorderColor, lineWidth: 1)
+            )
+            .accessibilityLabel(category.title)
+    }
+}
+
 private func entryDisplayTitle(_ entry: CreateEntryDraft) -> String {
     let trimmedTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmedTitle.isEmpty ? "Untitled Entry" : trimmedTitle
@@ -6332,15 +6463,58 @@ private struct EntryLoadingBar: View {
     let width: CGFloat?
     let height: CGFloat
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isShimmering = false
+
     init(width: CGFloat? = nil, height: CGFloat) {
         self.width = width
         self.height = height
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+
+        shape
             .fill(Color(red: 0.82, green: 0.83, blue: 0.88))
             .frame(width: width, height: height)
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { proxy in
+                        let shimmerWidth = max(proxy.size.width * 0.48, 22)
+
+                        LinearGradient(
+                            colors: [
+                                .clear,
+                                .white.opacity(0.58),
+                                .clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: shimmerWidth)
+                        .offset(x: isShimmering ? proxy.size.width + shimmerWidth : -shimmerWidth)
+                    }
+                    .clipShape(shape)
+                }
+            }
+            .onAppear {
+                guard !reduceMotion else {
+                    return
+                }
+
+                withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                    isShimmering = true
+                }
+            }
+            .onChange(of: reduceMotion) { shouldReduceMotion in
+                if shouldReduceMotion {
+                    isShimmering = false
+                } else {
+                    withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                        isShimmering = true
+                    }
+                }
+            }
     }
 }
 
@@ -6468,6 +6642,7 @@ private struct EntryGridPreviewCard: View {
     let isEditing: Bool
     let showsActions: Bool
     let title: String
+    var category: EntriesTab?
     var isOpening = false
     let onOpen: () -> Void
     let onDelete: () -> Void
@@ -6500,6 +6675,12 @@ private struct EntryGridPreviewCard: View {
                     .buttonStyle(.plain)
                     .padding(8)
                     .accessibilityLabel("Delete \(title)")
+                }
+
+                if let category {
+                    EntryCategoryPill(category: category)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 }
             }
 
@@ -6568,6 +6749,7 @@ private struct CompletedEntryGridCard: View {
     let title: String
     let sortOption: EntrySortOption
     let storyboardImage: CompletedStoryboardImage
+    let category: EntriesTab?
     let isOpening: Bool
     let onOpen: () -> Void
     let accessibilityLabel: String
@@ -6577,6 +6759,7 @@ private struct CompletedEntryGridCard: View {
         title: String,
         sortOption: EntrySortOption,
         storyboardImage: CompletedStoryboardImage,
+        category: EntriesTab? = nil,
         isOpening: Bool = false,
         onOpen: @escaping () -> Void
     ) {
@@ -6584,6 +6767,7 @@ private struct CompletedEntryGridCard: View {
         self.title = title
         self.sortOption = sortOption
         self.storyboardImage = storyboardImage
+        self.category = category
         self.isOpening = isOpening
         self.onOpen = onOpen
         accessibilityLabel = "Completed \(title)"
@@ -6605,6 +6789,13 @@ private struct CompletedEntryGridCard: View {
 
                     storyboardOverlay(in: proxy.size)
                         .zIndex(1)
+
+                    if let category {
+                        EntryCategoryPill(category: category)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                            .zIndex(2)
+                    }
                 }
             }
                 .aspectRatio(260.0 / 340.0, contentMode: .fit)
@@ -6901,6 +7092,7 @@ private enum CompletedStoryboardSample: Int, CaseIterable, Identifiable {
 }
 
 private enum EntriesTab: String, CaseIterable, Identifiable {
+    case all
     case drafts
     case completed
 
@@ -6910,10 +7102,56 @@ private enum EntriesTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .all:
+            return "All"
         case .drafts:
             return "Drafts"
         case .completed:
             return "Completed"
+        }
+    }
+
+    var pillTitle: String {
+        switch self {
+        case .all:
+            return title
+        case .drafts:
+            return "Draft"
+        case .completed:
+            return "Completed"
+        }
+    }
+
+    var pillForegroundColor: Color {
+        switch self {
+        case .all:
+            return Color.storyInk
+        case .drafts:
+            return Color.homeAccent
+        case .completed:
+            return Color.white
+        }
+    }
+
+    var pillBackgroundColor: Color {
+        switch self {
+        case .all:
+            return Color.white
+        case .drafts:
+            return Color.homeAccent.opacity(0.11)
+        case .completed:
+            return Color.storyInk.opacity(0.88)
+        }
+    }
+
+    var pillBorderColor: Color {
+        switch self {
+        case .all:
+            return Color.homeBorder
+        case .drafts:
+            return Color.homeAccent.opacity(0.26)
+        case .completed:
+            return Color.storyInk.opacity(0.12)
         }
     }
 }
@@ -9314,6 +9552,10 @@ enum StoryEntryStore {
             }
     }
 
+    static func journalTitles(containing entry: PrototypeEntry) -> Set<String> {
+        Set(records.filter { $0.id == entry.id || $0.matchesContent(of: entry) }.map(\.chapterTitle))
+    }
+
     static func add(_ entry: PrototypeEntry, to chapterTitle: String) {
         let newRecord = Record(
             id: entry.id,
@@ -9399,6 +9641,33 @@ enum StoryEntryStore {
             }
 
             if record.id == entryID, !didDelete {
+                didDelete = true
+                return false
+            }
+
+            return true
+        }
+
+        guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func delete(entryIDs: Set<UUID>, matching entry: PrototypeEntry, from chapterTitle: String) {
+        var didDelete = false
+        let remainingRecords = records.filter { record in
+            guard record.chapterTitle == chapterTitle else {
+                return true
+            }
+
+            if !didDelete, let id = record.id, entryIDs.contains(id) {
+                didDelete = true
+                return false
+            }
+
+            if !didDelete, record.matchesContent(of: entry) {
                 didDelete = true
                 return false
             }
