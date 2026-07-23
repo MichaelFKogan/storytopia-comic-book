@@ -258,7 +258,7 @@ enum NotebookMetrics {
     static let naturalBodyLineSpacing: CGFloat = 5
     static let bodyFontSize: CGFloat = 16
     static let titleFontSize: CGFloat = bodyFontSize * NotebookTextRunStyle.heading1.fontScale
-    static let marginLeading: CGFloat = 54
+    static let marginLeading: CGFloat = 30
     static let textLeadingInset: CGFloat = 5
     static let syntheticItalicObliqueness: CGFloat = 0.16
 
@@ -1540,20 +1540,23 @@ struct LinedTextEditor: UIViewRepresentable {
             }
         }
 
-        if focusRequestID != coordinator.handledFocusRequestID {
-            coordinator.handledFocusRequestID = focusRequestID
+        var didHandleBlurRequest = false
+        if blurRequestID != coordinator.handledBlurRequestID {
+            coordinator.handledBlurRequestID = blurRequestID
+            didHandleBlurRequest = true
+            coordinator.isProgrammaticallyEndingEditing = true
             DispatchQueue.main.async {
-                textView.becomeFirstResponder()
+                textView.resignFirstResponder()
+                coordinator.isProgrammaticallyEndingEditing = false
             }
         }
 
-        if blurRequestID != coordinator.handledBlurRequestID {
-            coordinator.handledBlurRequestID = blurRequestID
-            coordinator.isProgrammaticallyEndingEditing = true
-            DispatchQueue.main.async {
-                textView.releaseKeyboardChrome()
-                textView.resignFirstResponder()
-                coordinator.isProgrammaticallyEndingEditing = false
+        if focusRequestID != coordinator.handledFocusRequestID {
+            coordinator.handledFocusRequestID = focusRequestID
+            if !didHandleBlurRequest {
+                DispatchQueue.main.async {
+                    textView.becomeFirstResponder()
+                }
             }
         }
 
@@ -1565,6 +1568,13 @@ struct LinedTextEditor: UIViewRepresentable {
                 coordinator.onSelectionStateChange?(textView.currentSelectionState())
             }
         }
+    }
+
+    static func dismantleUIView(_ uiView: LinedTextView, coordinator: Coordinator) {
+        uiView.resignFirstResponder()
+        uiView.releaseKeyboardChrome()
+        uiView.delegate = nil
+        uiView.onEditingEnded = nil
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: LinedTextView, context: Context) -> CGSize? {
@@ -2127,6 +2137,8 @@ struct NotebookEditorContent: View {
                     Rectangle()
                         .fill(NotebookMetrics.ruleColor)
                         .frame(height: 1)
+                        .padding(.leading, -leadingContentPadding)
+                        .padding(.trailing, -18)
                 }
             }
 

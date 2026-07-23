@@ -9,6 +9,8 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @EnvironmentObject private var authStore: SupabaseAuthStore
+
     @State private var selectedPage: StoryPage = .home
     @State private var pageBehindCreate: StoryPage = .home
     @State private var entryText: String
@@ -45,6 +47,16 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.32), value: selectedPage)
+        .task {
+            await authStore.refreshCurrentUser()
+            reloadScopedLocalState()
+        }
+        .onChange(of: authStore.userID) { _ in
+            reloadScopedLocalState()
+        }
+        .onChange(of: selectedPage) { _ in
+            endWindowEditing()
+        }
     }
 
     private var pageSelection: Binding<StoryPage> {
@@ -147,6 +159,7 @@ struct ContentView: View {
             completedEntryOpenedStoryboardImage: $completedEntryOpenedStoryboardImage,
             isOpeningCompletedEntryFromEntries: $isOpeningCompletedEntryFromEntries,
             dismissCreate: {
+                endWindowEditing()
                 selectedPage = pageBehindCreate
                 isOpeningEntryFromEntries = false
                 isOpeningCompletedEntryFromEntries = false
@@ -154,10 +167,39 @@ struct ContentView: View {
             }
         )
     }
+
+    private func endWindowEditing() {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .endEditing(true)
+    }
+
+    private func reloadScopedLocalState() {
+        guard authStore.userID != nil else {
+            isDraftSaved = false
+            generatedStoryboards = []
+            activeDraftID = nil
+            completedEntryOpenedStoryboardImage = nil
+            isOpeningEntryFromEntries = false
+            isOpeningCompletedEntryFromEntries = false
+            return
+        }
+
+        let drafts = CreateEntryDraftStore.loadAll()
+        isDraftSaved = !drafts.isEmpty
+        generatedStoryboards = GeneratedStoryboardStore.load()
+        activeDraftID = nil
+        completedEntryOpenedStoryboardImage = nil
+        isOpeningEntryFromEntries = false
+        isOpeningCompletedEntryFromEntries = false
+    }
 }
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
+            .environmentObject(SupabaseAuthStore.preview)
     }
 }

@@ -262,6 +262,42 @@ private enum StoryboardGenerationPhase: Equatable {
             return "Completed"
         }
     }
+
+    var progressTitle: String {
+        switch self {
+        case .ready:
+            return "Getting ready..."
+        case .preparingEntry:
+            return "Preparing your entry..."
+        case .uploadingReferencePhotos:
+            return "Uploading your photos..."
+        case .generating:
+            return "Generating your storyboard..."
+        case .savingResult:
+            return "Saving your storyboard..."
+        case .completed:
+            return "Storyboard ready"
+        case .failed:
+            return "Generation stopped"
+        }
+    }
+
+    var progressValue: Double {
+        switch self {
+        case .ready:
+            return 0.08
+        case .preparingEntry:
+            return 0.22
+        case .uploadingReferencePhotos:
+            return 0.38
+        case .generating:
+            return 0.68
+        case .savingResult:
+            return 0.9
+        case .completed, .failed:
+            return 1
+        }
+    }
 }
 
 private struct EntryLocationSuggestion: Identifiable, Equatable {
@@ -396,35 +432,99 @@ struct EntryLocationRecentsList: View {
 private enum EntryJournalLinkStore {
     private static let storageKey = "StorytopiaEntryJournalLinks"
     private static let entryIDStorageKey = "StorytopiaEntryJournalEntryIDs"
+    private static let multiStorageKey = "StorytopiaEntryJournalLinkLists"
+    private static let multiEntryIDStorageKey = "StorytopiaEntryJournalEntryIDLists"
 
     static func loadJournalTitle(for draftID: UUID) -> String? {
-        links[draftID.uuidString]
+        loadJournalTitles(for: draftID).first
+    }
+
+    static func loadJournalTitles(for draftID: UUID) -> Set<String> {
+        let draftKey = draftID.uuidString
+        var titles = Set(multiLinks[draftKey] ?? [])
+        if let legacyTitle = links[draftKey] {
+            titles.insert(legacyTitle)
+        }
+        return titles
     }
 
     static func loadJournalEntryID(for draftID: UUID) -> UUID? {
+        loadJournalEntryIDs(for: draftID).first
+    }
+
+    static func loadJournalEntryIDs(for draftID: UUID) -> Set<UUID> {
+        let draftKey = draftID.uuidString
+        var ids = Set((multiEntryIDs[draftKey] ?? []).compactMap(UUID.init(uuidString:)))
         guard let rawID = entryIDs[draftID.uuidString] else {
-            return nil
+            return ids
         }
 
-        return UUID(uuidString: rawID)
+        if let legacyID = UUID(uuidString: rawID) {
+            ids.insert(legacyID)
+        }
+        return ids
     }
 
     static func save(journalTitle: String, journalEntryID: UUID, for draftID: UUID) {
         var links = links
         var entryIDs = entryIDs
+        var multiLinks = multiLinks
+        var multiEntryIDs = multiEntryIDs
+        var titles = Set(multiLinks[draftID.uuidString] ?? [])
+        var ids = Set(multiEntryIDs[draftID.uuidString] ?? [])
         links[draftID.uuidString] = journalTitle
         entryIDs[draftID.uuidString] = journalEntryID.uuidString
+        titles.insert(journalTitle)
+        ids.insert(journalEntryID.uuidString)
+        multiLinks[draftID.uuidString] = Array(titles).sorted()
+        multiEntryIDs[draftID.uuidString] = Array(ids).sorted()
         UserDefaults.standard.set(links, forKey: storageKey)
         UserDefaults.standard.set(entryIDs, forKey: entryIDStorageKey)
+        UserDefaults.standard.set(multiLinks, forKey: multiStorageKey)
+        UserDefaults.standard.set(multiEntryIDs, forKey: multiEntryIDStorageKey)
+    }
+
+    static func remove(journalTitle: String, for draftID: UUID) {
+        var links = links
+        var entryIDs = entryIDs
+        var multiLinks = multiLinks
+        var multiEntryIDs = multiEntryIDs
+        var titles = Set(multiLinks[draftID.uuidString] ?? [])
+
+        titles.remove(journalTitle)
+        if links[draftID.uuidString] == journalTitle {
+            links[draftID.uuidString] = titles.sorted().first
+            if links[draftID.uuidString] == nil {
+                entryIDs.removeValue(forKey: draftID.uuidString)
+            }
+        }
+
+        if titles.isEmpty {
+            multiLinks.removeValue(forKey: draftID.uuidString)
+            multiEntryIDs.removeValue(forKey: draftID.uuidString)
+        } else {
+            multiLinks[draftID.uuidString] = Array(titles).sorted()
+        }
+
+        UserDefaults.standard.set(links, forKey: storageKey)
+        UserDefaults.standard.set(entryIDs, forKey: entryIDStorageKey)
+        UserDefaults.standard.set(multiLinks, forKey: multiStorageKey)
+        UserDefaults.standard.set(multiEntryIDs, forKey: multiEntryIDStorageKey)
     }
 
     static func remove(for draftID: UUID) {
         var links = links
         var entryIDs = entryIDs
+        var multiLinks = multiLinks
+        var multiEntryIDs = multiEntryIDs
         links.removeValue(forKey: draftID.uuidString)
         entryIDs.removeValue(forKey: draftID.uuidString)
+        multiLinks.removeValue(forKey: draftID.uuidString)
+        multiEntryIDs.removeValue(forKey: draftID.uuidString)
         UserDefaults.standard.set(links, forKey: storageKey)
         UserDefaults.standard.set(entryIDs, forKey: entryIDStorageKey)
+        UserDefaults.standard.set(multiLinks, forKey: multiStorageKey)
+        UserDefaults.standard.set(multiEntryIDs, forKey: multiEntryIDStorageKey)
     }
 
     private static var links: [String: String] {
@@ -433,6 +533,14 @@ private enum EntryJournalLinkStore {
 
     private static var entryIDs: [String: String] {
         UserDefaults.standard.dictionary(forKey: entryIDStorageKey) as? [String: String] ?? [:]
+    }
+
+    private static var multiLinks: [String: [String]] {
+        UserDefaults.standard.dictionary(forKey: multiStorageKey) as? [String: [String]] ?? [:]
+    }
+
+    private static var multiEntryIDs: [String: [String]] {
+        UserDefaults.standard.dictionary(forKey: multiEntryIDStorageKey) as? [String: [String]] ?? [:]
     }
 }
 
@@ -1233,6 +1341,7 @@ struct CreateEntryView: View {
     @State private var isShowingCamera = false
     @State private var isShowingExitConfirmation = false
     @State private var isGeneratingStoryboard = false
+    @State private var isShowingStoryboardGenerationProgress = false
     @State private var storyboardGenerationPhase: StoryboardGenerationPhase = .ready
     @State private var generationErrorMessage: String?
     @State private var isFullScreenEditorVisible = false
@@ -1252,9 +1361,11 @@ struct CreateEntryView: View {
     @State private var textFormattingRequestID = 0
     @State private var textFormattingRequest: NotebookTextFormattingRequest?
     @State private var selectedCustomJournalTitle: String?
+    @State private var selectedCustomJournalTitles: Set<String> = []
     @State private var addedJournalTitle: String?
     @State private var isShowingAddToJournalPage = false
     @State private var linkedJournalTitle: String?
+    @State private var linkedJournalTitles: Set<String> = []
     @State private var storyLocation = ""
     @State private var recentEntryLocations = EntryLocationRecentStore.all
     @StateObject private var locationSearch = EntryLocationSearchModel()
@@ -1284,17 +1395,29 @@ struct CreateEntryView: View {
     @State private var isToolbarSaveInProgress = false
     @State private var toolbarSaveFeedbackVersion = 0
     @State private var cloudSaveState: EntryCloudSaveState = .idle
+    @State private var cloudSaveDismissVersion = 0
     @State private var currentEntryStatus: JournalEntryStatus = .draft
     @State private var activeKeyboardFormattingMode: CreateKeyboardFormattingMode?
     @State private var lastKeyboardHeight: CGFloat = 300
     @State private var selectedKeyboardTextType: CreateKeyboardTextType = .body
     @State private var editorSelectionState = NotebookTextSelectionState()
+    @State private var isKeyboardDismissInProgress = false
 
     private func dismissKeyboard() {
+        isKeyboardDismissInProgress = true
         isTitleFocused = false
-        resetKeyboardFormattingState()
-        isBodyEditorEditing = false
         editorBlurRequestID += 1
+        endWindowEditing()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            isKeyboardDismissInProgress = false
+            isBodyEditorEditing = false
+            resetKeyboardFormattingState()
+            endWindowEditing()
+        }
+    }
+
+    private func endWindowEditing() {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
@@ -1510,8 +1633,9 @@ struct CreateEntryView: View {
             NavigationStack {
                 AddEntryToJournalPage(
                     selectedJournalTitle: $selectedCustomJournalTitle,
+                    selectedJournalTitles: $selectedCustomJournalTitles,
                     onSelect: addEditedEntryToJournal,
-                    onDeselect: removeEditedEntryFromJournal
+                    onSaveSelection: saveEditedEntryJournalSelection
                 )
             }
             .presentationDetents([.large])
@@ -1541,6 +1665,15 @@ struct CreateEntryView: View {
             .presentationDetents([.height(280), .medium])
             .presentationDragIndicator(.visible)
             .presentationBackground(Color.homePageBackground)
+        }
+        .sheet(isPresented: $isShowingStoryboardGenerationProgress) {
+            StoryboardGenerationProgressScreen(phase: storyboardGenerationPhase) {
+                isShowingStoryboardGenerationProgress = false
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(0)
+            .presentationBackground(.clear)
         }
         .alert(presentation.exitConfirmationTitle, isPresented: $isShowingExitConfirmation) {
             Button(presentation.exitConfirmationSaveButtonTitle) {
@@ -1634,10 +1767,7 @@ struct CreateEntryView: View {
             return
         }
 
-        guard let journalTitle = selectedEntryJournalTitle else {
-            isShowingJournalDestinationSheet = true
-            return
-        }
+        let journalTitle = selectedEntryJournalTitle
 
         let apiKey = OpenAITestConfig.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty, apiKey != "PASTE_OPENAI_API_KEY_HERE" else {
@@ -1661,6 +1791,7 @@ struct CreateEntryView: View {
         let requiresEntrySave = activeDraftID == nil || hasUnsavedDraftChanges
         let requiresReferencePhotoSync = requiresEntrySave && hasUnsavedReferencePhotoChanges
         isGeneratingStoryboard = true
+        isShowingStoryboardGenerationProgress = true
         storyboardGenerationPhase = requiresReferencePhotoSync ? .uploadingReferencePhotos : .preparingEntry
 
         Task {
@@ -1673,7 +1804,7 @@ struct CreateEntryView: View {
                     syncReferencePhotos: requiresReferencePhotoSync
                 )
                 activeDraftID = prepareResult.localDraftID
-                cloudSaveState = prepareResult.state
+                setCloudSaveState(prepareResult.state)
                 if case .failed(let message) = prepareResult.state {
                     throw StoryboardGenerationError.openAIMessage(message)
                 }
@@ -1719,11 +1850,25 @@ struct CreateEntryView: View {
                 var storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboard, into: generatedStoryboards)
                 GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
 
-                let cloudStoryboard: EntryStoryboard
+                let storyboardForCompletion: GeneratedStoryboard
                 do {
-                    cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                    let cloudStoryboard = try await SupabaseStoryboardService().persistPrimaryStoryboard(storyboard)
+                    storyboardForCompletion = GeneratedStoryboard(
+                        id: storyboard.id,
+                        clientEntryID: storyboard.clientEntryID,
+                        image: storyboard.image,
+                        promptText: storyboard.promptText,
+                        artStyle: storyboard.artStyle,
+                        panelLayout: storyboard.panelLayout,
+                        sourcePhotoCount: storyboard.sourcePhotoCount,
+                        createdAt: storyboard.createdAt,
+                        imageFileName: storyboard.imageFileName,
+                        storagePath: cloudStoryboard.storagePath,
+                        cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
+                        isPrimary: true
+                    )
                 } catch {
-                    let failedStoryboard = GeneratedStoryboard(
+                    storyboardForCompletion = GeneratedStoryboard(
                         id: storyboard.id,
                         clientEntryID: storyboard.clientEntryID,
                         image: storyboard.image,
@@ -1737,26 +1882,9 @@ struct CreateEntryView: View {
                         cloudSyncState: StoryboardCloudSyncState.failed.rawValue,
                         isPrimary: storyboard.isPrimary
                     )
-                    storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(failedStoryboard, into: storyboardsAfterLocalSave)
-                    GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
-                    generatedStoryboards = storyboardsAfterLocalSave
-                    throw StoryboardGenerationError.openAIMessage("Storyboard saved locally. Cloud storyboard sync failed, so this entry was not completed.")
                 }
-
-                let syncedStoryboard = GeneratedStoryboard(
-                    id: storyboard.id,
-                    clientEntryID: storyboard.clientEntryID,
-                    image: storyboard.image,
-                    promptText: storyboard.promptText,
-                    artStyle: storyboard.artStyle,
-                    panelLayout: storyboard.panelLayout,
-                    sourcePhotoCount: storyboard.sourcePhotoCount,
-                    createdAt: storyboard.createdAt,
-                    imageFileName: storyboard.imageFileName,
-                    storagePath: cloudStoryboard.storagePath,
-                    cloudSyncState: StoryboardCloudSyncState.synced.rawValue,
-                    isPrimary: true
-                )
+                storyboardsAfterLocalSave = GeneratedStoryboardStore.merging(storyboardForCompletion, into: storyboardsAfterLocalSave)
+                GeneratedStoryboardStore.save(storyboardsAfterLocalSave)
 
                 print("[Storytopia] Entry completion started.")
                 print("[Storytopia] Marking entry completed.")
@@ -1793,11 +1921,12 @@ struct CreateEntryView: View {
 
                 await MainActor.run {
                     activeDraftID = completionResult.localDraftID
-                    cloudSaveState = completionResult.state
+                    setCloudSaveState(completionResult.state)
                     let completedSnapshot = currentDraftSnapshot(id: completionResult.localDraftID)
                     loadedDraftSnapshot = completedSnapshot
                     toolbarSavedSnapshot = completedSnapshot
-                    if let journalEntry = currentJournalEntry(id: completionResult.localDraftID) {
+                    if let journalTitle,
+                       let journalEntry = currentJournalEntry(id: completionResult.localDraftID) {
                         StoryEntryStore.upsert(journalEntry, to: journalTitle)
                         onJournalEntryCreated(journalTitle, journalEntry)
                         EntryJournalLinkStore.save(
@@ -1806,12 +1935,13 @@ struct CreateEntryView: View {
                             for: completionResult.localDraftID
                         )
                     }
-                    generatedStoryboards = GeneratedStoryboardStore.merging(syncedStoryboard, into: storyboardsAfterLocalSave)
+                    generatedStoryboards = storyboardsAfterLocalSave
                     GeneratedStoryboardStore.save(generatedStoryboards)
                     currentEntryStatus = .completed
                     isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
                     storyboardGenerationPhase = .completed
                     isGeneratingStoryboard = false
+                    isShowingStoryboardGenerationProgress = false
                     addedJournalTitle = journalTitle
                     UserDefaults.standard.set("completed", forKey: "StorytopiaSelectedEntriesTab")
                     isOpeningCompletedEntryFromEntries = true
@@ -1824,9 +1954,20 @@ struct CreateEntryView: View {
                     generationErrorMessage = error.localizedDescription
                     storyboardGenerationPhase = .failed
                     isGeneratingStoryboard = false
+                    isShowingStoryboardGenerationProgress = false
                 }
             }
         }
+    }
+
+    private func showStoryboardGenerationProgressPreview() {
+        dismissKeyboard()
+
+        if !isGeneratingStoryboard {
+            storyboardGenerationPhase = .generating
+        }
+
+        isShowingStoryboardGenerationProgress = true
     }
 
     private var layoutPage: some View {
@@ -2024,10 +2165,15 @@ struct CreateEntryView: View {
                     Image(systemName: presentation.closeButtonSystemName)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.storyInk.opacity(0.72))
-                        .frame(width: 30, height: 30)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.homeBorder.opacity(0.95), lineWidth: 1)
+                        )
                         .contentShape(Rectangle())
                 }
-                .frame(width: showsToolbarSaveButton ? 74 : 30, alignment: .leading)
+                .frame(width: showsToolbarSaveButton ? 88 : 44, alignment: .leading)
                 .buttonStyle(.plain)
                 .accessibilityLabel(presentation.closeButtonAccessibilityLabel)
             }
@@ -2072,23 +2218,32 @@ struct CreateEntryView: View {
                     performToolbarSave()
                 } label: {
                     HStack(spacing: 4) {
-                        Text(toolbarSaveButtonTitle)
-                            .font(.system(size: 13, weight: .bold))
-                            .lineLimit(1)
-
                         if isToolbarSaveInProgress {
                             ProgressView()
                                 .controlSize(.mini)
                                 .tint(Color.storyPurple)
                         }
 
+                        Text(toolbarSaveButtonTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+
                         if showsToolbarSavedState {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 10, weight: .bold))
                         }
                     }
-                    .frame(width: 74, alignment: .trailing)
+                    .frame(width: 88, height: 44)
                     .foregroundStyle(toolbarSaveButtonColor)
+                    .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.homeBorder.opacity(0.95), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                    .opacity(canUseToolbarSaveButton || isToolbarSaveInProgress ? 1 : 0.52)
+                    .animation(.snappy(duration: 0.18), value: isToolbarSaveInProgress)
+                    .animation(.snappy(duration: 0.18), value: showsToolbarSavedState)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canUseToolbarSaveButton || isToolbarSaveInProgress)
@@ -2129,14 +2284,18 @@ struct CreateEntryView: View {
         }
 
         if showsToolbarSavedState {
-            return .green
+            return Color.storyPurple
         }
 
         return canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
     }
 
     private var toolbarSaveButtonTitle: String {
-        showsToolbarSavedState ? "Saved" : "Save"
+        if isToolbarSaveInProgress {
+            return "Saving"
+        }
+
+        return showsToolbarSavedState ? "Saved" : "Save"
     }
 
     private var showsToolbarSavedState: Bool {
@@ -2210,11 +2369,16 @@ struct CreateEntryView: View {
 
     private func closeEditorWithoutSaving() {
         dismissKeyboard()
-        clearEditor()
-        activeDraftID = nil
-        isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
         withAnimation(.snappy(duration: 0.32)) {
             dismissCreate()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            if selectedPage != .create {
+                clearEditor()
+                activeDraftID = nil
+                isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
+            }
         }
     }
 
@@ -2227,6 +2391,7 @@ struct CreateEntryView: View {
         beginToolbarSavedFeedback()
 
         Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
             await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: false)
         }
     }
@@ -2236,6 +2401,7 @@ struct CreateEntryView: View {
         beginToolbarSavedFeedback()
 
         Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
             await saveDraftToLocalAndCloud(forceSave: false, navigatesToOptions: false)
         }
     }
@@ -2271,6 +2437,29 @@ struct CreateEntryView: View {
         toolbarSaveFeedbackVersion += 1
         isToolbarSaveInProgress = false
         showsToolbarSavedFeedback = false
+    }
+
+    private func setCloudSaveState(_ state: EntryCloudSaveState) {
+        cloudSaveDismissVersion += 1
+        let dismissVersion = cloudSaveDismissVersion
+
+        withAnimation(.snappy(duration: 0.22)) {
+            cloudSaveState = state
+        }
+
+        guard state.shouldDismissAutomatically else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
+            guard cloudSaveDismissVersion == dismissVersion, cloudSaveState == state else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                cloudSaveState = .idle
+            }
+        }
     }
 
     private func saveFromExitConfirmation() {
@@ -2432,7 +2621,7 @@ struct CreateEntryView: View {
             return
         }
 
-        cloudSaveState = payload.photos.isEmpty ? .saving : .uploadingPhotos
+        setCloudSaveState(payload.photos.isEmpty ? .saving : .uploadingPhotos)
 
         do {
             let result = try await EntrySaveService().saveEntryPreservingStatus(
@@ -2446,14 +2635,14 @@ struct CreateEntryView: View {
             toolbarSavedSnapshot = savedSnapshot
             isDraftSaved = !CreateEntryDraftStore.loadAll().isEmpty
             recentEntryLocations = EntryLocationRecentStore.all
-            cloudSaveState = result.state
+            setCloudSaveState(result.state)
             completeToolbarSavedFeedback(for: savedSnapshot)
 
             if navigatesToOptions {
                 isShowingEntryOptionsPage = true
             }
         } catch {
-            cloudSaveState = .failed("Could not save this entry locally.")
+            setCloudSaveState(.failed("Could not save this entry locally."))
             cancelToolbarSavedFeedback()
         }
     }
@@ -2493,7 +2682,7 @@ struct CreateEntryView: View {
         storyboardPhotos = Array(repeating: nil, count: 5)
         toolbarSavedSnapshot = nil
         toolbarSavedJournalEntryID = nil
-        cloudSaveState = .idle
+        setCloudSaveState(.idle)
         storyboardGenerationPhase = .ready
         showsToolbarSavedFeedback = false
         isToolbarSaveInProgress = false
@@ -2515,8 +2704,10 @@ struct CreateEntryView: View {
         selectedPaperColorIndex = 0
         isShowingEntryOptionsPage = false
         selectedCustomJournalTitle = nil
+        selectedCustomJournalTitles = []
         loadedDraftSnapshot = nil
         linkedJournalTitle = nil
+        linkedJournalTitles = []
         resetKeyboardFormattingState()
         isBodyEditorEditing = false
         isKeyboardVisible = false
@@ -2525,10 +2716,17 @@ struct CreateEntryView: View {
     private func loadLinkedJournalTitle(for draftID: UUID?) {
         guard let draftID else {
             linkedJournalTitle = nil
+            linkedJournalTitles = []
+            selectedCustomJournalTitle = nil
+            selectedCustomJournalTitles = []
             return
         }
 
-        linkedJournalTitle = EntryJournalLinkStore.loadJournalTitle(for: draftID)
+        let journalTitles = EntryJournalLinkStore.loadJournalTitles(for: draftID)
+        linkedJournalTitles = journalTitles
+        linkedJournalTitle = journalTitles.sorted().first
+        selectedCustomJournalTitles = journalTitles
+        selectedCustomJournalTitle = journalTitles.sorted().first
     }
 
     private func loadSavedDraftIfNeeded() {
@@ -2650,6 +2848,10 @@ struct CreateEntryView: View {
                             usesTexturedPaperEffect: selectedPaperStyleChoice.usesTexturedPaperTextEffect,
                             onSelectionStateChange: updateEditorSelectionState,
                             onEditingEnded: {
+                                guard !isKeyboardDismissInProgress else {
+                                    return
+                                }
+
                                 isBodyEditorEditing = false
                                 resetKeyboardFormattingState()
                             },
@@ -2692,7 +2894,7 @@ struct CreateEntryView: View {
     @ViewBuilder
     private func completedEntryStoryboardHeader(containerWidth: CGFloat) -> some View {
         if let completedEntryOpenedStoryboardImage {
-            let imageWidth = containerWidth * 0.75
+            let imageWidth = containerWidth * 0.95
             let aspectRatio = max(completedEntryOpenedStoryboardImage.size.width / completedEntryOpenedStoryboardImage.size.height, 0.1)
             let imageHeight = imageWidth / aspectRatio
             let desiredHeight = imageHeight + 40
@@ -2727,7 +2929,7 @@ struct CreateEntryView: View {
     }
 
     private var showsDraftKeyboardAccessory: Bool {
-        isBodyEditorEditing || isTitleFocused
+        isKeyboardDismissInProgress || isBodyEditorEditing || isTitleFocused
     }
 
     private func editorScrollContentHeight(for visibleHeight: CGFloat) -> CGFloat {
@@ -2934,6 +3136,10 @@ struct CreateEntryView: View {
 
                     toolbarActionButton(title: "Paper", systemName: "doc.text", accessibilityLabel: "Background") {
                         openPaperOptions()
+                    }
+
+                    toolbarActionButton(title: "Journal", systemName: "book.closed") {
+                        openAddToJournalPage()
                     }
 
                     toolbarActionButton(title: "Prompts", systemName: "lightbulb") {
@@ -3680,6 +3886,25 @@ struct CreateEntryView: View {
         isShowingPaperFormattingSheet = true
     }
 
+    private func openAddToJournalPage() {
+        dismissKeyboard()
+        var journalTitles = linkedJournalTitles.union(selectedCustomJournalTitles)
+        if let currentEntry = currentJournalEntry() {
+            journalTitles.formUnion(StoryEntryStore.journalTitles(containing: currentEntry))
+        }
+
+        if let linkedJournalTitle {
+            journalTitles.insert(linkedJournalTitle)
+        }
+        if let selectedCustomJournalTitle {
+            journalTitles.insert(selectedCustomJournalTitle)
+        }
+
+        selectedCustomJournalTitles = journalTitles
+        selectedCustomJournalTitle = journalTitles.sorted().first
+        isShowingAddToJournalPage = true
+    }
+
     private func openEntryDateSheet() {
         dismissKeyboard()
         isShowingEntryDateSheet = true
@@ -3723,7 +3948,7 @@ struct CreateEntryView: View {
             return directJournalTitle
         }
 
-        return selectedCustomJournalTitle
+        return selectedCustomJournalTitle ?? selectedCustomJournalTitles.sorted().first
     }
 
     private var hasStoryboardPhotos: Bool {
@@ -3807,7 +4032,9 @@ struct CreateEntryView: View {
             return
         }
         selectedCustomJournalTitle = journalTitle
+        selectedCustomJournalTitles.insert(journalTitle)
         linkedJournalTitle = journalTitle
+        linkedJournalTitles.insert(journalTitle)
         if let linkedDraftID {
             EntryJournalLinkStore.save(journalTitle: journalTitle, journalEntryID: entry.id, for: linkedDraftID)
         }
@@ -3832,20 +4059,88 @@ struct CreateEntryView: View {
         dismissKeyboard()
 
         if let activeDraftID {
-            if let journalEntryID = EntryJournalLinkStore.loadJournalEntryID(for: activeDraftID) {
-                StoryEntryStore.delete(entryID: journalEntryID, from: journalTitle)
-            } else if let currentEntry = currentJournalEntry() {
-                StoryEntryStore.deleteFirstMatchingContent(currentEntry, from: journalTitle)
+            if let currentEntry = currentJournalEntry() {
+                StoryEntryStore.delete(
+                    entryIDs: EntryJournalLinkStore.loadJournalEntryIDs(for: activeDraftID),
+                    matching: currentEntry,
+                    from: journalTitle
+                )
             }
 
-            EntryJournalLinkStore.remove(for: activeDraftID)
+            EntryJournalLinkStore.remove(journalTitle: journalTitle, for: activeDraftID)
         } else if let currentEntry = currentJournalEntry() {
             StoryEntryStore.deleteFirstMatchingContent(currentEntry, from: journalTitle)
         }
 
-        selectedCustomJournalTitle = nil
-        linkedJournalTitle = nil
+        selectedCustomJournalTitles.remove(journalTitle)
+        linkedJournalTitles.remove(journalTitle)
+        selectedCustomJournalTitle = selectedCustomJournalTitles.sorted().first
+        linkedJournalTitle = linkedJournalTitles.sorted().first
         addedJournalTitle = nil
+        isShowingAddToJournalPage = false
+    }
+
+    private func saveEditedEntryJournalSelection(_ journalTitles: Set<String>) {
+        dismissKeyboard()
+
+        var linkedDraftID = activeDraftID
+        if presentation.isEditDraft {
+            saveEditedDraftChanges()
+            linkedDraftID = activeDraftID ?? linkedDraftID
+        }
+
+        let previousJournalTitles = selectedCustomJournalTitles
+        let addedJournalTitles = journalTitles.subtracting(previousJournalTitles)
+        let removedJournalTitles = previousJournalTitles.subtracting(journalTitles)
+
+        if !addedJournalTitles.isEmpty,
+           let entry = currentJournalEntry(id: linkedDraftID ?? UUID()) {
+            addedJournalTitles.sorted().forEach { journalTitle in
+                StoryEntryStore.add(entry, to: journalTitle)
+                onJournalEntryCreated(journalTitle, entry)
+                if let linkedDraftID {
+                    EntryJournalLinkStore.save(journalTitle: journalTitle, journalEntryID: entry.id, for: linkedDraftID)
+                }
+            }
+        }
+
+        removedJournalTitles.sorted().forEach { journalTitle in
+            if let linkedDraftID,
+               let currentEntry = currentJournalEntry() {
+                StoryEntryStore.delete(
+                    entryIDs: EntryJournalLinkStore.loadJournalEntryIDs(for: linkedDraftID),
+                    matching: currentEntry,
+                    from: journalTitle
+                )
+                EntryJournalLinkStore.remove(journalTitle: journalTitle, for: linkedDraftID)
+            } else if let currentEntry = currentJournalEntry() {
+                StoryEntryStore.deleteFirstMatchingContent(currentEntry, from: journalTitle)
+            }
+        }
+
+        selectedCustomJournalTitles = journalTitles
+        selectedCustomJournalTitle = journalTitles.sorted().first
+        linkedJournalTitles = journalTitles
+        linkedJournalTitle = journalTitles.sorted().first
+
+        if let addedJournalTitle = addedJournalTitles.sorted().first {
+            withAnimation(.snappy(duration: 0.24)) {
+                self.addedJournalTitle = addedJournalTitle
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                guard self.addedJournalTitle == addedJournalTitle else {
+                    return
+                }
+
+                withAnimation(.snappy(duration: 0.24)) {
+                    self.addedJournalTitle = nil
+                }
+            }
+        } else {
+            self.addedJournalTitle = nil
+        }
+
         isShowingAddToJournalPage = false
     }
 
@@ -3896,7 +4191,7 @@ struct CreateEntryView: View {
 
             Text(message)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.storyInk)
+                .foregroundStyle(cloudSaveStatusTextColor)
                 .lineLimit(2)
 
             Spacer(minLength: 10)
@@ -3938,25 +4233,34 @@ struct CreateEntryView: View {
                 .tint(Color.storyPurple)
                 .frame(width: 30, height: 30)
         case .saved, .photosUploaded:
-            Image(systemName: "checkmark.icloud.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.green)
+                .foregroundStyle(Color.storyPurple)
                 .frame(width: 30, height: 30)
-                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .savedLocally:
-            Image(systemName: "tray.and.arrow.down.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.storyPurple)
                 .frame(width: 30, height: 30)
                 .background(Color.storyPurple.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .failed, .photoUploadFailed:
-            Image(systemName: "exclamationmark.icloud.fill")
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.red)
                 .frame(width: 30, height: 30)
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         case .idle:
             EmptyView()
+        }
+    }
+
+    private var cloudSaveStatusTextColor: Color {
+        switch cloudSaveState {
+        case .saved, .photosUploaded:
+            return Color.storyPurple
+        default:
+            return Color.storyInk
         }
     }
 
@@ -5803,8 +6107,120 @@ struct CreateEntryView: View {
             Text("Estimated time: around 2 minutes")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.storyInk.opacity(0.46))
+
+            Button {
+                showStoryboardGenerationProgressPreview()
+            } label: {
+                Text("Preview generation progress screen")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.storyPurple)
+                    .padding(.top, 2)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.top, 2)
+    }
+}
+
+private struct StoryboardGenerationProgressScreen: View {
+    let phase: StoryboardGenerationPhase
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Image("generate-storyboard-bg")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+                .overlay(Color.black.opacity(0.24).ignoresSafeArea())
+
+            Color.storyPurple.opacity(0.08)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(Color.storyPurple)
+                    .frame(width: 64, height: 64)
+                    .background(Color.storyPurple.opacity(0.1), in: Circle())
+
+                VStack(spacing: 8) {
+                    Text("Generating your storyboard...")
+                        .font(.system(size: 19, weight: .bold, design: .serif))
+                        .foregroundStyle(Color.storyInk)
+                        .multilineTextAlignment(.center)
+
+                    Text(phase.progressTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.homeMutedText)
+                        .multilineTextAlignment(.center)
+                }
+
+                StoryboardGenerationProgressBar(value: phase.progressValue)
+                    .padding(.top, 6)
+            }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 34)
+            .frame(width: 280)
+            .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.82), lineWidth: 1)
+            )
+            .shadow(color: Color.storyInk.opacity(0.18), radius: 24, y: 14)
+
+            VStack {
+                HStack {
+                    Spacer()
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.storyInk.opacity(0.68))
+                            .frame(width: 40, height: 40)
+                            .background(Color.white.opacity(0.88), in: Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.7), lineWidth: 1)
+                            )
+                            .shadow(color: Color.storyInk.opacity(0.12), radius: 10, y: 5)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close generation progress")
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 34)
+        }
+        .statusBarHidden()
+    }
+}
+
+private struct StoryboardGenerationProgressBar: View {
+    let value: Double
+
+    private var clampedValue: Double {
+        min(max(value, 0), 1)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.storyPurple.opacity(0.14))
+
+                Capsule()
+                    .fill(Color.storyPurple)
+                    .frame(width: max(28, proxy.size.width * CGFloat(clampedValue)))
+            }
+        }
+        .frame(height: 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Storyboard generation progress")
+        .accessibilityValue("\(Int(clampedValue * 100)) percent")
     }
 }
 
@@ -6089,12 +6505,13 @@ private struct JournalEntryPromptsSheet: View {
 
 private struct AddEntryToJournalPage: View {
     @Binding var selectedJournalTitle: String?
+    @Binding var selectedJournalTitles: Set<String>
 
     let onSelect: (String) -> Void
-    let onDeselect: (String) -> Void
+    let onSaveSelection: (Set<String>) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var pendingJournalTitle: String?
+    @State private var pendingJournalTitles: Set<String> = []
     @State private var isCreateJournalAlertPresented = false
     @State private var newJournalName = ""
 
@@ -6112,10 +6529,10 @@ private struct AddEntryToJournalPage: View {
                 LazyVStack(spacing: 0) {
                     ForEach(journals) { journal in
                         Button {
-                            if pendingJournalTitle == journal.title {
-                                pendingJournalTitle = nil
+                            if pendingJournalTitles.contains(journal.title) {
+                                pendingJournalTitles.remove(journal.title)
                             } else {
-                                pendingJournalTitle = journal.title
+                                pendingJournalTitles.insert(journal.title)
                             }
                         } label: {
                             journalRow(journal)
@@ -6152,12 +6569,9 @@ private struct AddEntryToJournalPage: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save") {
-                    if let pendingJournalTitle {
-                        selectedJournalTitle = pendingJournalTitle
-                        onSelect(pendingJournalTitle)
-                    } else if let selectedJournalTitle {
-                        onDeselect(selectedJournalTitle)
-                    }
+                    onSaveSelection(pendingJournalTitles)
+                    selectedJournalTitles = pendingJournalTitles
+                    selectedJournalTitle = pendingJournalTitles.sorted().first
                     dismiss()
                 }
                 .font(.system(size: 16, weight: .bold))
@@ -6194,26 +6608,29 @@ private struct AddEntryToJournalPage: View {
             Text("Name the journal where this entry should be added.")
         }
         .onAppear {
-            pendingJournalTitle = selectedJournalTitle
+            pendingJournalTitles = selectedJournalTitles
+            if let selectedJournalTitle {
+                pendingJournalTitles.insert(selectedJournalTitle)
+            }
         }
     }
 
     private var canUseDoneButton: Bool {
-        pendingJournalTitle != selectedJournalTitle
-            || (pendingJournalTitle != nil && selectedJournalTitle == nil)
-            || (pendingJournalTitle == nil && selectedJournalTitle != nil)
+        pendingJournalTitles != selectedJournalTitles
     }
 
     private func journalRow(_ journal: PrototypeChapter) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: pendingJournalTitle == journal.title ? "checkmark.circle.fill" : "circle")
+        let isSelected = pendingJournalTitles.contains(journal.title)
+
+        return HStack(spacing: 10) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(pendingJournalTitle == journal.title ? Color.storyPurple : Color.homeBorder)
+                .foregroundStyle(isSelected ? Color.storyPurple : Color.homeBorder)
                 .frame(width: 22, height: 22)
 
             AddEntryJournalNotebookCover(
                 color: Color.storyPurple.opacity(0.82),
-                isSelected: false
+                isSelected: isSelected
             )
             .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
 
@@ -6234,6 +6651,7 @@ private struct AddEntryToJournalPage: View {
         .frame(height: 50)
         .contentShape(Rectangle())
         .accessibilityLabel(journal.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var createNewJournalButton: some View {
@@ -6273,7 +6691,8 @@ private struct AddEntryToJournalPage: View {
 
         UserChapterStore.add(journal)
         selectedJournalTitle = journal.title
-        pendingJournalTitle = journal.title
+        selectedJournalTitles.insert(journal.title)
+        pendingJournalTitles.insert(journal.title)
         newJournalName = ""
         onSelect(journal.title)
         dismiss()
@@ -6968,7 +7387,7 @@ struct NotebookPaperBackground: View {
                         .padding(.leading, NotebookMetrics.marginLeading)
 
                     pageHoles
-                        .padding(.leading, 20)
+                        .padding(.leading, 10)
                         .padding(.top, 92)
                 }
             }
@@ -7252,7 +7671,7 @@ private struct CreatePaperPreview: View {
         Rectangle()
             .fill(Color.storyRose.opacity(0.6))
             .frame(width: 1)
-            .offset(x: size.width * 0.18)
+            .offset(x: size.width * 0.10)
     }
 
 }

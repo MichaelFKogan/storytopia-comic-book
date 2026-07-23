@@ -254,6 +254,48 @@ enum EntryLocationRecentStore {
     }
 }
 
+enum StorytopiaLocalAccountScope {
+    private static let activeUserIDKey = "StorytopiaActiveLocalUserID"
+
+    static var currentScopeID: String {
+        UserDefaults.standard.string(forKey: activeUserIDKey) ?? "anonymous"
+    }
+
+    static var isAnonymous: Bool {
+        currentScopeID == "anonymous"
+    }
+
+    static func setActiveUserID(_ userID: UUID?) {
+        if let userID {
+            UserDefaults.standard.set(userID.uuidString.lowercased(), forKey: activeUserIDKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: activeUserIDKey)
+        }
+    }
+
+    static func scopedDirectory(named name: String) -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("StorytopiaAccounts", isDirectory: true)
+            .appendingPathComponent(currentScopeID, isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
+    }
+
+    static func anonymousDirectory(named name: String) -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("StorytopiaAccounts", isDirectory: true)
+            .appendingPathComponent("anonymous", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
+    }
+
+    static func scopedUserDefaultsKey(_ baseKey: String) -> String {
+        "\(baseKey).\(currentScopeID)"
+    }
+
+    static func anonymousUserDefaultsKey(_ baseKey: String) -> String {
+        "\(baseKey).anonymous"
+    }
+}
+
 enum CreateEntryDraftStore {
     private static let metadataFileName = "draft.json"
     private static let thumbnailFileName = "thumbnail.jpg"
@@ -365,7 +407,7 @@ enum CreateEntryDraftStore {
     ) -> UUID? {
         let draftID = id ?? UUID()
         let draftDirectory = directory(for: draftID)
-        let existingDraft = id.flatMap(load(id:))
+        let existingDraft = id.flatMap { loadDraft(at: directory(for: $0)) }
 
         try? FileManager.default.removeItem(at: draftDirectory)
 
@@ -560,8 +602,31 @@ enum CreateEntryDraftStore {
     }
 
     private static func migrateLegacyDraftIfNeeded() {
+        if !StorytopiaLocalAccountScope.isAnonymous,
+           let anonymousDraftURLs = try? FileManager.default.contentsOfDirectory(
+                at: anonymousDraftsDirectory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+           ) {
+            mergeLegacyDrafts(anonymousDraftURLs.compactMap(loadDraft(at:)))
+        }
+
+        if let legacyDraftURLs = try? FileManager.default.contentsOfDirectory(
+            at: legacyDraftsDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            let legacyDrafts = legacyDraftURLs.compactMap(loadDraft(at:))
+            if !legacyDrafts.isEmpty {
+                mergeLegacyDrafts(legacyDrafts)
+            }
+        }
+
+        guard !FileManager.default.fileExists(atPath: draftsDirectory.path) else {
+            return
+        }
+
         guard
-            !FileManager.default.fileExists(atPath: draftsDirectory.path),
             let legacyDraft = loadDraft(at: legacyDraftDirectory)
         else {
             return
@@ -593,18 +658,61 @@ enum CreateEntryDraftStore {
         try? FileManager.default.removeItem(at: legacyDraftDirectory)
     }
 
+    private static func mergeLegacyDrafts(_ legacyDrafts: [CreateEntryDraft]) {
+        for legacyDraft in legacyDrafts {
+            guard !FileManager.default.fileExists(atPath: directory(for: legacyDraft.id).path) else {
+                continue
+            }
+
+            _ = save(
+                id: legacyDraft.id,
+                title: legacyDraft.title,
+                text: legacyDraft.text,
+                richText: legacyDraft.richText,
+                referencePhotos: legacyDraft.photos,
+                artStyle: legacyDraft.artStyle,
+                location: legacyDraft.location,
+                date: legacyDraft.date,
+                datePrecision: legacyDraft.datePrecision,
+                savesDraft: legacyDraft.savesDraft,
+                isPrivate: legacyDraft.isPrivate,
+                status: JournalEntryStatus(rawValue: legacyDraft.status) ?? .draft,
+                fontChoiceRawValue: legacyDraft.fontChoiceRawValue,
+                textColorIndex: legacyDraft.textColorIndex,
+                textSize: legacyDraft.textSize,
+                paperStyleRawValue: legacyDraft.paperStyleRawValue,
+                paperColorIndex: legacyDraft.paperColorIndex,
+                isBold: legacyDraft.isBold,
+                isItalic: legacyDraft.isItalic,
+                isUnderlined: legacyDraft.isUnderlined,
+                isStrikethrough: legacyDraft.isStrikethrough,
+                isHighlighted: legacyDraft.isHighlighted,
+                textAlignmentRawValue: legacyDraft.textAlignmentRawValue,
+                thumbnail: legacyDraft.thumbnail
+            )
+        }
+    }
+
     private static func directory(for id: UUID) -> URL {
         draftsDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
     private static var draftsDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CreateEntryDrafts", isDirectory: true)
+        StorytopiaLocalAccountScope.scopedDirectory(named: "CreateEntryDrafts")
     }
 
     private static var legacyDraftDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CreateEntryDraft", isDirectory: true)
+    }
+
+    private static var legacyDraftsDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CreateEntryDrafts", isDirectory: true)
+    }
+
+    private static var anonymousDraftsDirectory: URL {
+        StorytopiaLocalAccountScope.anonymousDirectory(named: "CreateEntryDrafts")
     }
 }
 
@@ -673,8 +781,10 @@ enum GeneratedStoryboardStore {
     private static let metadataKey = "StorytopiaGeneratedStoryboardMetadata"
 
     static func load() -> [GeneratedStoryboard] {
+        migrateLegacyStoryboardsIfNeeded()
+
         guard
-            let metadataData = UserDefaults.standard.data(forKey: metadataKey),
+            let metadataData = UserDefaults.standard.data(forKey: scopedMetadataKey),
             let metadata = try? JSONDecoder().decode([GeneratedStoryboardMetadata].self, from: metadataData)
         else {
             return []
@@ -707,6 +817,8 @@ enum GeneratedStoryboardStore {
     }
 
     static func save(_ storyboards: [GeneratedStoryboard]) {
+        migrateLegacyStoryboardsIfNeeded()
+
         let metadata = storyboards.compactMap { storyboard -> GeneratedStoryboardMetadata? in
             guard let imageFileName = storyboard.imageFileName else {
                 return nil
@@ -731,7 +843,7 @@ enum GeneratedStoryboardStore {
             return
         }
 
-        UserDefaults.standard.set(metadataData, forKey: metadataKey)
+        UserDefaults.standard.set(metadataData, forKey: scopedMetadataKey)
     }
 
     static func delete(_ storyboards: [GeneratedStoryboard]) {
@@ -820,8 +932,77 @@ enum GeneratedStoryboardStore {
     }
 
     private static var imagesDirectory: URL {
+        StorytopiaLocalAccountScope.scopedDirectory(named: "GeneratedStoryboards")
+    }
+
+    private static var legacyImagesDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("GeneratedStoryboards", isDirectory: true)
+    }
+
+    private static var scopedMetadataKey: String {
+        StorytopiaLocalAccountScope.scopedUserDefaultsKey(metadataKey)
+    }
+
+    private static func migrateLegacyStoryboardsIfNeeded() {
+        if !StorytopiaLocalAccountScope.isAnonymous,
+           let anonymousMetadataData = UserDefaults.standard.data(forKey: StorytopiaLocalAccountScope.anonymousUserDefaultsKey(metadataKey)) {
+            copyImages(from: StorytopiaLocalAccountScope.anonymousDirectory(named: "GeneratedStoryboards"))
+            mergeMetadataData(anonymousMetadataData)
+        }
+
+        if let legacyMetadataData = UserDefaults.standard.data(forKey: metadataKey) {
+            copyImages(from: legacyImagesDirectory)
+            mergeMetadataData(legacyMetadataData)
+        }
+    }
+
+    private static func copyImages(from sourceDirectory: URL) {
+        try? FileManager.default.createDirectory(
+            at: imagesDirectory,
+            withIntermediateDirectories: true
+        )
+
+        if let imageURLs = try? FileManager.default.contentsOfDirectory(
+            at: sourceDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for imageURL in imageURLs {
+                let destinationURL = imagesDirectory.appendingPathComponent(imageURL.lastPathComponent)
+                guard !FileManager.default.fileExists(atPath: destinationURL.path) else {
+                    continue
+                }
+                try? FileManager.default.copyItem(at: imageURL, to: destinationURL)
+            }
+        }
+    }
+
+    private static func mergeMetadataData(_ metadataData: Data) {
+        guard let sourceMetadata = try? JSONDecoder().decode([GeneratedStoryboardMetadata].self, from: metadataData) else {
+            return
+        }
+
+        let existingMetadata: [GeneratedStoryboardMetadata]
+        if let existingMetadataData = UserDefaults.standard.data(forKey: scopedMetadataKey),
+           let decodedMetadata = try? JSONDecoder().decode([GeneratedStoryboardMetadata].self, from: existingMetadataData) {
+            existingMetadata = decodedMetadata
+        } else {
+            existingMetadata = []
+        }
+
+        let existingIDs = Set(existingMetadata.map(\.id))
+        let metadataToAdd = sourceMetadata.filter { !existingIDs.contains($0.id) }
+        guard !metadataToAdd.isEmpty else {
+            return
+        }
+
+        let mergedMetadata = metadataToAdd + existingMetadata
+        guard let mergedData = try? JSONEncoder().encode(mergedMetadata) else {
+            return
+        }
+
+        UserDefaults.standard.set(mergedData, forKey: scopedMetadataKey)
     }
 }
 

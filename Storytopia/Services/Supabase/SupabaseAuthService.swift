@@ -18,6 +18,7 @@ final class SupabaseAuthStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let client: SupabaseClient
+    private let skipsSessionRefresh: Bool
     private var authStateTask: Task<Void, Never>?
 
     var userID: UUID? {
@@ -28,10 +29,28 @@ final class SupabaseAuthStore: ObservableObject {
         currentUser?.email ?? "Signed in"
     }
 
-    init(client: SupabaseClient = SupabaseService.shared) {
+    var email: String? {
+        currentUser?.email
+    }
+
+    init(
+        client: SupabaseClient = SupabaseService.shared,
+        startsListening: Bool = true,
+        validatesConfiguration: Bool = true,
+        skipsSessionRefresh: Bool = false
+    ) {
         self.client = client
-        validateConfiguration()
-        startListening()
+        self.skipsSessionRefresh = skipsSessionRefresh
+
+        if validatesConfiguration {
+            validateConfiguration()
+        } else {
+            status = .signedOut
+        }
+
+        if startsListening {
+            startListening()
+        }
     }
 
     deinit {
@@ -63,6 +82,7 @@ final class SupabaseAuthStore: ObservableObject {
 
         do {
             try await client.auth.signOut()
+            StorytopiaLocalAccountScope.setActiveUserID(nil)
             currentUser = nil
             status = .signedOut
         } catch {
@@ -71,15 +91,21 @@ final class SupabaseAuthStore: ObservableObject {
     }
 
     func refreshCurrentUser() async {
+        if skipsSessionRefresh {
+            return
+        }
+
         if case .misconfigured = status {
             return
         }
 
         do {
             let session = try await client.auth.session
+            StorytopiaLocalAccountScope.setActiveUserID(session.user.id)
             currentUser = session.user
             status = .signedIn
         } catch {
+            StorytopiaLocalAccountScope.setActiveUserID(nil)
             currentUser = nil
             status = .signedOut
         }
@@ -109,6 +135,7 @@ final class SupabaseAuthStore: ObservableObject {
                         return
                     }
 
+                    StorytopiaLocalAccountScope.setActiveUserID(session?.user.id)
                     self.currentUser = session?.user
                     self.status = session == nil ? .signedOut : .signedIn
                 }
@@ -123,6 +150,18 @@ final class SupabaseAuthStore: ObservableObject {
         }
 
         return "Authentication is unavailable right now. Please try again."
+    }
+
+    static var preview: SupabaseAuthStore {
+        SupabaseAuthStore(
+            client: SupabaseClient(
+                supabaseURL: URL(string: "https://example.supabase.co")!,
+                supabaseKey: "preview-supabase-anon-key"
+            ),
+            startsListening: false,
+            validatesConfiguration: false,
+            skipsSessionRefresh: true
+        )
     }
 }
 
