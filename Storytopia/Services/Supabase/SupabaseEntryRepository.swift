@@ -1,5 +1,6 @@
 import Foundation
 import Supabase
+import UIKit
 
 struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
@@ -117,6 +118,82 @@ struct JournalEntryUpdate: Encodable, Sendable {
     let status: String?
 }
 
+struct StoryJournal: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    let userID: UUID
+    let title: String
+    let subtitle: String?
+    let colorHex: String?
+    let symbol: String?
+    let coverStoragePath: String?
+    let kind: String
+    let isFavorite: Bool
+    let displayOrder: Int
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case title
+        case subtitle
+        case colorHex = "color_hex"
+        case symbol
+        case coverStoragePath = "cover_storage_path"
+        case kind
+        case isFavorite = "is_favorite"
+        case displayOrder = "display_order"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct StoryJournalPayload: Encodable, Sendable {
+    let id: UUID
+    let userID: UUID
+    let title: String
+    let subtitle: String?
+    let colorHex: String?
+    let symbol: String?
+    let kind: String
+    let isFavorite: Bool
+    let displayOrder: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case title
+        case subtitle
+        case colorHex = "color_hex"
+        case symbol
+        case kind
+        case isFavorite = "is_favorite"
+        case displayOrder = "display_order"
+    }
+}
+
+private struct JournalCoverUpdate: Encodable, Sendable {
+    let coverStoragePath: String
+
+    enum CodingKeys: String, CodingKey {
+        case coverStoragePath = "cover_storage_path"
+    }
+}
+
+private struct JournalEntryMembershipPayload: Encodable, Sendable {
+    let userID: UUID
+    let journalID: UUID
+    let clientEntryID: UUID
+    let position: Int
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case journalID = "journal_id"
+        case clientEntryID = "client_entry_id"
+        case position
+    }
+}
+
 enum JournalEntryStatus: String, Codable, Sendable {
     case draft
     case completed
@@ -136,6 +213,191 @@ enum JournalEntryRepositoryError: LocalizedError {
             return "Add a title or entry text first."
         case .operationFailed:
             return "The entry could not be saved. Please try again."
+        }
+    }
+}
+
+enum StoryJournalRepositoryError: LocalizedError {
+    case notAuthenticated
+    case operationFailed
+    case invalidCover
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "Please sign in before editing journals."
+        case .operationFailed:
+            return "The journal could not be saved. Please try again."
+        case .invalidCover:
+            return "The journal cover could not be prepared for upload."
+        }
+    }
+}
+
+struct SupabaseJournalRepository {
+    private let client: SupabaseClient
+    private let coverBucketName = "journal-covers"
+
+    init(client: SupabaseClient = SupabaseService.shared) {
+        self.client = client
+    }
+
+    func getJournals() async throws -> [StoryJournal] {
+        let userID = try await authenticatedUserID()
+
+        do {
+            return try await client
+                .from("journals")
+                .select()
+                .eq("user_id", value: userID)
+                .order("display_order", ascending: true)
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    @discardableResult
+    func upsertJournal(
+        id: UUID,
+        title: String,
+        subtitle: String?,
+        colorHex: String?,
+        symbol: String?,
+        kind: String,
+        isFavorite: Bool,
+        displayOrder: Int
+    ) async throws -> StoryJournal {
+        let userID = try await authenticatedUserID()
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            return try await client
+                .from("journals")
+                .upsert(
+                    StoryJournalPayload(
+                        id: id,
+                        userID: userID,
+                        title: cleanTitle.isEmpty ? "Untitled Journal" : cleanTitle,
+                        subtitle: subtitle?.trimmedOrNil,
+                        colorHex: colorHex?.trimmedOrNil,
+                        symbol: symbol?.trimmedOrNil,
+                        kind: kind,
+                        isFavorite: isFavorite,
+                        displayOrder: displayOrder
+                    ),
+                    onConflict: "user_id,id"
+                )
+                .select()
+                .single()
+                .execute()
+                .value
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    func deleteJournal(id: UUID) async throws {
+        let userID = try await authenticatedUserID()
+
+        do {
+            try await client
+                .from("journals")
+                .delete()
+                .eq("id", value: id)
+                .eq("user_id", value: userID)
+                .execute()
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    func replaceJournalEntries(journalID: UUID, clientEntryIDs: [UUID]) async throws {
+        let userID = try await authenticatedUserID()
+
+        do {
+            try await client
+                .from("journal_entries")
+                .delete()
+                .eq("journal_id", value: journalID)
+                .eq("user_id", value: userID)
+                .execute()
+
+            var seenEntryIDs = Set<UUID>()
+            let uniqueIDs = clientEntryIDs.filter { clientEntryID in
+                seenEntryIDs.insert(clientEntryID).inserted
+            }
+            guard !uniqueIDs.isEmpty else {
+                return
+            }
+
+            let payloads = uniqueIDs.enumerated().map { index, clientEntryID in
+                JournalEntryMembershipPayload(
+                    userID: userID,
+                    journalID: journalID,
+                    clientEntryID: clientEntryID,
+                    position: index
+                )
+            }
+
+            for payload in payloads {
+                try? await client
+                    .from("journal_entries")
+                    .insert(payload)
+                    .execute()
+            }
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    @discardableResult
+    func uploadCover(_ image: UIImage, journalID: UUID) async throws -> StoryJournal {
+        let userID = try await authenticatedUserID()
+        guard let imageData = image.storytopiaPreparedJPEGData(compressionQuality: 0.86) else {
+            throw StoryJournalRepositoryError.invalidCover
+        }
+
+        let storagePath = [
+            userID.uuidString.lowercased(),
+            journalID.uuidString.lowercased(),
+            "cover.jpg"
+        ].joined(separator: "/")
+
+        do {
+            try await client.storage
+                .from(coverBucketName)
+                .upload(
+                    storagePath,
+                    data: imageData,
+                    options: FileOptions(
+                        cacheControl: "31536000",
+                        contentType: CreateEntryReferencePhoto.mimeType,
+                        upsert: true
+                    )
+                )
+
+            return try await client
+                .from("journals")
+                .update(JournalCoverUpdate(coverStoragePath: storagePath))
+                .eq("id", value: journalID)
+                .eq("user_id", value: userID)
+                .select()
+                .single()
+                .execute()
+                .value
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    private func authenticatedUserID() async throws -> UUID {
+        do {
+            return try await client.auth.session.user.id
+        } catch {
+            throw StoryJournalRepositoryError.notAuthenticated
         }
     }
 }

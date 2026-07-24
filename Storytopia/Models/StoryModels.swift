@@ -181,6 +181,133 @@ struct CreateEntryReferencePhoto: Identifiable {
     }
 }
 
+enum CharacterRole: String, CaseIterable, Identifiable, Codable {
+    case mainCharacter
+    case supportingCharacter
+    case pet
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mainCharacter:
+            return "Main Character"
+        case .supportingCharacter:
+            return "Supporting Character"
+        case .pet:
+            return "Pet"
+        case .other:
+            return "Other"
+        }
+    }
+
+    var promptGroupTitle: String {
+        switch self {
+        case .mainCharacter:
+            return "Main character"
+        case .supportingCharacter:
+            return "Supporting characters"
+        case .pet:
+            return "Pets"
+        case .other:
+            return "Other references"
+        }
+    }
+
+    var sortPriority: Int {
+        switch self {
+        case .mainCharacter:
+            return 0
+        case .supportingCharacter:
+            return 1
+        case .pet:
+            return 2
+        case .other:
+            return 3
+        }
+    }
+}
+
+struct EntryCharacter: Identifiable {
+    static let fileExtension = "jpg"
+    static let mimeType = "image/jpeg"
+
+    let id: UUID
+    var name: String
+    var role: CharacterRole
+    var sourcePhotoID: UUID?
+    var image: UIImage
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        role: CharacterRole,
+        sourcePhotoID: UUID? = nil,
+        image: UIImage,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.sourcePhotoID = sourcePhotoID
+        self.image = image
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+enum EntryCharacterRules {
+    static let maxGenerationImageCount = 5
+
+    static func normalizedName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func hasDuplicateName(_ name: String, in characters: [EntryCharacter], excluding excludedID: UUID? = nil) -> Bool {
+        let normalized = normalizedName(name)
+        guard !normalized.isEmpty else {
+            return false
+        }
+
+        return characters.contains {
+            $0.id != excludedID && normalizedName($0.name) == normalized
+        }
+    }
+
+    static func applyingSingleMainCharacter(_ character: EntryCharacter, to characters: [EntryCharacter]) -> [EntryCharacter] {
+        var updatedCharacters = characters.map { existing -> EntryCharacter in
+            var updated = existing
+            if character.role == .mainCharacter, updated.id != character.id, updated.role == .mainCharacter {
+                updated.role = .supportingCharacter
+                updated.updatedAt = Date()
+            }
+            return updated
+        }
+
+        if let index = updatedCharacters.firstIndex(where: { $0.id == character.id }) {
+            updatedCharacters[index] = character
+        } else {
+            updatedCharacters.append(character)
+        }
+
+        return orderedCharacters(updatedCharacters)
+    }
+
+    static func orderedCharacters(_ characters: [EntryCharacter]) -> [EntryCharacter] {
+        characters.sorted {
+            if $0.role.sortPriority != $1.role.sortPriority {
+                return $0.role.sortPriority < $1.role.sortPriority
+            }
+
+            return $0.createdAt < $1.createdAt
+        }
+    }
+}
+
 enum OpenAITestConfig {
     // Prototype-only client key. Move image generation server-side before shipping.
     static var apiKey: String {
@@ -204,6 +331,7 @@ struct CreateEntryDraft: Identifiable {
     let text: String
     let richText: NotebookRichTextDocument?
     let photos: [CreateEntryReferencePhoto]
+    var characters: [EntryCharacter] = []
     let artStyle: String
     let location: String
     let date: Date
@@ -330,6 +458,7 @@ enum CreateEntryDraftStore {
         text: String,
         richText: NotebookRichTextDocument? = nil,
         photos: [UIImage],
+        characters: [EntryCharacter] = [],
         artStyle: String,
         location: String,
         date: Date,
@@ -356,6 +485,7 @@ enum CreateEntryDraftStore {
             text: text,
             richText: richText,
             referencePhotos: photos.map { CreateEntryReferencePhoto(image: $0) },
+            characters: characters,
             artStyle: artStyle,
             location: location,
             date: date,
@@ -385,6 +515,7 @@ enum CreateEntryDraftStore {
         text: String,
         richText: NotebookRichTextDocument? = nil,
         referencePhotos: [CreateEntryReferencePhoto],
+        characters: [EntryCharacter] = [],
         artStyle: String,
         location: String,
         date: Date,
@@ -437,6 +568,31 @@ enum CreateEntryDraftStore {
                 )
             }
 
+            var characterMetadata: [CreateEntryDraftCharacterMetadata] = []
+            for character in EntryCharacterRules.orderedCharacters(characters) {
+                guard let data = character.image.storytopiaPreparedJPEGData(maxDimension: 1024, compressionQuality: 0.88) else {
+                    continue
+                }
+
+                let fileName = "character-\(character.id.uuidString).jpg"
+                try data.write(
+                    to: draftDirectory.appendingPathComponent(fileName),
+                    options: [.atomic]
+                )
+                characterMetadata.append(
+                    CreateEntryDraftCharacterMetadata(
+                        id: character.id,
+                        name: character.name,
+                        role: character.role,
+                        sourcePhotoID: character.sourcePhotoID,
+                        fileName: fileName,
+                        mimeType: EntryCharacter.mimeType,
+                        createdAt: character.createdAt,
+                        updatedAt: character.updatedAt
+                    )
+                )
+            }
+
             let thumbnailToSave = thumbnail ?? existingDraft?.thumbnail
             if let thumbnailData = thumbnailToSave?.storytopiaPreparedJPEGData(compressionQuality: 0.86) {
                 try thumbnailData.write(
@@ -453,6 +609,7 @@ enum CreateEntryDraftStore {
                 richText: richText,
                 photoFileNames: photoMetadata.map(\.fileName),
                 referencePhotos: photoMetadata,
+                characters: characterMetadata,
                 artStyle: artStyle,
                 location: location,
                 date: date,
@@ -552,6 +709,25 @@ enum CreateEntryDraftStore {
 
         let thumbnailURL = draftDirectory.appendingPathComponent(thumbnailFileName)
         let thumbnail = (try? Data(contentsOf: thumbnailURL)).flatMap(UIImage.init(data:))
+        let characters = (metadata.characters ?? []).compactMap { item -> EntryCharacter? in
+            let imageURL = draftDirectory.appendingPathComponent(item.fileName)
+            guard
+                let imageData = try? Data(contentsOf: imageURL),
+                let image = UIImage(data: imageData)
+            else {
+                return nil
+            }
+
+            return EntryCharacter(
+                id: item.id,
+                name: item.name,
+                role: item.role,
+                sourcePhotoID: item.sourcePhotoID,
+                image: image,
+                createdAt: item.createdAt,
+                updatedAt: item.updatedAt
+            )
+        }
 
         return CreateEntryDraft(
             id: metadata.id ?? UUID(),
@@ -559,6 +735,7 @@ enum CreateEntryDraftStore {
             text: metadata.text,
             richText: metadata.richText,
             photos: photos,
+            characters: EntryCharacterRules.orderedCharacters(characters),
             artStyle: metadata.artStyle ?? "Anime",
             location: metadata.location ?? "",
             date: metadata.date ?? Date(),
@@ -638,6 +815,7 @@ enum CreateEntryDraftStore {
             text: legacyDraft.text,
             richText: legacyDraft.richText,
             referencePhotos: legacyDraft.photos,
+            characters: legacyDraft.characters,
             artStyle: legacyDraft.artStyle,
             location: legacyDraft.location,
             date: legacyDraft.date,
@@ -670,6 +848,7 @@ enum CreateEntryDraftStore {
                 text: legacyDraft.text,
                 richText: legacyDraft.richText,
                 referencePhotos: legacyDraft.photos,
+                characters: legacyDraft.characters,
                 artStyle: legacyDraft.artStyle,
                 location: legacyDraft.location,
                 date: legacyDraft.date,
@@ -723,6 +902,7 @@ private struct CreateEntryDraftMetadata: Codable {
     var richText: NotebookRichTextDocument?
     var photoFileNames: [String]
     var referencePhotos: [CreateEntryDraftPhotoMetadata]?
+    var characters: [CreateEntryDraftCharacterMetadata]?
     var artStyle: String?
     var location: String?
     var date: Date?
@@ -775,6 +955,17 @@ private struct CreateEntryDraftPhotoMetadata: Codable {
     var id: UUID
     var fileName: String
     var mimeType: String
+}
+
+private struct CreateEntryDraftCharacterMetadata: Codable {
+    var id: UUID
+    var name: String
+    var role: CharacterRole
+    var sourcePhotoID: UUID?
+    var fileName: String
+    var mimeType: String
+    var createdAt: Date
+    var updatedAt: Date
 }
 
 enum GeneratedStoryboardStore {

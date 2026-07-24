@@ -5,6 +5,15 @@ struct OpenAIImageGenerationService {
     private let editsEndpoint = URL(string: "https://api.openai.com/v1/images/edits")!
     private let generationsEndpoint = URL(string: "https://api.openai.com/v1/images/generations")!
     private let requestTimeout: TimeInterval = 600
+    private let maxInputImageCount = EntryCharacterRules.maxGenerationImageCount
+
+    private struct StoryboardReferenceImage {
+        let image: UIImage
+        let promptLabel: String
+        let fileName: String
+        let characterName: String?
+        let role: CharacterRole?
+    }
 
     func generateStoryboard(
         apiKey: String,
@@ -14,12 +23,14 @@ struct OpenAIImageGenerationService {
         artStyle: String,
         layout: StoryboardLayoutOption,
         isSmartGenerationEnabled: Bool,
-        images: [UIImage]
+        images: [UIImage],
+        characters: [EntryCharacter] = []
     ) async throws -> UIImage {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw StoryboardGenerationError.missingAPIKey
         }
 
+        let references = orderedGenerationReferences(characters: characters, originalImages: images)
         let prompt = makePrompt(
             title: title,
             text: text,
@@ -27,11 +38,14 @@ struct OpenAIImageGenerationService {
             artStyle: artStyle,
             layout: layout,
             isSmartGenerationEnabled: isSmartGenerationEnabled,
-            imageCount: images.count
+            originalImageCount: images.count,
+            references: references,
+            omittedCharacterCount: max(0, characters.count - references.filter { $0.characterName != nil }.count),
+            omittedOriginalPhotoCount: max(0, images.count - references.filter { $0.characterName == nil }.count)
         )
-        let data = try await images.isEmpty
+        let data = try await references.isEmpty
             ? generateStoryboardWithoutReferences(apiKey: apiKey, prompt: prompt)
-            : generateStoryboardWithReferences(apiKey: apiKey, prompt: prompt, images: images)
+            : generateStoryboardWithReferences(apiKey: apiKey, prompt: prompt, references: references)
 
         guard
             let imageData = Data(base64Encoded: data),
@@ -46,7 +60,7 @@ struct OpenAIImageGenerationService {
     private func generateStoryboardWithReferences(
         apiKey: String,
         prompt: String,
-        images: [UIImage]
+        references: [StoryboardReferenceImage]
     ) async throws -> String {
         var request = URLRequest(url: editsEndpoint)
         let boundary = "Boundary-\(UUID().uuidString)"
@@ -61,14 +75,14 @@ struct OpenAIImageGenerationService {
         body.appendMultipartField(name: "size", value: "1024x1536", boundary: boundary)
         body.appendMultipartField(name: "quality", value: "low", boundary: boundary)
 
-        for (index, image) in images.prefix(5).enumerated() {
-            guard let imageData = image.storytopiaPreparedJPEGData(maxDimension: 1536, compressionQuality: 0.76) else {
+        for (index, reference) in references.prefix(maxInputImageCount).enumerated() {
+            guard let imageData = reference.image.storytopiaPreparedJPEGData(maxDimension: 1536, compressionQuality: 0.76) else {
                 throw StoryboardGenerationError.invalidRequest
             }
 
             body.appendMultipartFile(
                 name: "image[]",
-                fileName: "storyboard-reference-\(index + 1).jpg",
+                fileName: "\(index + 1)-\(reference.fileName)",
                 mimeType: "image/jpeg",
                 data: imageData,
                 boundary: boundary
@@ -137,11 +151,15 @@ struct OpenAIImageGenerationService {
         artStyle: String,
         layout: StoryboardLayoutOption,
         isSmartGenerationEnabled: Bool,
-        imageCount: Int
+        originalImageCount: Int,
+        references: [StoryboardReferenceImage],
+        omittedCharacterCount: Int,
+        omittedOriginalPhotoCount: Int
     ) -> String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedRichText = richText?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imageCount = references.count
         let hasReferencePhotos = imageCount > 0
         let storyText: String
 
@@ -163,7 +181,7 @@ struct OpenAIImageGenerationService {
             storyText = trimmedText
         }
 
-        let referencePhotoCount = min(imageCount, 5)
+        let referencePhotoCount = min(imageCount, maxInputImageCount)
 
         let titleBlock = trimmedTitle.isEmpty
             ? "Untitled Entry"
@@ -174,7 +192,7 @@ struct OpenAIImageGenerationService {
             : "The user manually selected this layout."
 
         let creationSource = hasReferencePhotos
-            ? "the user's written memory and \(referencePhotoCount) uploaded reference photo(s)"
+            ? "the user's written memory and \(referencePhotoCount) uploaded reference image(s)"
             : "the user's written memory"
 
         let identityInstruction = hasReferencePhotos
@@ -191,8 +209,8 @@ struct OpenAIImageGenerationService {
         let referencePhotoInstructions = hasReferencePhotos
             ? """
             REFERENCE PHOTOS:
-            - Use all uploaded reference photos as visual evidence about the memory.
-            - Do not ignore any uploaded photo.
+            - Use all uploaded reference images as visual evidence about the memory.
+            - Do not ignore any uploaded reference image.
             - Use them to understand identity, appearance, relationships, pets, clothing,
             locations, objects, atmosphere, and emotional context.
             - Do not automatically map photo 1 to panel 1, photo 2 to panel 2, and so on.
@@ -353,6 +371,13 @@ struct OpenAIImageGenerationService {
 
         \(referencePhotoInstructions)
 
+        \(characterReferenceInstructions(
+            references: references,
+            originalImageCount: originalImageCount,
+            omittedCharacterCount: omittedCharacterCount,
+            omittedOriginalPhotoCount: omittedOriginalPhotoCount
+        ))
+
         CAPTIONS AND DIALOGUE:
 
         - Prioritize visual storytelling over written explanation.
@@ -374,6 +399,108 @@ struct OpenAIImageGenerationService {
         It should feel like a thoughtful graphic novelist interpreted a real person's memory
         with care, visual intelligence, restraint, and emotional honesty.
         """
+    }
+
+    private func orderedGenerationReferences(
+        characters: [EntryCharacter],
+        originalImages: [UIImage]
+    ) -> [StoryboardReferenceImage] {
+        let characterReferences = EntryCharacterRules.orderedCharacters(characters).map { character in
+            StoryboardReferenceImage(
+                image: character.image,
+                promptLabel: "\(character.role.title): \(character.name)",
+                fileName: "\(character.role.rawValue)-\(sanitizedFileComponent(character.name)).jpg",
+                characterName: character.name,
+                role: character.role
+            )
+        }
+
+        let originalReferences = originalImages.enumerated().map { index, image in
+            StoryboardReferenceImage(
+                image: image,
+                promptLabel: "Original reference photo \(index + 1)",
+                fileName: "original-reference-photo-\(index + 1).jpg",
+                characterName: nil,
+                role: nil
+            )
+        }
+
+        return Array((characterReferences + originalReferences).prefix(maxInputImageCount))
+    }
+
+    private func characterReferenceInstructions(
+        references: [StoryboardReferenceImage],
+        originalImageCount: Int,
+        omittedCharacterCount: Int,
+        omittedOriginalPhotoCount: Int
+    ) -> String {
+        guard !references.isEmpty else {
+            return ""
+        }
+
+        let characterReferences = references.enumerated().compactMap { index, reference -> (Int, StoryboardReferenceImage)? in
+            guard reference.characterName != nil else {
+                return nil
+            }
+            return (index + 1, reference)
+        }
+        let originalReferences = references.enumerated().compactMap { index, reference -> Int? in
+            reference.characterName == nil ? index + 1 : nil
+        }
+
+        var sections: [String] = []
+        for role in CharacterRole.allCases {
+            let lines = characterReferences
+                .filter { $0.1.role == role }
+                .map { imageNumber, reference in
+                    "- Image \(imageNumber): \(reference.promptLabel). Use this cropped portrait as the explicit identity reference."
+                }
+
+            if !lines.isEmpty {
+                sections.append(([role.promptGroupTitle + ":"] + lines).joined(separator: "\n"))
+            }
+        }
+
+        if !originalReferences.isEmpty {
+            sections.append(
+                """
+                Original uncropped reference photos:
+                - Images \(originalReferences.map(String.init).joined(separator: ", ")) are wider environmental, group, or context references.
+                """
+            )
+        }
+
+        if omittedCharacterCount > 0 || omittedOriginalPhotoCount > 0 {
+            sections.append(
+                """
+                Reference limit handling:
+                - The app prioritized named character crops before original reference photos because the request can include only \(maxInputImageCount) images.
+                - Omitted named character crops: \(omittedCharacterCount).
+                - Omitted original reference photos: \(omittedOriginalPhotoCount) of \(originalImageCount).
+                """
+            )
+        }
+
+        sections.append(
+            """
+            Character identity rules:
+            - Treat named character crops as authoritative identity references.
+            - Do not treat untagged people appearing incidentally in wider photos as story characters unless the written memory requires them.
+            - Preserve the visual identity of each named character using their corresponding cropped reference.
+            - The main character must not be replaced by another person appearing in a group photo.
+            """
+        )
+
+        return (["CHARACTER REFERENCES:"] + sections).joined(separator: "\n\n")
+    }
+
+    private func sanitizedFileComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let collapsed = String(scalars).split(separator: "-").joined(separator: "-")
+        return collapsed.isEmpty ? "character" : collapsed
     }
 }
 

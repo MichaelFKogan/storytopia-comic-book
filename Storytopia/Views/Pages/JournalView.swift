@@ -1,5 +1,4 @@
 import Foundation
-import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -8,8 +7,9 @@ struct JournalView: View {
     @Binding var selectedPage: StoryPage
     @Binding var isDraftSaved: Bool
     @Binding var activeDraftID: UUID?
+    @EnvironmentObject private var authStore: SupabaseAuthStore
 
-    @State private var showsPrototypeData = true
+    @State private var showsPrototypeData = false
     @State private var chapters: [PrototypeChapter]
     @State private var editMode: EditMode = .inactive
     @State private var journalBeingRenamed: PrototypeChapter?
@@ -17,9 +17,6 @@ struct JournalView: View {
     @State private var journalsPendingDeletion: [PrototypeChapter] = []
     @State private var isCreateJournalAlertPresented = false
     @State private var newJournalTitle = ""
-    @State private var selectedCoverJournalTitle: String?
-    @State private var selectedCoverPickerItem: PhotosPickerItem?
-    @State private var coverRefreshID = UUID()
     @State private var openingJournal: JournalOpeningContext?
     @State private var isJournalOpening = false
     @State private var journalNavigationPath: [JournalRoute] = []
@@ -27,6 +24,7 @@ struct JournalView: View {
     @State private var isJournalDetailVisible = false
     @Namespace private var journalOpenNamespace
     @AppStorage("StorytopiaSelectedJournalLayout") private var selectedJournalLayoutRawValue = JournalDisplayLayout.grid.rawValue
+    @AppStorage("StorytopiaSelectedJournalSort") private var selectedJournalSortRawValue = JournalSortOption.updated.rawValue
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
@@ -39,6 +37,32 @@ struct JournalView: View {
         }
         nonmutating set {
             selectedJournalLayoutRawValue = newValue.rawValue
+        }
+    }
+
+    private var selectedJournalSort: JournalSortOption {
+        get {
+            JournalSortOption(rawValue: selectedJournalSortRawValue) ?? .updated
+        }
+        nonmutating set {
+            selectedJournalSortRawValue = newValue.rawValue
+        }
+    }
+
+    private var sortedChapters: [PrototypeChapter] {
+        chapters.sorted { lhs, rhs in
+            switch selectedJournalSort {
+            case .created:
+                if lhs.createdAt == rhs.createdAt {
+                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                }
+                return lhs.createdAt > rhs.createdAt
+            case .updated:
+                if lhs.updatedAt == rhs.updatedAt {
+                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            }
         }
     }
 
@@ -83,22 +107,14 @@ struct JournalView: View {
                 dailyJournalDetail(for: route.chapter, dayOffset: route.dayOffset)
             }
         }
-        .id(coverRefreshID)
         .onAppear {
             chapters = DailyJournalData.allChapters()
+            loadCloudJournalsIfNeeded()
         }
         .onChange(of: selectedPage) { newPage in
             if newPage != .create {
                 chapters = DailyJournalData.allChapters()
-            }
-        }
-        .onChange(of: selectedCoverPickerItem) { newItem in
-            guard let selectedCoverJournalTitle, let newItem else {
-                return
-            }
-
-            Task {
-                await saveCover(from: newItem, for: selectedCoverJournalTitle)
+                loadCloudJournalsIfNeeded()
             }
         }
         .preferredColorScheme(.light)
@@ -139,22 +155,62 @@ struct JournalView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 14) {
-            Text("Journals")
-                .font(.system(size: 24, weight: .bold, design: .serif))
-                .foregroundStyle(Color.storyInk)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 14) {
+                Text("Journals")
+                    .font(.system(size: 24, weight: .bold, design: .serif))
+                    .foregroundStyle(Color.storyInk)
 
-            Spacer()
+                Spacer()
 
-            EditButton()
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(Color.homeAccent)
+                EditButton()
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.homeAccent)
 
-            journalLayoutSwitcher
+                journalCreateButton
+            }
 
-            journalCreateButton
+            HStack(alignment: .center) {
+                journalSortMenu
+
+                Spacer()
+
+                journalLayoutSwitcher
+            }
         }
         .padding(.top, 12)
+    }
+
+    private var journalSortMenu: some View {
+        Menu {
+            ForEach(JournalSortOption.allCases) { option in
+                Button {
+                    selectedJournalSort = option
+                } label: {
+                    Label(option.title, systemImage: selectedJournalSort == option ? "checkmark" : option.systemImage)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: selectedJournalSort.systemImage)
+                    .font(.system(size: 13, weight: .bold))
+
+                Text(selectedJournalSort.shortTitle)
+                    .font(.system(size: 12, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(Color.storyInk)
+            .padding(.horizontal, 9)
+            .frame(height: 34)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.homeBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort journals by \(selectedJournalSort.title)")
     }
 
     private var journalLayoutSwitcher: some View {
@@ -222,17 +278,16 @@ struct JournalView: View {
 
     private var journalGrid: some View {
         LazyVGrid(columns: columns, spacing: 14) {
-            if showsPrototypeData {
-                ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+            if sortedChapters.isEmpty {
+                emptyState
+                    .gridCellColumns(2)
+            } else {
+                ForEach(Array(sortedChapters.enumerated()), id: \.element.id) { index, chapter in
                     JournalCoverCard(
                         chapter: chapter,
-                        coverImage: JournalCoverStore.image(for: chapter.title),
+                        coverImage: nil,
                         fallbackImageName: fallbackCoverImageName(for: chapter, at: index),
                         isEditing: editMode == .active,
-                        onPickCover: {
-                            selectedCoverJournalTitle = chapter.title
-                        },
-                        selectedPickerItem: $selectedCoverPickerItem,
                         onRename: { beginRenaming(chapter) },
                         onDelete: { requestDeleteJournals([chapter]) }
                     )
@@ -252,9 +307,6 @@ struct JournalView: View {
                     }
                     .allowsHitTesting(openingJournal == nil && journalNavigationPath.isEmpty)
                 }
-            } else {
-                emptyState
-                    .gridCellColumns(2)
             }
         }
     }
@@ -307,21 +359,13 @@ struct JournalView: View {
 
     private var chapterList: some View {
         List {
-            if showsPrototypeData {
-                Section {
-                    if chapters.isEmpty {
-                        noSearchResults
-                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                            .listRowBackground(Color.clear)
-                    } else {
-                        journalRows
-                    }
-                }
-            } else {
-                Section {
-                    emptyState
+            Section {
+                if sortedChapters.isEmpty {
+                    noSearchResults
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
+                } else {
+                    journalRows
                 }
             }
         }
@@ -329,16 +373,20 @@ struct JournalView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: showsPrototypeData ? 170 : 150)
+            Color.clear.frame(height: 150)
         }
     }
 
     private var journalRows: some View {
-        ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+        ForEach(Array(sortedChapters.enumerated()), id: \.element.id) { index, chapter in
             NavigationLink {
                 dailyJournalDetail(for: chapter, dayOffset: index)
             } label: {
-                JournalChapterListRow(chapter: chapter)
+                JournalChapterListRow(
+                    chapter: chapter,
+                    coverImage: nil,
+                    fallbackImageName: journalFallbackCoverImageName(for: chapter, at: index)
+                )
             }
             .listRowInsets(EdgeInsets(
                 top: 0,
@@ -362,7 +410,7 @@ struct JournalView: View {
 
     @ViewBuilder
     private var bottomPrototypeNotice: some View {
-        if showsPrototypeData {
+        if false {
             prototypeNotice
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -432,6 +480,7 @@ struct JournalView: View {
         let oldTitle = chapters[index].title
         chapters[index] = chapters[index].copy(title: trimmedTitle)
         UserChapterStore.rename(title: oldTitle, to: trimmedTitle)
+        UserChapterStore.syncToCloud(chapters[index])
         StoryEntryStore.renameChapter(from: oldTitle, to: trimmedTitle)
         JournalCoverStore.rename(from: oldTitle, to: trimmedTitle)
         journalBeingRenamed = nil
@@ -461,12 +510,13 @@ struct JournalView: View {
 
         UserChapterStore.add(journal)
         chapters = DailyJournalData.allChapters()
-        showsPrototypeData = true
+        showsPrototypeData = false
         newJournalTitle = ""
     }
 
     private func deleteChapters(at offsets: IndexSet) {
-        requestDeleteJournals(offsets.map { chapters[$0] })
+        let visibleChapters = sortedChapters
+        requestDeleteJournals(offsets.compactMap { visibleChapters.indices.contains($0) ? visibleChapters[$0] : nil })
     }
 
     private var isDeleteJournalAlertPresented: Binding<Bool> {
@@ -505,6 +555,7 @@ struct JournalView: View {
     private func deleteJournal(_ journal: PrototypeChapter) {
         let isUserJournal = UserChapterStore.contains(title: journal.title)
         UserChapterStore.delete(title: journal.title)
+        UserChapterStore.deleteFromCloud(journal)
         JournalCoverStore.delete(title: journal.title)
         if !isUserJournal {
             DeletedSampleChapterStore.add(title: journal.title)
@@ -517,6 +568,7 @@ struct JournalView: View {
     private func moveChapters(from source: IndexSet, to destination: Int) {
         chapters.move(fromOffsets: source, toOffset: destination)
         UserChapterStore.replace(with: chapters.filter { UserChapterStore.contains(title: $0.title) })
+        UserChapterStore.syncOrderToCloud(chapters)
     }
 
     private func openJournal(_ chapter: PrototypeChapter, dayOffset: Int) {
@@ -527,7 +579,7 @@ struct JournalView: View {
         let context = JournalOpeningContext(
             chapter: chapter,
             dayOffset: dayOffset,
-            coverImage: JournalCoverStore.image(for: chapter.title),
+            coverImage: nil,
             fallbackImageName: fallbackCoverImageName(for: chapter, at: dayOffset)
         )
 
@@ -610,38 +662,27 @@ struct JournalView: View {
     }
 
     private func fallbackCoverImageName(for chapter: PrototypeChapter, at index: Int) -> String? {
-        if let coverImageName = chapter.coverImageName {
-            return coverImageName
-        }
-
-        let storyboardCoverRotation: [String?] = [
-            nil,
-            "storyboard6",
-            "storyboard10",
-            nil,
-            "storyboard13",
-            "storyboard16"
-        ]
-
-        return storyboardCoverRotation[index % storyboardCoverRotation.count]
+        journalFallbackCoverImageName(for: chapter, at: index)
     }
 
-    @MainActor
-    private func saveCover(from item: PhotosPickerItem, for title: String) async {
-        defer {
-            selectedCoverPickerItem = nil
-            selectedCoverJournalTitle = nil
-        }
-
-        guard
-            let data = try? await item.loadTransferable(type: Data.self),
-            let image = UIImage(data: data)
-        else {
+    private func loadCloudJournalsIfNeeded() {
+        guard authStore.userID != nil else {
             return
         }
 
-        JournalCoverStore.save(image, for: title)
-        coverRefreshID = UUID()
+        Task {
+            do {
+                let cloudJournals = try await SupabaseJournalRepository().getJournals()
+                let cloudChapters = cloudJournals.map(PrototypeChapter.init(cloudJournal:))
+
+                await MainActor.run {
+                    UserChapterStore.replace(with: cloudChapters)
+                    chapters = DailyJournalData.allChapters()
+                }
+            } catch {
+                print("[Storytopia] Cloud journals load failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private var noSearchResults: some View {
@@ -678,11 +719,11 @@ struct JournalView: View {
                 .padding(.bottom, 3)
 
             VStack(spacing: 8) {
-                Text("No entries yet")
+                Text("No journals yet")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(Color.storyInk)
 
-                Text("Your journal will appear here\nonce you start writing.")
+                Text("Create a journal to start collecting entries and storyboards.")
                     .font(.system(size: 13, weight: .semibold))
                     .lineSpacing(2)
                     .multilineTextAlignment(.center)
@@ -690,9 +731,9 @@ struct JournalView: View {
             }
 
             Button {
-                selectedPage = .create
+                isCreateJournalAlertPresented = true
             } label: {
-                Label("Write Your First Entry", systemImage: "plus")
+                Label("Create Journal", systemImage: "plus")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
@@ -700,15 +741,6 @@ struct JournalView: View {
                     .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .padding(.top, 10)
-
-            Button("Preview sample chapters") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showsPrototypeData = true
-                }
-            }
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(Color.homeAccent)
-            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
     }
@@ -737,6 +769,10 @@ private enum JournalDisplayLayout: String {
     }
 }
 
+private func journalFallbackCoverImageName(for _: PrototypeChapter, at _: Int) -> String? {
+    nil
+}
+
 private struct JournalRoute: Hashable, Identifiable {
     let chapter: PrototypeChapter
     let dayOffset: Int
@@ -752,6 +788,37 @@ private struct JournalRoute: Hashable, Identifiable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(dayOffset)
+    }
+}
+
+private enum JournalSortOption: String, CaseIterable, Identifiable {
+    case updated
+    case created
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .updated:
+            return "Last Updated"
+        case .created:
+            return "Created At"
+        }
+    }
+
+    var shortTitle: String {
+        title
+    }
+
+    var systemImage: String {
+        switch self {
+        case .updated:
+            return "clock.arrow.circlepath"
+        case .created:
+            return "plus.circle"
+        }
     }
 }
 
@@ -903,8 +970,6 @@ private struct JournalCoverCard: View {
     let coverImage: UIImage?
     let fallbackImageName: String?
     let isEditing: Bool
-    let onPickCover: () -> Void
-    @Binding var selectedPickerItem: PhotosPickerItem?
     let onRename: () -> Void
     let onDelete: () -> Void
 
@@ -937,11 +1002,6 @@ private struct JournalCoverCard: View {
                 .accessibilityLabel("Delete \(chapter.title)")
             } else {
                 Menu {
-                    PhotosPicker(selection: $selectedPickerItem, matching: .images) {
-                        Label("Change Cover Photo", systemImage: "photo")
-                    }
-                    .simultaneousGesture(TapGesture().onEnded(onPickCover))
-
                     Button(action: onRename) {
                         Label("Rename", systemImage: "pencil")
                     }
@@ -1131,7 +1191,7 @@ struct ClassicJournalView: View {
     var embedsInNavigationStack = true
     var showsBottomNavigation = true
 
-    @State private var showsPrototypeData = true
+    @State private var showsPrototypeData = false
     @State private var chapters: [PrototypeChapter]
     @State private var editMode: EditMode = .inactive
     @State private var journalBeingRenamed: PrototypeChapter?
@@ -1265,7 +1325,7 @@ struct ClassicJournalView: View {
 
     @ViewBuilder
     private var bottomPrototypeNotice: some View {
-        if showsPrototypeData {
+        if false {
             prototypeNotice
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -1304,21 +1364,13 @@ struct ClassicJournalView: View {
 
     private var chapterList: some View {
         List {
-            if showsPrototypeData {
-                Section {
-                    if chapters.isEmpty {
-                        noSearchResults
-                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                            .listRowBackground(Color.clear)
-                    } else {
-                        journalRows
-                    }
-                }
-            } else {
-                Section {
-                    emptyState
+            Section {
+                if chapters.isEmpty {
+                    noSearchResults
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
+                } else {
+                    journalRows
                 }
             }
         }
@@ -1326,7 +1378,7 @@ struct ClassicJournalView: View {
         .scrollContentBackground(.hidden)
         .background(Color.homePageBackground)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: showsBottomNavigation ? (showsPrototypeData ? 170 : 150) : 60)
+            Color.clear.frame(height: showsBottomNavigation ? 150 : 60)
         }
     }
 
@@ -1335,7 +1387,11 @@ struct ClassicJournalView: View {
             NavigationLink {
                 dailyJournalDetail(for: chapter, dayOffset: index)
             } label: {
-                JournalChapterListRow(chapter: chapter)
+                JournalChapterListRow(
+                    chapter: chapter,
+                    coverImage: nil,
+                    fallbackImageName: journalFallbackCoverImageName(for: chapter, at: index)
+                )
             }
             .listRowInsets(EdgeInsets(
                 top: 0,
@@ -1390,6 +1446,7 @@ struct ClassicJournalView: View {
         let oldTitle = chapters[index].title
         chapters[index] = chapters[index].copy(title: trimmedTitle)
         UserChapterStore.rename(title: oldTitle, to: trimmedTitle)
+        UserChapterStore.syncToCloud(chapters[index])
         StoryEntryStore.renameChapter(from: oldTitle, to: trimmedTitle)
         JournalCoverStore.rename(from: oldTitle, to: trimmedTitle)
         journalBeingRenamed = nil
@@ -1419,7 +1476,7 @@ struct ClassicJournalView: View {
 
         UserChapterStore.add(journal)
         chapters = DailyJournalData.allChapters()
-        showsPrototypeData = true
+        showsPrototypeData = false
         newJournalTitle = ""
     }
 
@@ -1463,6 +1520,7 @@ struct ClassicJournalView: View {
     private func deleteJournal(_ journal: PrototypeChapter) {
         let isUserJournal = UserChapterStore.contains(title: journal.title)
         UserChapterStore.delete(title: journal.title)
+        UserChapterStore.deleteFromCloud(journal)
         JournalCoverStore.delete(title: journal.title)
         if !isUserJournal {
             DeletedSampleChapterStore.add(title: journal.title)
@@ -1475,6 +1533,7 @@ struct ClassicJournalView: View {
     private func moveChapters(from source: IndexSet, to destination: Int) {
         chapters.move(fromOffsets: source, toOffset: destination)
         UserChapterStore.replace(with: chapters.filter { UserChapterStore.contains(title: $0.title) })
+        UserChapterStore.syncOrderToCloud(chapters)
     }
 
     private func journalDate(dayOffset: Int) -> Date {
@@ -1529,11 +1588,11 @@ struct ClassicJournalView: View {
                 .padding(.bottom, 3)
 
             VStack(spacing: 8) {
-                Text("No entries yet")
+                Text("No journals yet")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(Color.storyInk)
 
-                Text("Your journal will appear here\nonce you start writing.")
+                Text("Create a journal to start collecting entries and storyboards.")
                     .font(.system(size: 13, weight: .semibold))
                     .lineSpacing(2)
                     .multilineTextAlignment(.center)
@@ -1541,9 +1600,9 @@ struct ClassicJournalView: View {
             }
 
             Button {
-                selectedPage = .create
+                isCreateJournalAlertPresented = true
             } label: {
-                Label("Write Your First Entry", systemImage: "plus")
+                Label("Create Journal", systemImage: "plus")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
@@ -1551,15 +1610,6 @@ struct ClassicJournalView: View {
                     .background(Color.homeAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .padding(.top, 10)
-
-            Button("Preview sample chapters") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showsPrototypeData = true
-                }
-            }
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(Color.homeAccent)
-            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
     }
@@ -4197,11 +4247,7 @@ private struct DaybookStoryPage: Identifiable {
 
 enum DailyJournalData {
     static func allChapters() -> [PrototypeChapter] {
-        let visibleSamples = PrototypeChapter.samples.filter {
-            !DeletedSampleChapterStore.contains(title: $0.title)
-        }
-        let chapters = UserChapterStore.load() + visibleSamples
-        return chapters.map(chapterWithStoredEntries)
+        UserChapterStore.load().map(chapterWithStoredEntries)
     }
 
     static func journalDate(dayOffset: Int) -> Date {
@@ -4211,6 +4257,7 @@ enum DailyJournalData {
     static func dateTitledChapter(from chapter: PrototypeChapter, dayOffset: Int) -> PrototypeChapter {
         let date = journalDate(dayOffset: dayOffset)
         return PrototypeChapter(
+            id: chapter.id,
             title: Calendar.current.isDateInToday(date)
                 ? "Today"
                 : date.formatted(.dateTime.weekday(.wide)),
@@ -4220,6 +4267,8 @@ enum DailyJournalData {
             coverImageName: chapter.coverImageName,
             kind: .journal,
             isFavorite: chapter.isFavorite,
+            createdAt: chapter.createdAt,
+            updatedAt: chapter.updatedAt,
             entries: chapter.entries
         )
     }
@@ -4923,9 +4972,9 @@ struct EntriesView: View {
 
     private var layoutSwitcherRow: some View {
         HStack(spacing: 10) {
-            Spacer()
-
             entrySortMenu
+
+            Spacer()
 
             entryLayoutSwitcher
         }
@@ -7168,22 +7217,22 @@ private enum EntrySortOption: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .entryDate:
-            return "Story date"
+            return "Story Date"
         case .cloudCreated:
-            return "Created"
+            return "Created At"
         case .updated:
-            return "Updated"
+            return "Last Updated"
         }
     }
 
     var shortTitle: String {
         switch self {
         case .entryDate:
-            return "Story date"
+            return "Story Date"
         case .cloudCreated:
-            return "Created"
+            return "Created At"
         case .updated:
-            return "Updated"
+            return "Last Updated"
         }
     }
 
@@ -7232,12 +7281,15 @@ private enum JournalChapterListMetrics {
 
 private struct JournalChapterListRow: View {
     let chapter: PrototypeChapter
+    let coverImage: UIImage?
+    let fallbackImageName: String?
 
     var body: some View {
         HStack(spacing: 10) {
             JournalListCover(
-                color: Color.homeAccent.opacity(0.82),
-                imageName: nil,
+                color: chapter.color,
+                coverImage: coverImage,
+                fallbackImageName: fallbackImageName,
                 width: JournalChapterListMetrics.coverWidth,
                 height: JournalChapterListMetrics.coverHeight
             )
@@ -7267,7 +7319,8 @@ private struct JournalChapterListRow: View {
 
 private struct JournalListCover: View {
     let color: Color
-    let imageName: String?
+    let coverImage: UIImage?
+    let fallbackImageName: String?
     var width: CGFloat
     var height: CGFloat
 
@@ -7282,8 +7335,14 @@ private struct JournalListCover: View {
             )
             .fill(color)
 
-            if let imageName {
-                Image(imageName)
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+                    .overlay(Color.black.opacity(0.12))
+                    .clipped()
+            } else if let fallbackImageName {
+                Image(fallbackImageName)
                     .resizable()
                     .scaledToFill()
                     .overlay(Color.black.opacity(0.12))
@@ -9165,7 +9224,7 @@ struct PrototypeChapter: Identifiable {
         case storyboard
     }
 
-    let id = UUID()
+    let id: UUID
     let title: String
     let subtitle: String
     let color: Color
@@ -9173,6 +9232,8 @@ struct PrototypeChapter: Identifiable {
     let coverImageName: String?
     let kind: Kind
     let isFavorite: Bool
+    let createdAt: Date
+    let updatedAt: Date
     var entries: [PrototypeEntry]
 
     var imageCount: Int {
@@ -9183,8 +9244,51 @@ struct PrototypeChapter: Identifiable {
         "\(entries.count) \(entries.count == 1 ? "story" : "stories")"
     }
 
+    init(
+        id: UUID = UUID(),
+        title: String,
+        subtitle: String,
+        color: Color,
+        symbol: String,
+        coverImageName: String?,
+        kind: Kind,
+        isFavorite: Bool,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        entries: [PrototypeEntry]
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.color = color
+        self.symbol = symbol
+        self.coverImageName = coverImageName
+        self.kind = kind
+        self.isFavorite = isFavorite
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.entries = entries
+    }
+
+    init(cloudJournal: StoryJournal) {
+        self.init(
+            id: cloudJournal.id,
+            title: cloudJournal.title,
+            subtitle: cloudJournal.subtitle ?? "Personal journal",
+            color: cloudJournal.colorHex.flatMap(Color.init(hex:)) ?? Color.storyPurple,
+            symbol: cloudJournal.symbol ?? "book.closed.fill",
+            coverImageName: nil,
+            kind: cloudJournal.kind == "storyboard" ? .storyboard : .journal,
+            isFavorite: cloudJournal.isFavorite,
+            createdAt: cloudJournal.createdAt,
+            updatedAt: cloudJournal.updatedAt,
+            entries: []
+        )
+    }
+
     func copy(title: String) -> PrototypeChapter {
         PrototypeChapter(
+            id: id,
             title: title,
             subtitle: subtitle,
             color: color,
@@ -9192,6 +9296,8 @@ struct PrototypeChapter: Identifiable {
             coverImageName: coverImageName,
             kind: kind,
             isFavorite: isFavorite,
+            createdAt: createdAt,
+            updatedAt: Date(),
             entries: entries
         )
     }
@@ -9240,7 +9346,7 @@ struct PrototypeChapter: Identifiable {
             subtitle: "Trips, detours, and sunlit days",
             color: Color(red: 0.05, green: 0.09, blue: 0.20),
             symbol: "sun.max.fill",
-            coverImageName: "storyboard6",
+            coverImageName: nil,
             kind: .storyboard,
             isFavorite: false,
             entries: [
@@ -9317,32 +9423,32 @@ struct PrototypeChapter: Identifiable {
 }
 
 enum UserChapterStore {
-    private struct Record: Codable {
+    private struct Record: Codable, Equatable {
+        let id: UUID?
         let title: String
         let subtitle: String
         let symbol: String
         let kind: String
+        let colorHex: String?
+        let createdAt: Date?
+        let updatedAt: Date?
     }
 
     private static let storageKey = "StorytopiaUserChapters"
 
     static func load() -> [PrototypeChapter] {
-        guard
-            let data = UserDefaults.standard.data(forKey: storageKey),
-            let records = try? JSONDecoder().decode([Record].self, from: data)
-        else {
-            return []
-        }
-
         return records.map { record in
             PrototypeChapter(
+                id: record.id ?? stableID(for: record.title, occurrence: 0),
                 title: record.title,
                 subtitle: record.subtitle,
-                color: color(for: record.symbol),
+                color: color(for: record),
                 symbol: record.symbol,
                 coverImageName: nil,
                 kind: record.kind == "storyboard" ? .storyboard : .journal,
                 isFavorite: false,
+                createdAt: record.createdAt ?? Date(),
+                updatedAt: record.updatedAt ?? record.createdAt ?? Date(),
                 entries: []
             )
         }
@@ -9359,11 +9465,19 @@ enum UserChapterStore {
             existingRecords = []
         }
 
+        guard !existingRecords.contains(where: { $0.title == chapter.title }) else {
+            return
+        }
+
         let newRecord = Record(
+            id: chapter.id,
             title: chapter.title,
             subtitle: chapter.subtitle,
             symbol: chapter.symbol,
-            kind: chapter.kind == .storyboard ? "storyboard" : "journal"
+            kind: chapter.kind == .storyboard ? "storyboard" : "journal",
+            colorHex: colorHex(for: chapter),
+            createdAt: chapter.createdAt,
+            updatedAt: Date()
         )
 
         guard let data = try? JSONEncoder().encode([newRecord] + existingRecords) else {
@@ -9371,6 +9485,7 @@ enum UserChapterStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapter)
     }
 
     static func contains(title: String) -> Bool {
@@ -9384,10 +9499,14 @@ enum UserChapterStore {
             }
 
             return Record(
+                id: record.id ?? stableID(for: oldTitle, occurrence: 0),
                 title: newTitle,
                 subtitle: record.subtitle,
                 symbol: record.symbol,
-                kind: record.kind
+                kind: record.kind,
+                colorHex: record.colorHex,
+                createdAt: record.createdAt,
+                updatedAt: Date()
             )
         }
 
@@ -9401,10 +9520,14 @@ enum UserChapterStore {
     static func replace(with chapters: [PrototypeChapter]) {
         let updatedRecords = chapters.map { chapter in
             Record(
+                id: chapter.id,
                 title: chapter.title,
                 subtitle: chapter.subtitle,
                 symbol: chapter.symbol,
-                kind: chapter.kind == .storyboard ? "storyboard" : "journal"
+                kind: chapter.kind == .storyboard ? "storyboard" : "journal",
+                colorHex: colorHex(for: chapter),
+                createdAt: chapter.createdAt,
+                updatedAt: chapter.updatedAt
             )
         }
 
@@ -9424,15 +9547,157 @@ enum UserChapterStore {
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 
+    static func touch(title: String) {
+        let now = Date()
+        let updatedRecords = records.map { record in
+            guard record.title == title else {
+                return record
+            }
+
+            return Record(
+                id: record.id,
+                title: record.title,
+                subtitle: record.subtitle,
+                symbol: record.symbol,
+                kind: record.kind,
+                colorHex: record.colorHex,
+                createdAt: record.createdAt,
+                updatedAt: now
+            )
+        }
+
+        guard let data = try? JSONEncoder().encode(updatedRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func id(for title: String) -> UUID? {
+        records.first { $0.title == title }?.id
+    }
+
+    static func syncToCloud(_ chapter: PrototypeChapter) {
+        guard contains(title: chapter.title) else {
+            return
+        }
+
+        Task {
+            try? await SupabaseJournalRepository().upsertJournal(
+                id: chapter.id,
+                title: chapter.title,
+                subtitle: chapter.subtitle,
+                colorHex: colorHex(for: chapter),
+                symbol: chapter.symbol,
+                kind: chapter.kind == .storyboard ? "storyboard" : "journal",
+                isFavorite: chapter.isFavorite,
+                displayOrder: displayOrder(for: chapter.title)
+            )
+            syncEntriesToCloud(chapter.entries, journalID: chapter.id)
+        }
+    }
+
+    static func syncAllToCloud(_ chapters: [PrototypeChapter]) {
+        chapters
+            .filter { contains(title: $0.title) }
+            .forEach(syncToCloud)
+    }
+
+    static func syncOrderToCloud(_ chapters: [PrototypeChapter]) {
+        chapters
+            .filter { contains(title: $0.title) }
+            .enumerated()
+            .forEach { offset, chapter in
+                Task {
+                    try? await SupabaseJournalRepository().upsertJournal(
+                        id: chapter.id,
+                        title: chapter.title,
+                        subtitle: chapter.subtitle,
+                        colorHex: colorHex(for: chapter),
+                        symbol: chapter.symbol,
+                        kind: chapter.kind == .storyboard ? "storyboard" : "journal",
+                        isFavorite: chapter.isFavorite,
+                        displayOrder: offset
+                    )
+                }
+            }
+    }
+
+    static func deleteFromCloud(_ chapter: PrototypeChapter) {
+        Task {
+            try? await SupabaseJournalRepository().deleteJournal(id: chapter.id)
+        }
+    }
+
+    static func uploadCoverToCloud(_ image: UIImage, journalID: UUID) {
+        Task {
+            try? await SupabaseJournalRepository().uploadCover(image, journalID: journalID)
+        }
+    }
+
+    static func syncEntriesToCloud(_ entries: [PrototypeEntry], journalID: UUID) {
+        Task {
+            try? await SupabaseJournalRepository().replaceJournalEntries(
+                journalID: journalID,
+                clientEntryIDs: entries.map(\.id)
+            )
+        }
+    }
+
     private static var records: [Record] {
+        loadMigratedRecords()
+    }
+
+    private static func loadMigratedRecords() -> [Record] {
         guard
             let data = UserDefaults.standard.data(forKey: storageKey),
-            let records = try? JSONDecoder().decode([Record].self, from: data)
+            let decodedRecords = try? JSONDecoder().decode([Record].self, from: data)
         else {
             return []
         }
 
-        return records
+        let migratedRecords = migrateRecords(decodedRecords)
+        if migratedRecords != decodedRecords,
+           let data = try? JSONEncoder().encode(migratedRecords) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+
+        return migratedRecords
+    }
+
+    private static func migrateRecords(_ records: [Record]) -> [Record] {
+        var seenTitles = Set<String>()
+        var seenIDs = Set<UUID>()
+
+        return records.enumerated().compactMap { index, record in
+            guard seenTitles.insert(record.title).inserted else {
+                return nil
+            }
+
+            var recordID = record.id ?? stableID(for: record.title, occurrence: index)
+            while !seenIDs.insert(recordID).inserted {
+                recordID = stableID(for: record.title, occurrence: index + seenIDs.count + 1)
+            }
+
+            return Record(
+                id: recordID,
+                title: record.title,
+                subtitle: record.subtitle,
+                symbol: record.symbol,
+                kind: record.kind,
+                colorHex: record.colorHex,
+                createdAt: record.createdAt,
+                updatedAt: record.updatedAt ?? record.createdAt ?? Date()
+            )
+        }
+    }
+
+    private static func color(for record: Record) -> Color {
+        if let colorHex = record.colorHex {
+            return Color(hex: colorHex) ?? color(for: record.symbol)
+        }
+
+        return color(for: record.symbol)
     }
 
     private static func color(for symbol: String) -> Color {
@@ -9450,6 +9715,28 @@ enum UserChapterStore {
         default:
             return Color(red: 0.20, green: 0.12, blue: 0.42)
         }
+    }
+
+    private static func colorHex(for chapter: PrototypeChapter) -> String {
+        UIColor(chapter.color).storytopiaHexString ?? "#3D2678"
+    }
+
+    private static func displayOrder(for title: String) -> Int {
+        records.firstIndex { $0.title == title } ?? 0
+    }
+
+    private static func stableID(for title: String, occurrence: Int) -> UUID {
+        let namespace = "StorytopiaJournal:\(title):\(occurrence)"
+        let uuidBytes = Array(namespace.utf8).reduce(into: [UInt8](repeating: 0, count: 16)) { bytes, byte in
+            let index = Int(byte) % bytes.count
+            bytes[index] = bytes[index] &+ byte
+        }
+        return UUID(uuid: (
+            uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+            uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+            uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+            uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]
+        ))
     }
 }
 
@@ -9556,6 +9843,12 @@ enum StoryEntryStore {
         Set(records.filter { $0.id == entry.id || $0.matchesContent(of: entry) }.map(\.chapterTitle))
     }
 
+    static func clientEntryIDs(for chapterTitle: String) -> [UUID] {
+        records
+            .filter { $0.chapterTitle == chapterTitle }
+            .compactMap(\.id)
+    }
+
     static func add(_ entry: PrototypeEntry, to chapterTitle: String) {
         let newRecord = Record(
             id: entry.id,
@@ -9574,6 +9867,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func upsert(_ entry: PrototypeEntry, to chapterTitle: String) {
@@ -9604,6 +9898,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func delete(_ entry: PrototypeEntry, from chapterTitle: String) {
@@ -9631,6 +9926,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func delete(entryID: UUID, from chapterTitle: String) {
@@ -9653,6 +9949,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func delete(entryIDs: Set<UUID>, matching entry: PrototypeEntry, from chapterTitle: String) {
@@ -9680,6 +9977,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func deleteFirstMatchingContent(_ entry: PrototypeEntry, from chapterTitle: String) {
@@ -9702,6 +10000,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func saveStoredOrder(from entries: [PrototypeEntry], for chapterTitle: String) {
@@ -9726,6 +10025,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func deleteAll(for chapterTitle: String) {
@@ -9735,6 +10035,7 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: chapterTitle)
     }
 
     static func renameChapter(from oldTitle: String, to newTitle: String) {
@@ -9761,6 +10062,8 @@ enum StoryEntryStore {
         }
 
         UserDefaults.standard.set(data, forKey: storageKey)
+        syncToCloud(chapterTitle: oldTitle)
+        syncToCloud(chapterTitle: newTitle)
     }
 
     private static var records: [Record] {
@@ -9772,6 +10075,34 @@ enum StoryEntryStore {
         }
 
         return records
+    }
+
+    private static func syncToCloud(chapterTitle: String) {
+        guard let journalID = UserChapterStore.id(for: chapterTitle) else {
+            return
+        }
+
+        UserChapterStore.touch(title: chapterTitle)
+
+        let clientEntryIDs = records
+            .filter { $0.chapterTitle == chapterTitle }
+            .compactMap(\.id)
+
+        UserChapterStore.syncEntriesToCloud(
+            clientEntryIDs.map {
+                PrototypeEntry(
+                    id: $0,
+                    weekday: "",
+                    day: "",
+                    title: "",
+                    body: "",
+                    time: "",
+                    location: nil,
+                    imageNames: []
+                )
+            },
+            journalID: journalID
+        )
     }
 }
 

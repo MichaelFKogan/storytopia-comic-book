@@ -49,6 +49,7 @@ struct EntryDraftSavePayload {
     let text: String
     let richText: NotebookRichTextDocument?
     let photos: [CreateEntryReferencePhoto]
+    let characters: [EntryCharacter]
     let artStyle: String
     let location: String
     let date: Date
@@ -449,6 +450,8 @@ struct EntrySaveService {
             )
         }
 
+        syncJournalMemberships(for: localDraftID)
+
         guard syncReferencePhotos else {
             print("[Storytopia] Reference photos unchanged, sync skipped.")
             return EntrySaveResult(
@@ -604,6 +607,7 @@ struct EntrySaveService {
             text: payload.text,
             richText: payload.richText,
             referencePhotos: payload.photos,
+            characters: payload.characters,
             artStyle: payload.artStyle,
             location: payload.location,
             date: payload.date,
@@ -624,5 +628,26 @@ struct EntrySaveService {
             textAlignmentRawValue: payload.textAlignmentRawValue,
             thumbnail: draftThumbnail
         )
+    }
+
+    private func syncJournalMemberships(for clientEntryID: UUID) {
+        let journalTitles = EntryJournalLinkStore.loadJournalTitles(for: clientEntryID)
+        guard !journalTitles.isEmpty else {
+            return
+        }
+
+        for journalTitle in journalTitles {
+            guard let journalID = UserChapterStore.id(for: journalTitle) else {
+                continue
+            }
+
+            Task {
+                let linkedEntryIDs = StoryEntryStore.clientEntryIDs(for: journalTitle)
+                try? await SupabaseJournalRepository().replaceJournalEntries(
+                    journalID: journalID,
+                    clientEntryIDs: linkedEntryIDs
+                )
+            }
+        }
     }
 }

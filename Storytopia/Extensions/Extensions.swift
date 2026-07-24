@@ -162,6 +162,43 @@ extension Color {
     static let homeMutedText = Color(red: 0.43, green: 0.44, blue: 0.54)
     static let homeBorder = Color(red: 0.86, green: 0.87, blue: 0.91)
     static let homeAccent = Color(uiColor: .systemIndigo)
+
+    init?(hex: String) {
+        var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("#") {
+            cleaned.removeFirst()
+        }
+
+        guard cleaned.count == 6, let value = Int(cleaned, radix: 16) else {
+            return nil
+        }
+
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+extension UIColor {
+    var storytopiaHexString: String? {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+
+        return String(
+            format: "#%02X%02X%02X",
+            Int(round(red * 255)),
+            Int(round(green * 255)),
+            Int(round(blue * 255))
+        )
+    }
 }
 
 private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
