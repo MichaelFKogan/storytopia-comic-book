@@ -4307,10 +4307,10 @@ struct CreateEntryView: View {
 
     private var cloudSaveBannerMessage: String? {
         switch cloudSaveState {
-        case .saved, .savedLocally, .photosUploaded:
-            return nil
-        default:
+        case .failed, .photoUploadFailed:
             return cloudSaveState.message
+        case .idle, .saving, .saved, .savedLocally, .uploadingPhotos, .photosUploaded:
+            return nil
         }
     }
 
@@ -4337,23 +4337,30 @@ struct CreateEntryView: View {
     }
 
     private var savedConfirmationCard: some View {
-        VStack(spacing: 8) {
-            Text("Saved!")
-                .font(.custom("Caveat-Regular", size: 76))
-                .foregroundStyle(Color.storyPurple)
-                .frame(width: 340, height: 104)
-                .mask(alignment: .leading) {
-                    GeometryReader { proxy in
-                        Rectangle()
-                            .frame(width: max(1, proxy.size.width * savedConfirmationRevealProgress + 34))
-                    }
-                }
+        VStack(spacing: 6) {
+            // SwiftUI Text clips Caveat flourishes; UILabel draws with expanded insets.
+            NonClippingScriptText(
+                text: "Saved!",
+                fontName: "Caveat-Regular",
+                fontSize: 76,
+                color: UIColor(Color.storyPurple),
+                clipPadding: 20
+            )
+            .fixedSize()
+            .opacity(savedConfirmationRevealProgress)
+            .scaleEffect(
+                0.96 + (0.04 * savedConfirmationRevealProgress),
+                anchor: .center
+            )
 
             Capsule()
                 .fill(Color.storyPurple.opacity(0.28))
                 .frame(width: 158 * savedConfirmationRevealProgress, height: 4)
         }
-        .frame(width: 340, height: 158)
+        .padding(.horizontal, 36)
+        .padding(.top, 6)
+        .padding(.bottom, 18)
+        .frame(width: 340)
         .background(Color.white.opacity(0.97), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -8850,6 +8857,85 @@ struct ReferencePhotoViewer: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden()
+    }
+}
+
+/// UILabel that expands its drawing bounds so script-font flourishes aren't clipped.
+private struct NonClippingScriptText: UIViewRepresentable {
+    var text: String
+    var fontName: String
+    var fontSize: CGFloat
+    var color: UIColor
+    var clipPadding: CGFloat = 24
+
+    func makeUIView(context: Context) -> NonClippingScriptLabel {
+        let label = NonClippingScriptLabel()
+        label.backgroundColor = .clear
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .vertical)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
+        return label
+    }
+
+    func updateUIView(_ label: NonClippingScriptLabel, context: Context) {
+        label.text = text
+        label.font = UIFont(name: fontName, size: fontSize) ?? .systemFont(ofSize: fontSize)
+        label.textColor = color
+        label.clipPadding = clipPadding
+        label.invalidateIntrinsicContentSize()
+    }
+}
+
+private final class NonClippingScriptLabel: UILabel {
+    var clipPadding: CGFloat = 24 {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        guard size.width < CGFloat.greatestFiniteMagnitude / 2,
+              size.height < CGFloat.greatestFiniteMagnitude / 2 else {
+            return size
+        }
+        return CGSize(
+            width: size.width + clipPadding * 2,
+            height: size.height + clipPadding * 2
+        )
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let fitted = super.sizeThatFits(
+            CGSize(
+                width: max(0, size.width - clipPadding * 2),
+                height: max(0, size.height - clipPadding * 2)
+            )
+        )
+        return CGSize(
+            width: fitted.width + clipPadding * 2,
+            height: fitted.height + clipPadding * 2
+        )
+    }
+
+    override func drawText(in rect: CGRect) {
+        let insets = UIEdgeInsets(
+            top: clipPadding,
+            left: clipPadding,
+            bottom: clipPadding,
+            right: clipPadding
+        )
+        super.drawText(in: rect.inset(by: insets))
+    }
+
+    override var alignmentRectInsets: UIEdgeInsets {
+        UIEdgeInsets(
+            top: clipPadding,
+            left: clipPadding,
+            bottom: clipPadding,
+            right: clipPadding
+        )
     }
 }
 

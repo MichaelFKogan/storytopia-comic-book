@@ -4827,10 +4827,10 @@ struct EntriesView: View {
 
                 cloudEntriesNotice
 
-                if selectedEntryTab == .completed {
-                    completedEntryGrid
-                } else if selectedEntryLayout == .list {
+                if selectedEntryLayout == .list {
                     entryList
+                } else if selectedEntryTab == .completed {
+                    completedEntryGrid
                 } else {
                     entryGrid
                 }
@@ -5190,10 +5190,18 @@ struct EntriesView: View {
     private var entryRows: some View {
         if showsSampleEntries {
             ForEach(filteredEntries) { entry in
+                let category = categoryForSampleEntry(entry)
+
                 Button {
                     sampleEntryBeingPreviewed = entry
                 } label: {
-                    EntryListRow(entry: entry, category: categoryForSampleEntry(entry))
+                    EntryListRow(
+                        entry: entry,
+                        category: category,
+                        completedStoryboardImage: category == .completed
+                            ? .asset(CompletedStoryboardSample.imageName(for: completedSampleFallbackIndex(for: entry)))
+                            : nil
+                    )
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(
@@ -5208,15 +5216,20 @@ struct EntriesView: View {
             ForEach(filteredEntryItems) { item in
                 let displayEntry = entryForDisplay(item)
                 let isCompleted = isCompletedEntryItem(item)
+                let completedFallbackIndex = completedStoryboardFallbackIndex(for: item)
 
                 Button {
                     openEntryItem(
                         item,
                         asCompleted: isCompleted,
-                        storyboardImage: isCompleted ? storyboardUIImage(for: item, fallbackIndex: completedStoryboardFallbackIndex(for: item)) : nil
+                        storyboardImage: isCompleted ? storyboardUIImage(for: item, fallbackIndex: completedFallbackIndex) : nil
                     )
                 } label: {
-                    EntryListRow(entry: displayEntry, category: categoryForEntryItem(item))
+                    EntryListRow(
+                        entry: displayEntry,
+                        category: categoryForEntryItem(item),
+                        completedStoryboardImage: isCompleted ? storyboardImage(for: item, fallbackIndex: completedFallbackIndex) : nil
+                    )
                         .opacity(openingEntryPreview?.id == item.id ? 0.58 : 1)
                 }
                 .buttonStyle(.plain)
@@ -6410,6 +6423,7 @@ private struct EntrySamplePreview: View {
 private struct EntryListRow: View {
     let entry: CreateEntryDraft
     var category: EntriesTab?
+    var completedStoryboardImage: CompletedStoryboardImage?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -6445,7 +6459,9 @@ private struct EntryListRow: View {
 
     private var entryIcon: some View {
         Group {
-            if let thumbnail = entry.thumbnail {
+            if let completedStoryboardImage {
+                storyboardThumbnail(completedStoryboardImage)
+            } else if let thumbnail = entry.thumbnail {
                 Image(uiImage: thumbnail)
                     .resizable()
                     .scaledToFill()
@@ -6462,8 +6478,39 @@ private struct EntryListRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color.storyInk.opacity(entry.thumbnail == nil ? 0 : 0.14), lineWidth: 0.8)
+                .stroke(Color.storyInk.opacity(showsImageThumbnail ? 0.14 : 0), lineWidth: 0.8)
         )
+    }
+
+    @ViewBuilder
+    private func storyboardThumbnail(_ image: CompletedStoryboardImage) -> some View {
+        switch image {
+        case .asset(let imageName):
+            Image(imageName)
+                .resizable()
+                .scaledToFill()
+        case .uiImage(let uiImage):
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+        case .loading:
+            ZStack {
+                Color.white
+                ProgressView()
+                    .controlSize(.small)
+            }
+        case .failed:
+            ZStack {
+                Color.white
+                Image(systemName: "icloud.slash")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.homeMutedText)
+            }
+        }
+    }
+
+    private var showsImageThumbnail: Bool {
+        entry.thumbnail != nil || completedStoryboardImage != nil
     }
 
     private var entryDateText: String {
