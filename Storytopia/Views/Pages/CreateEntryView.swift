@@ -4331,7 +4331,7 @@ struct CreateEntryView: View {
 
         savedConfirmationRevealProgress = 0
 
-        withAnimation(.easeOut(duration: 0.85).delay(0.12)) {
+        withAnimation(.easeInOut(duration: 1.05).delay(0.08)) {
             savedConfirmationRevealProgress = 1
         }
     }
@@ -4339,6 +4339,7 @@ struct CreateEntryView: View {
     private var savedConfirmationCard: some View {
         VStack(spacing: 6) {
             // SwiftUI Text clips Caveat flourishes; UILabel draws with expanded insets.
+            // Left-to-right mask wipe reads as an invisible pen writing the word.
             NonClippingScriptText(
                 text: "Saved!",
                 fontName: "Caveat-Regular",
@@ -4347,11 +4348,23 @@ struct CreateEntryView: View {
                 clipPadding: 20
             )
             .fixedSize()
-            .opacity(savedConfirmationRevealProgress)
-            .scaleEffect(
-                0.96 + (0.04 * savedConfirmationRevealProgress),
-                anchor: .center
-            )
+            .mask(alignment: .leading) {
+                GeometryReader { proxy in
+                    let revealWidth = proxy.size.width * savedConfirmationRevealProgress
+                    let softEdge: CGFloat = 16
+                    HStack(spacing: 0) {
+                        Rectangle()
+                            .frame(width: max(0, revealWidth - softEdge))
+                        LinearGradient(
+                            colors: [.black, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: min(softEdge, revealWidth))
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
 
             Capsule()
                 .fill(Color.storyPurple.opacity(0.28))

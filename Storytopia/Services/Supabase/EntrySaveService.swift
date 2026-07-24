@@ -375,13 +375,16 @@ struct SupabaseStoryboardService {
 @MainActor
 struct EntrySaveService {
     private let repository: SupabaseEntryRepository
+    private let journalRepository: SupabaseJournalRepository
     private let referencePhotoService: SupabaseReferencePhotoService
 
     init(
         repository: SupabaseEntryRepository = SupabaseEntryRepository(),
+        journalRepository: SupabaseJournalRepository = SupabaseJournalRepository(),
         referencePhotoService: SupabaseReferencePhotoService = SupabaseReferencePhotoService()
     ) {
         self.repository = repository
+        self.journalRepository = journalRepository
         self.referencePhotoService = referencePhotoService
     }
 
@@ -450,7 +453,15 @@ struct EntrySaveService {
             )
         }
 
-        syncJournalMemberships(for: localDraftID)
+        do {
+            try await syncJournalMemberships(for: localDraftID)
+        } catch {
+            return EntrySaveResult(
+                localDraftID: localDraftID,
+                cloudEntry: cloudEntry,
+                state: .failed("Saved locally. Journal sync failed.")
+            )
+        }
 
         guard syncReferencePhotos else {
             print("[Storytopia] Reference photos unchanged, sync skipped.")
@@ -569,6 +580,12 @@ struct EntrySaveService {
 
     func deleteEntry(localDraftID: UUID, cloudEntry: JournalEntry?, isSignedIn: Bool) async throws {
         guard let cloudEntry else {
+            if isSignedIn {
+                try await journalRepository.deleteJournalEntryMemberships(clientEntryID: localDraftID)
+                try await referencePhotoService.deleteReferencePhotos(clientEntryID: localDraftID)
+                try await repository.deleteEntry(clientEntryID: localDraftID)
+            }
+
             CreateEntryDraftStore.delete(id: localDraftID)
             return
         }
@@ -577,8 +594,9 @@ struct EntrySaveService {
             throw JournalEntryRepositoryError.notAuthenticated
         }
 
-        try await referencePhotoService.deleteReferencePhotos(entryID: cloudEntry.id)
-        try await repository.deleteEntry(id: cloudEntry.id)
+        try await referencePhotoService.deleteReferencePhotos(clientEntryID: cloudEntry.clientEntryID)
+        try await journalRepository.deleteJournalEntryMemberships(clientEntryID: cloudEntry.clientEntryID)
+        try await repository.deleteEntry(clientEntryID: cloudEntry.clientEntryID)
         CreateEntryDraftStore.delete(id: localDraftID)
     }
 
@@ -630,7 +648,7 @@ struct EntrySaveService {
         )
     }
 
-    private func syncJournalMemberships(for clientEntryID: UUID) {
+    private func syncJournalMemberships(for clientEntryID: UUID) async throws {
         let journalTitles = EntryJournalLinkStore.loadJournalTitles(for: clientEntryID)
         guard !journalTitles.isEmpty else {
             return
@@ -641,13 +659,11 @@ struct EntrySaveService {
                 continue
             }
 
-            Task {
-                let linkedEntryIDs = StoryEntryStore.clientEntryIDs(for: journalTitle)
-                try? await SupabaseJournalRepository().replaceJournalEntries(
-                    journalID: journalID,
-                    clientEntryIDs: linkedEntryIDs
-                )
-            }
+            let linkedEntryIDs = StoryEntryStore.clientEntryIDs(for: journalTitle)
+            try await journalRepository.replaceJournalEntries(
+                journalID: journalID,
+                clientEntryIDs: linkedEntryIDs
+            )
         }
     }
 }

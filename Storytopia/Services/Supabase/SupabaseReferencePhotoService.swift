@@ -201,11 +201,33 @@ struct SupabaseReferencePhotoService {
         }
     }
 
+    func deleteReferencePhotos(clientEntryID: UUID) async throws {
+        do {
+            let rows = try await existingReferencePhotos(clientEntryID: clientEntryID)
+            for row in rows {
+                try await deleteCloudPhoto(row)
+            }
+        } catch let error as SupabaseReferencePhotoError {
+            throw error
+        } catch {
+            throw SupabaseReferencePhotoError.syncFailed
+        }
+    }
+
     func existingReferencePhotos(entryID: UUID) async throws -> [EntryReferencePhoto] {
         try await client
             .from("entry_reference_photos")
             .select()
             .eq("entry_id", value: entryID)
+            .execute()
+            .value
+    }
+
+    func existingReferencePhotos(clientEntryID: UUID) async throws -> [EntryReferencePhoto] {
+        try await client
+            .from("entry_reference_photos")
+            .select()
+            .eq("client_entry_id", value: clientEntryID)
             .execute()
             .value
     }

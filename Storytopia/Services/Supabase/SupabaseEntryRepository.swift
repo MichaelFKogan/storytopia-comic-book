@@ -194,6 +194,26 @@ private struct JournalEntryMembershipPayload: Encodable, Sendable {
     }
 }
 
+struct JournalEntryMembership: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    let userID: UUID
+    let journalID: UUID
+    let clientEntryID: UUID
+    let position: Int
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case journalID = "journal_id"
+        case clientEntryID = "client_entry_id"
+        case position
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
 enum JournalEntryStatus: String, Codable, Sendable {
     case draft
     case completed
@@ -252,6 +272,23 @@ struct SupabaseJournalRepository {
                 .eq("user_id", value: userID)
                 .order("display_order", ascending: true)
                 .order("created_at", ascending: false)
+                .execute()
+                .value
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    func getJournalEntryMemberships() async throws -> [JournalEntryMembership] {
+        let userID = try await authenticatedUserID()
+
+        do {
+            return try await client
+                .from("journal_entries")
+                .select()
+                .eq("user_id", value: userID)
+                .order("position", ascending: true)
+                .order("created_at", ascending: true)
                 .execute()
                 .value
         } catch {
@@ -343,11 +380,26 @@ struct SupabaseJournalRepository {
             }
 
             for payload in payloads {
-                try? await client
+                try await client
                     .from("journal_entries")
                     .insert(payload)
                     .execute()
             }
+        } catch {
+            throw StoryJournalRepositoryError.operationFailed
+        }
+    }
+
+    func deleteJournalEntryMemberships(clientEntryID: UUID) async throws {
+        let userID = try await authenticatedUserID()
+
+        do {
+            try await client
+                .from("journal_entries")
+                .delete()
+                .eq("client_entry_id", value: clientEntryID)
+                .eq("user_id", value: userID)
+                .execute()
         } catch {
             throw StoryJournalRepositoryError.operationFailed
         }

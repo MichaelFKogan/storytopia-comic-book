@@ -672,11 +672,19 @@ struct JournalView: View {
 
         Task {
             do {
-                let cloudJournals = try await SupabaseJournalRepository().getJournals()
+                let journalRepository = SupabaseJournalRepository()
+                let cloudJournals = try await journalRepository.getJournals()
+                let cloudEntries = try await SupabaseEntryRepository().getEntries()
+                let memberships = try await journalRepository.getJournalEntryMemberships()
                 let cloudChapters = cloudJournals.map(PrototypeChapter.init(cloudJournal:))
 
                 await MainActor.run {
                     UserChapterStore.replace(with: cloudChapters)
+                    StoryEntryStore.replaceCloudMemberships(
+                        memberships,
+                        journals: cloudChapters,
+                        entries: cloudEntries
+                    )
                     chapters = DailyJournalData.allChapters()
                 }
             } catch {
@@ -4907,8 +4915,9 @@ struct EntriesView: View {
             }
 
             Button(entryDeleteErrorMessage == nil ? "Delete" : "Retry", role: .destructive) {
+                let entriesToDelete = entriesPendingDeletion
                 Task {
-                    await deletePendingEntries()
+                    await deletePendingEntries(entriesToDelete)
                 }
             }
         } message: {
@@ -5699,6 +5708,8 @@ struct EntriesView: View {
             cloudEntry: item.cloudEntry,
             isSignedIn: authStore.userID != nil
         )
+        StoryEntryStore.delete(entryID: item.id)
+        EntryJournalLinkStore.remove(for: item.id)
         entries.removeAll { $0.id == item.id }
         cloudEntries.removeAll { $0.clientEntryID == item.id }
 
@@ -5745,8 +5756,7 @@ struct EntriesView: View {
         entryDeleteErrorMessage = nil
     }
 
-    private func deletePendingEntries() async {
-        let entriesToDelete = entriesPendingDeletion
+    private func deletePendingEntries(_ entriesToDelete: [EntryDisplayItem]) async {
         var failedEntries: [EntryDisplayItem] = []
 
         for entry in entriesToDelete {
@@ -9835,6 +9845,13 @@ private enum DeletedSampleEntryStore {
     }
 }
 
+private extension String {
+    var trimmedOrNil: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
 enum StoryEntryStore {
     private struct Record: Codable {
         let id: UUID?
@@ -9863,6 +9880,52 @@ enum StoryEntryStore {
                 && body == entry.body
                 && time == entry.time
                 && location == entry.location
+        }
+
+        init(
+            id: UUID?,
+            chapterTitle: String,
+            weekday: String,
+            day: String,
+            title: String,
+            body: String,
+            richText: NotebookRichTextDocument?,
+            time: String,
+            location: String?
+        ) {
+            self.id = id
+            self.chapterTitle = chapterTitle
+            self.weekday = weekday
+            self.day = day
+            self.title = title
+            self.body = body
+            self.richText = richText
+            self.time = time
+            self.location = location
+        }
+
+        init(cloudEntry entry: JournalEntry, chapterTitle: String) {
+            let displayDate = entry.entryDate ?? entry.createdAt
+            let weekdayFormatter = DateFormatter()
+            weekdayFormatter.dateFormat = "EEE"
+
+            let dayFormatter = DateFormatter()
+            dayFormatter.dateFormat = "d"
+
+            let timeFormatter = DateFormatter()
+            timeFormatter.timeStyle = .short
+
+            self.init(
+                id: entry.clientEntryID,
+                chapterTitle: chapterTitle,
+                weekday: weekdayFormatter.string(from: displayDate).uppercased(),
+                day: dayFormatter.string(from: displayDate),
+                title: entry.title?.trimmedOrNil ?? "Untitled Entry",
+                body: entry.content ?? "",
+                richText: entry.richText ?? entry.content.map { NotebookRichTextDocument(text: $0) },
+                time: timeFormatter.string(from: displayDate),
+                location: entry.location?.trimmedOrNil
+            )
         }
     }
 
@@ -9894,6 +9957,46 @@ enum StoryEntryStore {
         records
             .filter { $0.chapterTitle == chapterTitle }
             .compactMap(\.id)
+    }
+
+    static func replaceCloudMemberships(
+        _ memberships: [JournalEntryMembership],
+        journals: [PrototypeChapter],
+        entries: [JournalEntry]
+    ) {
+        let cloudJournalTitlesByID = Dictionary(uniqueKeysWithValues: journals.map { ($0.id, $0.title) })
+        let cloudJournalTitles = Set(cloudJournalTitlesByID.values)
+        let entriesByClientID = Dictionary(grouping: entries, by: \.clientEntryID)
+            .compactMapValues(\.first)
+        let cloudRecords = memberships
+            .sorted {
+                if $0.journalID != $1.journalID {
+                    return (cloudJournalTitlesByID[$0.journalID] ?? "") < (cloudJournalTitlesByID[$1.journalID] ?? "")
+                }
+
+                if $0.position != $1.position {
+                    return $0.position < $1.position
+                }
+
+                return $0.createdAt < $1.createdAt
+            }
+            .compactMap { membership -> Record? in
+                guard
+                    let chapterTitle = cloudJournalTitlesByID[membership.journalID],
+                    let entry = entriesByClientID[membership.clientEntryID]
+                else {
+                    return nil
+                }
+
+                return Record(cloudEntry: entry, chapterTitle: chapterTitle)
+            }
+
+        let localRecords = records.filter { !cloudJournalTitles.contains($0.chapterTitle) }
+        guard let data = try? JSONEncoder().encode(cloudRecords + localRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
     }
 
     static func add(_ entry: PrototypeEntry, to chapterTitle: String) {
@@ -9997,6 +10100,18 @@ enum StoryEntryStore {
 
         UserDefaults.standard.set(data, forKey: storageKey)
         syncToCloud(chapterTitle: chapterTitle)
+    }
+
+    static func delete(entryID: UUID) {
+        let deletedChapterTitles = Set(records.filter { $0.id == entryID }.map(\.chapterTitle))
+        let remainingRecords = records.filter { $0.id != entryID }
+
+        guard let data = try? JSONEncoder().encode(remainingRecords) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: storageKey)
+        deletedChapterTitles.forEach { syncToCloud(chapterTitle: $0) }
     }
 
     static func delete(entryIDs: Set<UUID>, matching entry: PrototypeEntry, from chapterTitle: String) {
