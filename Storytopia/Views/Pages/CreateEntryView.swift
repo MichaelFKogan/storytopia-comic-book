@@ -281,23 +281,6 @@ private enum StoryboardGenerationPhase: Equatable {
             return "Generation stopped"
         }
     }
-
-    var progressValue: Double {
-        switch self {
-        case .ready:
-            return 0.08
-        case .preparingEntry:
-            return 0.22
-        case .uploadingReferencePhotos:
-            return 0.38
-        case .generating:
-            return 0.68
-        case .savingResult:
-            return 0.9
-        case .completed, .failed:
-            return 1
-        }
-    }
 }
 
 private struct EntryLocationSuggestion: Identifiable, Equatable {
@@ -1394,6 +1377,7 @@ struct CreateEntryView: View {
     @State private var showsToolbarSavedFeedback = false
     @State private var isToolbarSaveInProgress = false
     @State private var toolbarSaveFeedbackVersion = 0
+    @State private var savedConfirmationRevealProgress: CGFloat = 0
     @State private var cloudSaveState: EntryCloudSaveState = .idle
     @State private var cloudSaveDismissVersion = 0
     @State private var currentEntryStatus: JournalEntryStatus = .draft
@@ -1439,16 +1423,7 @@ struct CreateEntryView: View {
             return
         }
 
-        if presentation.isEditDraft, hasUnsavedDraftChanges {
-            dismissKeyboard()
-            beginToolbarSavedFeedback()
-
-            Task {
-                await saveDraftToLocalAndCloud(forceSave: true, navigatesToOptions: true)
-            }
-        } else {
-            showEntryOptionsPage()
-        }
+        showEntryOptionsPage()
     }
 
     private var selectedTextStyle: NotebookTextStyle {
@@ -1528,11 +1503,17 @@ struct CreateEntryView: View {
                     .padding(.horizontal, 14)
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if let cloudSaveMessage = cloudSaveState.message {
+            } else if let cloudSaveMessage = cloudSaveBannerMessage {
                 cloudSaveStatusBanner(message: cloudSaveMessage)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay {
+            if showsSavedConfirmationCard {
+                savedConfirmationCard
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
             }
         }
         .onDisappear {
@@ -1722,6 +1703,9 @@ struct CreateEntryView: View {
         }
         .onChange(of: activeDraftID) { newDraftID in
             handleActiveDraftChange(newDraftID)
+        }
+        .onChange(of: cloudSaveState) { newState in
+            updateSavedConfirmationReveal(for: newState)
         }
     }
 
@@ -2228,10 +2212,6 @@ struct CreateEntryView: View {
                             .font(.system(size: 13, weight: .bold))
                             .lineLimit(1)
 
-                        if showsToolbarSavedState {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
-                        }
                     }
                     .frame(width: 88, height: 44)
                     .foregroundStyle(toolbarSaveButtonColor)
@@ -2243,7 +2223,6 @@ struct CreateEntryView: View {
                     .contentShape(Rectangle())
                     .opacity(canUseToolbarSaveButton || isToolbarSaveInProgress ? 1 : 0.52)
                     .animation(.snappy(duration: 0.18), value: isToolbarSaveInProgress)
-                    .animation(.snappy(duration: 0.18), value: showsToolbarSavedState)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canUseToolbarSaveButton || isToolbarSaveInProgress)
@@ -2263,10 +2242,6 @@ struct CreateEntryView: View {
             return false
         }
 
-        if showsToolbarSavedState {
-            return true
-        }
-
         if isToolbarContentSaved {
             return false
         }
@@ -2283,10 +2258,6 @@ struct CreateEntryView: View {
             return Color.storyPurple
         }
 
-        if showsToolbarSavedState {
-            return Color.storyPurple
-        }
-
         return canUseToolbarSaveButton ? Color.storyPurple : Color.storyGray.opacity(0.42)
     }
 
@@ -2295,7 +2266,7 @@ struct CreateEntryView: View {
             return "Saving"
         }
 
-        return showsToolbarSavedState ? "Saved" : "Save"
+        return "Save"
     }
 
     private var showsToolbarSavedState: Bool {
@@ -4183,6 +4154,66 @@ struct CreateEntryView: View {
                 .stroke(Color.storyBorder.opacity(0.55), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
+    }
+
+    private var cloudSaveBannerMessage: String? {
+        switch cloudSaveState {
+        case .saved, .savedLocally, .photosUploaded:
+            return nil
+        default:
+            return cloudSaveState.message
+        }
+    }
+
+    private var showsSavedConfirmationCard: Bool {
+        switch cloudSaveState {
+        case .saved, .savedLocally, .photosUploaded:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func updateSavedConfirmationReveal(for state: EntryCloudSaveState) {
+        guard state == .saved || state == .savedLocally || state == .photosUploaded else {
+            savedConfirmationRevealProgress = 0
+            return
+        }
+
+        savedConfirmationRevealProgress = 0
+
+        withAnimation(.easeOut(duration: 0.85).delay(0.12)) {
+            savedConfirmationRevealProgress = 1
+        }
+    }
+
+    private var savedConfirmationCard: some View {
+        VStack(spacing: 8) {
+            Text("Saved!")
+                .font(.custom("Caveat-Regular", size: 76))
+                .foregroundStyle(Color.storyPurple)
+                .frame(width: 340, height: 104)
+                .mask(alignment: .leading) {
+                    GeometryReader { proxy in
+                        Rectangle()
+                            .frame(width: max(1, proxy.size.width * savedConfirmationRevealProgress + 34))
+                    }
+                }
+
+            Capsule()
+                .fill(Color.storyPurple.opacity(0.28))
+                .frame(width: 158 * savedConfirmationRevealProgress, height: 4)
+        }
+        .frame(width: 340, height: 158)
+        .background(Color.white.opacity(0.97), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.storyPurple.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: Color.storyPurple.opacity(0.16), radius: 22, y: 10)
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 5)
+        .allowsHitTesting(false)
+        .accessibilityLabel("Saved")
     }
 
     private func cloudSaveStatusBanner(message: String) -> some View {
@@ -6138,11 +6169,7 @@ private struct StoryboardGenerationProgressScreen: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(Color.storyPurple)
-                    .frame(width: 64, height: 64)
-                    .background(Color.storyPurple.opacity(0.1), in: Circle())
+                AnimatedStoryboardSparkleIcon()
 
                 VStack(spacing: 8) {
                     Text("Generating your storyboard...")
@@ -6156,7 +6183,7 @@ private struct StoryboardGenerationProgressScreen: View {
                         .multilineTextAlignment(.center)
                 }
 
-                StoryboardGenerationProgressBar(value: phase.progressValue)
+                StoryboardGenerationProgressBar(phase: phase)
                     .padding(.top, 6)
             }
             .padding(.horizontal, 30)
@@ -6199,28 +6226,125 @@ private struct StoryboardGenerationProgressScreen: View {
     }
 }
 
-private struct StoryboardGenerationProgressBar: View {
-    let value: Double
+private struct AnimatedStoryboardSparkleIcon: View {
+    @State private var isAnimating = false
 
-    private var clampedValue: Double {
-        min(max(value, 0), 1)
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.storyPurple.opacity(0.1))
+                .scaleEffect(isAnimating ? 1.08 : 0.94)
+
+            Circle()
+                .stroke(Color.storyPurple.opacity(isAnimating ? 0.04 : 0.18), lineWidth: 1.5)
+                .scaleEffect(isAnimating ? 1.24 : 0.82)
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(Color.storyPurple)
+                .scaleEffect(isAnimating ? 1.08 : 0.94)
+                .rotationEffect(.degrees(isAnimating ? 8 : -8))
+        }
+        .frame(width: 64, height: 64)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+                isAnimating = true
+            }
+        }
+    }
+}
+
+private struct StoryboardGenerationProgressBar: View {
+    let phase: StoryboardGenerationPhase
+
+    private var isComplete: Bool {
+        phase == .completed
+    }
+
+    private var isFailed: Bool {
+        phase == .failed
     }
 
     var body: some View {
+        Group {
+            if isComplete {
+                StoryboardGenerationCompleteBar()
+            } else {
+                StoryboardGenerationShimmerBar(isActive: !isFailed)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Storyboard generation progress")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        if isComplete {
+            return "Complete"
+        }
+
+        if isFailed {
+            return "Stopped"
+        }
+
+        return "In progress"
+    }
+}
+
+private struct StoryboardGenerationCompleteBar: View {
+    var body: some View {
+        Capsule()
+            .fill(Color.storyPurple)
+    }
+}
+
+private struct StoryboardGenerationShimmerBar: View {
+    let isActive: Bool
+
+    @State private var isAnimating = false
+
+    var body: some View {
         GeometryReader { proxy in
+            let shimmerWidth = max(proxy.size.width * 0.36, 56)
+
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.storyPurple.opacity(0.14))
 
-                Capsule()
-                    .fill(Color.storyPurple)
-                    .frame(width: max(28, proxy.size.width * CGFloat(clampedValue)))
+                if isActive {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.storyPurple.opacity(0),
+                                    Color.storyPurple.opacity(0.82),
+                                    Color.white.opacity(0.95),
+                                    Color.storyPurple.opacity(0.82),
+                                    Color.storyPurple.opacity(0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: shimmerWidth)
+                        .offset(x: isAnimating ? proxy.size.width + shimmerWidth : -shimmerWidth)
+                        .mask(Capsule())
+                }
+            }
+            .clipShape(Capsule())
+            .onAppear {
+                guard isActive else {
+                    return
+                }
+
+                isAnimating = false
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    isAnimating = true
+                }
             }
         }
-        .frame(height: 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Storyboard generation progress")
-        .accessibilityValue("\(Int(clampedValue * 100)) percent")
     }
 }
 
